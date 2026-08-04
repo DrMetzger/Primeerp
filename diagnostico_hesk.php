@@ -1,17 +1,26 @@
 <?php
 
 /**
- * Página de diagnóstico (somente admin) para inspecionar a estrutura do banco
- * do HESK antes de construirmos a integração de chamados. Remover depois que
- * não for mais necessária.
+ * Página de diagnóstico (admin, ou link temporário gerado por um admin) para
+ * inspecionar a estrutura do banco do HESK antes de construirmos a integração
+ * de chamados. Remover depois que não for mais necessária.
  */
 
 require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\Auth;
+use AdminPrime\Database;
 use AdminPrime\HeskDatabase;
+use AdminPrime\TempAccess;
 
-Auth::requireAdmin();
+Auth::requireAdminOrTempToken(Database::connection());
+
+$linkGerado = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'gerar_link' && Auth::check() && Auth::isAdmin()) {
+    csrf_verify();
+    $token = TempAccess::gerar(Database::connection(), Auth::userId(), 60);
+    $linkGerado = url('diagnostico_hesk.php') . '?diag_token=' . $token;
+}
 
 $tituloPagina = 'Diagnóstico HESK';
 require __DIR__ . '/templates/header.php';
@@ -20,6 +29,25 @@ $pdo = HeskDatabase::connection();
 ?>
 
 <h4 class="mb-3">Diagnóstico do banco do HESK</h4>
+
+<?php if (Auth::check() && Auth::isAdmin()): ?>
+<div class="card card-stat mb-3">
+    <div class="card-body">
+        <form method="post" class="d-flex align-items-center gap-2">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="gerar_link">
+            <button type="submit" class="btn btn-dark btn-sm">Gerar link temporário (60 min)</button>
+            <span class="text-muted small">Gera um link de leitura válido por 1 hora, para eu poder olhar sem precisar de print.</span>
+        </form>
+        <?php if ($linkGerado): ?>
+            <div class="alert alert-success mt-3 mb-0">
+                Link gerado: <br>
+                <code><?= e($linkGerado) ?></code>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (!$pdo): ?>
     <div class="alert alert-danger">Não foi possível conectar ao banco do HESK. Verifique as credenciais em config/config.php.</div>

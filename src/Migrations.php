@@ -104,6 +104,16 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS temp_access_tokens (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expira_em DATETIME NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Usuário admin padrão, criado apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
         if ($count === 0) {

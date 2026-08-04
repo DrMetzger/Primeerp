@@ -74,4 +74,18 @@ class Auth
             die('Acesso restrito a administradores.');
         }
     }
+
+    /**
+     * Igual requireAdmin(), mas também aceita um token temporário válido
+     * (?diag_token=...) gerado por um admin logado, para permitir leitura
+     * por uma ferramenta externa sem sessão de navegador.
+     */
+    public static function requireAdminOrTempToken(PDO $pdo): void
+    {
+        $token = $_GET['diag_token'] ?? '';
+        if ($token !== '' && TempAccess::valido($pdo, $token)) {
+            return;
+        }
+        self::requireAdmin();
+    }
 }
