@@ -461,6 +461,9 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
     background-color: #fff;
 }
 
+.nav-tabs .nav-link.text-danger:hover,
+.nav-tabs .nav-link.text-danger.active { color: var(--ph-danger) !important; }
+
 .tab-pane { display: none; }
 .tab-pane.show.active { display: block; }
 
@@ -556,6 +559,9 @@ table.table td {
 table.table.table-sm td, table.table.table-sm th { padding: .5rem .75rem; }
 
 table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
+
+.linha-cliente { cursor: pointer; }
+.linha-cliente:focus { outline: 2px solid var(--ph-primary); outline-offset: -2px; }
 
 /* -------------------------------------------------------------- Login */
 
