@@ -31,6 +31,24 @@ foreach ($clientes as $c) {
     $chavesClientes[$c['id']] = normalizar_chave($c['nome']);
 }
 
+// Resolução manual de ambiguidades específicas, decididas com o Kleber caso a
+// caso (não é uma regra geral automática — só entra aqui e-mail que já foi
+// checado e confirmado com ele). Casos:
+// - ti.rs@werk-schott.com.br: Kleber esclareceu em 04/08/2026 que "WERK" e
+//   "SCHOTT" não são dois clientes, e sim UM único cliente chamado
+//   "Werk-Schott" (por isso o e-mail batia com os dois nomes ao mesmo tempo).
+//   O registro duplicado foi mesclado (ver manutencao_clientes.php) e esses
+//   chamados pertencem ao cliente "Werk-Schott". Como o hífen no domínio de
+//   e-mail não sobrevive à normalização do nome do cliente, o algoritmo de
+//   substring nunca bateria sozinho — por isso o mapeamento manual abaixo.
+$resolucaoManualPorEmail = [
+    'ti.rs@werk-schott.com.br' => 'Werk-Schott',
+];
+$idPorNomeCliente = [];
+foreach ($clientes as $c) {
+    $idPorNomeCliente[$c['nome']] = $c['id'];
+}
+
 $jaImportados = $pdo->query('SELECT hesk_ticket_id FROM chamados WHERE hesk_ticket_id IS NOT NULL')->fetchAll(\PDO::FETCH_COLUMN);
 $jaImportados = array_flip($jaImportados);
 
@@ -46,6 +64,13 @@ if ($heskPdo) {
 
     foreach ($tickets as $t) {
         $emailNormalizado = mb_strtolower($t['email'] ?? '', 'UTF-8');
+
+        $nomeResolvidoManualmente = $resolucaoManualPorEmail[$emailNormalizado] ?? null;
+        if ($nomeResolvidoManualmente !== null && isset($idPorNomeCliente[$nomeResolvidoManualmente])) {
+            $porCliente[$idPorNomeCliente[$nomeResolvidoManualmente]][] = $t;
+            continue;
+        }
+
         $matches = [];
         foreach ($chavesClientes as $clienteId => $chave) {
             if ($chave !== '' && str_contains($emailNormalizado, $chave)) {
