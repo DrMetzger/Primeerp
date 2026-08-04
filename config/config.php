@@ -17,12 +17,24 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
     define('DB_NAME', getenv('ADMINPRIME_DB_NAME') ?: 'adminprime_test');
     define('DB_USER', getenv('ADMINPRIME_DB_USER') ?: 'adminprime');
     define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: 'testpass123');
+
+    // Banco do HESK (helpdesk) não existe localmente ainda — deixado em branco.
+    define('HESK_DB_HOST', '');
+    define('HESK_DB_NAME', '');
+    define('HESK_DB_USER', '');
+    define('HESK_DB_PASS', '');
 } else {
     // --- Configuração de PRODUÇÃO (Hostinger) ---
     define('DB_HOST', 'localhost');
     define('DB_NAME', 'u195563148_claude');
     define('DB_USER', 'u195563148_claude');
     define('DB_PASS', '*@2^@cIdb4J?');
+
+    // Banco do HESK (sistema de chamados atual, primeerp.com.br/helpdesk/)
+    define('HESK_DB_HOST', 'localhost');
+    define('HESK_DB_NAME', 'u195563148_help');
+    define('HESK_DB_USER', 'u195563148_help');
+    define('HESK_DB_PASS', 'I31&vq~=k5');
 }
 
 define('DB_CHARSET', 'utf8mb4');
