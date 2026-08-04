@@ -368,21 +368,21 @@ require __DIR__ . '/templates/header.php';
 
                 <?php if (!empty($respostasPorChamado[$c['id']])): ?>
                     <hr>
+                    <!-- Cliente sempre à esquerda, equipe (nós) sempre à direita -- convenção
+                         pedida pelo Kleber, igual estilo WhatsApp. -->
+                    <div class="chat-thread">
                     <?php foreach ($respostasPorChamado[$c['id']] as $r): ?>
-                        <div class="resposta-item">
-                            <span class="avatar-circle <?= $r['autor_tipo'] === 'equipe' ? 'equipe' : 'cliente' ?>">
-                                <?= e(mb_strtoupper(mb_substr($r['autor_nome'], 0, 1))) ?>
-                            </span>
-                            <div class="flex-grow-1">
-                                <div class="d-flex align-items-center gap-2 flex-wrap">
-                                    <strong><?= e($r['autor_nome']) ?></strong>
-                                    <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge badge-origem-equipe">PrimeERP</span>' : '<span class="badge badge-origem-cliente">Cliente</span>' ?>
-                                    <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
-                                </div>
-                                <p class="mb-0" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
+                        <?php $ladoDireita = $r['autor_tipo'] === 'equipe'; ?>
+                        <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
+                            <?= avatar_html($r['autor_nome'], $ladoDireita ? null : ($cliente['foto_perfil'] ?? null), $ladoDireita ? 'equipe' : 'cliente') ?>
+                            <div class="chat-bolha">
+                                <span class="chat-autor"><?= e($r['autor_nome']) ?></span>
+                                <span style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></span>
+                                <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></span>
                             </div>
                         </div>
                     <?php endforeach; ?>
+                    </div>
                 <?php endif; ?>
 
                 <form method="post" class="mt-3">

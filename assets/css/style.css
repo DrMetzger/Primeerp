@@ -167,14 +167,84 @@ body {
 .avatar-circle.equipe { background-color: var(--ph-primary); }
 .avatar-circle.cliente { background-color: var(--ph-accent); }
 
-.resposta-item {
-    display: flex;
-    gap: .65rem;
-    padding: .6rem 0;
+.avatar-circle.avatar-foto {
+    object-fit: cover;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.06);
 }
 
-.resposta-item + .resposta-item {
-    border-top: 1px dashed #ececf1;
+.perfil-avatar .avatar-circle {
+    width: 96px;
+    height: 96px;
+    font-size: 2.2rem;
+}
+
+/* ---- Chat de chamados (estilo WhatsApp) ---- */
+.chat-thread {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    padding: .75rem 0;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.chat-linha {
+    display: flex;
+    align-items: flex-end;
+    gap: .5rem;
+    max-width: 100%;
+}
+
+.chat-linha.chat-direita {
+    flex-direction: row-reverse;
+    margin-left: auto;
+}
+
+.chat-linha.chat-esquerda {
+    margin-right: auto;
+}
+
+.chat-bolha {
+    max-width: min(75%, 520px);
+    padding: .55rem .85rem;
+    border-radius: 16px;
+    position: relative;
+    word-wrap: break-word;
+}
+
+.chat-esquerda .chat-bolha {
+    background-color: #f0f0f3;
+    color: #27272a;
+    border-bottom-left-radius: 4px;
+}
+
+.chat-direita .chat-bolha {
+    background-color: var(--ph-primary);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+
+.chat-bolha .chat-autor {
+    font-size: .72rem;
+    font-weight: 700;
+    opacity: .75;
+    display: block;
+    margin-bottom: .1rem;
+}
+
+.chat-direita .chat-bolha .chat-autor { color: #e0e7ff; }
+
+.chat-bolha .chat-hora {
+    font-size: .68rem;
+    opacity: .65;
+    display: block;
+    margin-top: .25rem;
+    text-align: right;
+}
+
+@media (max-width: 576px) {
+    .chat-bolha { max-width: 85%; }
 }
 
 /* Grupo de filtro por status (pills clicáveis) -- cada status tem sua própria

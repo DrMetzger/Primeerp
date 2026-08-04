@@ -63,6 +63,21 @@ function flash_get(string $key): ?string
     return null;
 }
 
+/**
+ * Avatar circular usado nas respostas de chamados: mostra a foto de perfil
+ * do cliente quando ele tiver enviado uma (via portal/perfil.php); cai para
+ * um círculo com a inicial do nome quando não houver foto (também usado
+ * sempre para respostas da equipe, que não têm foto de perfil).
+ */
+function avatar_html(string $nome, ?string $caminhoFoto, string $classeTipo): string
+{
+    if ($caminhoFoto) {
+        return '<img src="' . e(asset_url($caminhoFoto)) . '" class="avatar-circle avatar-foto ' . e($classeTipo) . '" alt="' . e($nome) . '">';
+    }
+    $inicial = $nome !== '' ? mb_strtoupper(mb_substr($nome, 0, 1)) : '?';
+    return '<span class="avatar-circle ' . e($classeTipo) . '">' . e($inicial) . '</span>';
+}
+
 function formatar_data(?string $data): string
 {
     if (!$data) {

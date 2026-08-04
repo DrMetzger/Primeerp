@@ -15,6 +15,10 @@ $stmt = $pdo->prepare('SELECT * FROM chamados WHERE id = ? AND cliente_id = ?');
 $stmt->execute([$chamadoId, $clienteId]);
 $chamado = $stmt->fetch();
 
+$stmtCliente = $pdo->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+$stmtCliente->execute([$clienteId]);
+$fotoPerfilCliente = $stmtCliente->fetchColumn() ?: null;
+
 if (!$chamado) {
     http_response_code(404);
     die('Chamado não encontrado.');
@@ -65,18 +69,23 @@ require __DIR__ . '/../templates/portal_header.php';
 </div>
 
 <h6 class="mt-4 mb-2">Respostas</h6>
-<?php foreach ($respostas as $r): ?>
-    <div class="card card-stat mb-2 <?= $r['autor_tipo'] === 'equipe' ? 'border-start border-4 border-primary' : '' ?>">
-        <div class="card-body py-2">
-            <div class="d-flex justify-content-between">
-                <strong><?= e($r['autor_nome']) ?> <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge bg-primary">PrimeERP</span>' : '' ?></strong>
-                <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
+<?php if (!empty($respostas)): ?>
+    <!-- Aqui quem responde é o cliente logado -- suas próprias mensagens ficam
+         à direita (convenção normal de chat), a equipe PrimeERP à esquerda. -->
+    <div class="chat-thread">
+    <?php foreach ($respostas as $r): ?>
+        <?php $ladoDireita = $r['autor_tipo'] === 'cliente'; ?>
+        <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
+            <?= avatar_html($r['autor_nome'], $ladoDireita ? $fotoPerfilCliente : null, $ladoDireita ? 'cliente' : 'equipe') ?>
+            <div class="chat-bolha">
+                <span class="chat-autor"><?= e($r['autor_nome']) ?><?= $r['autor_tipo'] === 'equipe' ? ' · Prime Hub' : '' ?></span>
+                <span style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></span>
+                <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></span>
             </div>
-            <p class="mb-0 mt-1" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
         </div>
+    <?php endforeach; ?>
     </div>
-<?php endforeach; ?>
-<?php if (empty($respostas)): ?>
+<?php else: ?>
     <p class="text-muted">Nenhuma resposta ainda.</p>
 <?php endif; ?>
 

@@ -1,0 +1,14 @@
+# Pasta de fotos de perfil enviadas pelos clientes -- imagens precisam ser
+# acessíveis publicamente (usadas como <img src>), mas nunca deve ser
+# possível executar nada aqui, mesmo que um arquivo malicioso escape da
+# validação de tipo no upload.
+<FilesMatch "\.(php|phtml|php\d|pl|py|cgi|sh)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
