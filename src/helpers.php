@@ -75,36 +75,36 @@ function formatar_data(?string $data): string
 function badge_status_demanda(string $status): string
 {
     $mapa = [
-        'aberta' => ['Aberta', 'badge-aberta'],
-        'em_andamento' => ['Em andamento', 'badge-andamento'],
-        'concluida' => ['Concluída', 'badge-concluida'],
-        'cancelada' => ['Cancelada', 'badge-cancelada'],
+        'aberta' => ['Aberta', 'badge-aberta', 'bi-circle'],
+        'em_andamento' => ['Em andamento', 'badge-andamento', 'bi-arrow-repeat'],
+        'concluida' => ['Concluída', 'badge-concluida', 'bi-check-circle-fill'],
+        'cancelada' => ['Cancelada', 'badge-cancelada', 'bi-x-circle'],
     ];
-    [$label, $classe] = $mapa[$status] ?? [$status, ''];
-    return '<span class="badge ' . e($classe) . '">' . e($label) . '</span>';
+    [$label, $classe, $icone] = $mapa[$status] ?? [$status, '', 'bi-circle'];
+    return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
 }
 
 function badge_status_chamado(string $status): string
 {
     $mapa = [
-        'aberto' => ['Aberto', 'badge-aberta'],
-        'em_andamento' => ['Em andamento', 'badge-andamento'],
-        'respondido' => ['Respondido', 'badge-andamento'],
-        'resolvido' => ['Resolvido', 'badge-concluida'],
-        'fechado' => ['Fechado', 'badge-cancelada'],
+        'aberto' => ['Aberto', 'badge-aberto', 'bi-envelope-open'],
+        'em_andamento' => ['Em andamento', 'badge-andamento', 'bi-arrow-repeat'],
+        'respondido' => ['Respondido', 'badge-andamento', 'bi-reply-fill'],
+        'resolvido' => ['Resolvido', 'badge-resolvido', 'bi-check-circle-fill'],
+        'fechado' => ['Fechado', 'badge-fechado', 'bi-x-circle'],
     ];
-    [$label, $classe] = $mapa[$status] ?? [$status, ''];
-    return '<span class="badge ' . e($classe) . '">' . e($label) . '</span>';
+    [$label, $classe, $icone] = $mapa[$status] ?? [$status, '', 'bi-circle'];
+    return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
 }
 
 function badge_prioridade(string $prioridade): string
 {
     $mapa = [
-        'baixa' => ['Baixa', 'prio-baixa'],
-        'media' => ['Média', 'prio-media'],
-        'alta' => ['Alta', 'prio-alta'],
-        'urgente' => ['Urgente', 'prio-urgente'],
+        'baixa' => ['Baixa', 'prio-baixa', 'bi-arrow-down-circle'],
+        'media' => ['Média', 'prio-media', 'bi-dash-circle'],
+        'alta' => ['Alta', 'prio-alta', 'bi-arrow-up-circle'],
+        'urgente' => ['Urgente', 'prio-urgente', 'bi-exclamation-circle-fill'],
     ];
-    [$label, $classe] = $mapa[$prioridade] ?? [$prioridade, ''];
-    return '<span class="badge ' . e($classe) . '">' . e($label) . '</span>';
+    [$label, $classe, $icone] = $mapa[$prioridade] ?? [$prioridade, '', 'bi-circle'];
+    return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
 }

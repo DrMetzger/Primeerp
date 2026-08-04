@@ -317,19 +317,37 @@ require __DIR__ . '/templates/header.php';
 
     <!-- CHAMADOS -->
     <div class="tab-pane" id="chamados">
-        <div class="d-flex justify-content-end mb-2">
-            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Registrar chamado</button>
+        <div class="toolbar">
+            <div class="toolbar-acoes">
+                <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Registrar chamado</button>
+            </div>
+            <div class="toolbar-filtros">
+                <div class="btn-group flex-wrap" role="group" id="filtroStatusChamados">
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill active" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="aberto"><i class="bi bi-envelope-open"></i> Abertos</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="em_andamento"><i class="bi bi-arrow-repeat"></i> Em andamento</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="respondido"><i class="bi bi-reply-fill"></i> Respondidos</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="resolvido"><i class="bi bi-check-circle-fill"></i> Resolvidos</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="fechado"><i class="bi bi-x-circle"></i> Fechados</button>
+                </div>
+                <a href="<?= url('exportar_chamados.php?id=' . $clienteId) ?>" class="btn btn-sm btn-outline-dark" id="linkExportarChamados">
+                    <i class="bi bi-file-earmark-excel"></i> Exportar
+                </a>
+            </div>
         </div>
 
+        <div id="listaChamados">
         <?php foreach ($chamados as $c): ?>
-        <div class="card card-stat mb-3">
-            <div class="card-header bg-white">
+        <div class="card chamado-card mb-3" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>">
+            <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <div>
+                    <div class="d-flex align-items-center flex-wrap gap-2">
                         <strong><?= e($c['titulo']) ?></strong>
                         <?= badge_status_chamado($c['status']) ?>
                         <?= badge_prioridade($c['prioridade']) ?>
-                        <?= $c['aberto_por'] === 'cliente' ? '<span class="badge bg-light text-dark border">Aberto pelo cliente</span>' : '<span class="badge bg-light text-dark border">Aberto pela equipe</span>' ?>
+                        <?= $c['aberto_por'] === 'cliente'
+                            ? '<span class="badge badge-origem-cliente"><i class="bi bi-person-fill"></i> Aberto pelo cliente</span>'
+                            : '<span class="badge badge-origem-equipe"><i class="bi bi-headset"></i> Aberto pela equipe</span>' ?>
                     </div>
                     <form method="post" class="d-flex align-items-center gap-1">
                         <?= csrf_field() ?>
@@ -345,17 +363,24 @@ require __DIR__ . '/templates/header.php';
                 </div>
             </div>
             <div class="card-body">
-                <p class="text-muted small mb-1">Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
+                <p class="text-muted small mb-1"><i class="bi bi-clock"></i> Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
                 <p style="white-space: pre-wrap;"><?= e($c['descricao']) ?></p>
 
                 <?php if (!empty($respostasPorChamado[$c['id']])): ?>
                     <hr>
                     <?php foreach ($respostasPorChamado[$c['id']] as $r): ?>
-                        <div class="mb-2">
-                            <strong><?= e($r['autor_nome']) ?></strong>
-                            <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge bg-primary">PrimeERP</span>' : '<span class="badge bg-secondary">Cliente</span>' ?>
-                            <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
-                            <p class="mb-0" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
+                        <div class="resposta-item">
+                            <span class="avatar-circle <?= $r['autor_tipo'] === 'equipe' ? 'equipe' : 'cliente' ?>">
+                                <?= e(mb_strtoupper(mb_substr($r['autor_nome'], 0, 1))) ?>
+                            </span>
+                            <div class="flex-grow-1">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <strong><?= e($r['autor_nome']) ?></strong>
+                                    <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge badge-origem-equipe">PrimeERP</span>' : '<span class="badge badge-origem-cliente">Cliente</span>' ?>
+                                    <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
+                                </div>
+                                <p class="mb-0" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
+                            </div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -366,19 +391,21 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="aba_retorno" value="chamados">
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
-                    <button type="submit" class="btn btn-sm btn-dark">Enviar resposta</button>
+                    <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
                 </form>
             </div>
         </div>
         <?php endforeach; ?>
+        </div>
         <?php if (empty($chamados)): ?>
             <p class="text-muted text-center py-4">Nenhum chamado registrado ainda.</p>
         <?php endif; ?>
+        <p class="text-muted text-center py-3 d-none" id="avisoFiltroVazio">Nenhum chamado com esse status.</p>
     </div>
 
     <!-- DEMANDAS -->
     <div class="tab-pane" id="demandas">
-        <div class="d-flex justify-content-end mb-2">
+        <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovaDemanda"><i class="bi bi-plus-lg"></i> Nova demanda</button>
         </div>
         <div class="card card-stat">
@@ -413,7 +440,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
-        <div class="d-flex justify-content-end mb-2">
+        <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoKpi"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
         </div>
         <div class="card card-stat">
@@ -450,7 +477,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- DOCUMENTOS -->
     <div class="tab-pane" id="documentos">
-        <div class="d-flex justify-content-end mb-2">
+        <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoDocumento"><i class="bi bi-upload"></i> Enviar documento</button>
         </div>
         <div class="card card-stat">
@@ -485,7 +512,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- TREINAMENTOS -->
     <div class="tab-pane" id="treinamentos">
-        <div class="d-flex justify-content-end mb-2">
+        <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoTreinamento"><i class="bi bi-plus-lg"></i> Novo treinamento</button>
         </div>
         <div class="card card-stat">
@@ -782,6 +809,31 @@ document.addEventListener('DOMContentLoaded', function () {
             history.replaceState(null, '', e.target.getAttribute('href'));
         });
     });
+
+    // Filtro de chamados por status (client-side, sem recarregar a página).
+    var grupoFiltro = document.getElementById('filtroStatusChamados');
+    var linkExportar = document.getElementById('linkExportarChamados');
+    if (grupoFiltro) {
+        var urlExportarBase = linkExportar ? linkExportar.getAttribute('href') : '';
+        grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (b) { b.classList.remove('active'); });
+                botao.classList.add('active');
+                var filtro = botao.getAttribute('data-filtro');
+                var algumVisivel = false;
+                document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
+                    var mostra = (filtro === 'todos' || card.getAttribute('data-status') === filtro);
+                    card.style.display = mostra ? '' : 'none';
+                    if (mostra) algumVisivel = true;
+                });
+                var aviso = document.getElementById('avisoFiltroVazio');
+                if (aviso) aviso.classList.toggle('d-none', algumVisivel || document.querySelectorAll('#listaChamados .chamado-card').length === 0);
+                if (linkExportar && urlExportarBase) {
+                    linkExportar.setAttribute('href', filtro === 'todos' ? urlExportarBase : urlExportarBase + '&status=' + encodeURIComponent(filtro));
+                }
+            });
+        });
+    }
 });
 </script>
 

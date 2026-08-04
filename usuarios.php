@@ -90,9 +90,12 @@ require __DIR__ . '/templates/header.php';
     <div class="alert alert-<?= $mensagemAcaoToken['tipo'] === 'sucesso' ? 'success' : 'danger' ?>"><?= e($mensagemAcaoToken['texto']) ?></div>
 <?php endif; ?>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0">Usuários</h4>
-    <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
+<h4 class="mb-3">Usuários</h4>
+
+<div class="toolbar">
+    <div class="toolbar-acoes">
+        <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
+    </div>
 </div>
 
 <div class="card card-stat">

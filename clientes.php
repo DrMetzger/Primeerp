@@ -46,17 +46,23 @@ $tituloPagina = 'Clientes';
 require __DIR__ . '/templates/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0">Clientes</h4>
-    <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoCliente">
-        <i class="bi bi-plus-lg"></i> Novo cliente
-    </button>
+<h4 class="mb-3">Clientes</h4>
+
+<div class="toolbar">
+    <div class="toolbar-acoes">
+        <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoCliente">
+            <i class="bi bi-plus-lg"></i> Novo cliente
+        </button>
+    </div>
+    <div class="toolbar-filtros">
+        <input type="text" class="form-control form-control-sm" id="buscaClientes" placeholder="Buscar por nome ou contato..." style="max-width: 260px;">
+    </div>
 </div>
 
 <div class="card card-stat">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0" id="tabelaClientes">
                 <thead>
                 <tr>
                     <th>Nome</th>
@@ -69,7 +75,7 @@ require __DIR__ . '/templates/header.php';
                 </thead>
                 <tbody>
                 <?php foreach ($clientes as $c): ?>
-                    <tr>
+                    <tr data-busca="<?= e(mb_strtolower($c['nome'] . ' ' . $c['contato_nome'] . ' ' . $c['contato_email'])) ?>">
                         <td class="fw-semibold"><?= e($c['nome']) ?></td>
                         <td>
                             <?php
@@ -86,10 +92,10 @@ require __DIR__ . '/templates/header.php';
                         </td>
                         <td class="text-center"><?= (int)$c['demandas_abertas'] ?></td>
                         <td class="text-center">
-                            <?= (int)$c['urgentes'] > 0 ? '<span class="badge prio-urgente">' . (int)$c['urgentes'] . '</span>' : '-' ?>
+                            <?= (int)$c['urgentes'] > 0 ? '<span class="badge prio-urgente"><i class="bi bi-exclamation-circle-fill"></i> ' . (int)$c['urgentes'] . '</span>' : '-' ?>
                         </td>
                         <td class="text-end">
-                            <a href="<?= url('cliente.php?id=' . $c['id']) ?>" class="btn btn-sm btn-outline-dark">Abrir</a>
+                            <a href="<?= url('cliente.php?id=' . $c['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-box-arrow-up-right"></i> Abrir</a>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -136,5 +142,18 @@ require __DIR__ . '/templates/header.php';
     </div>
   </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var busca = document.getElementById('buscaClientes');
+    if (!busca) return;
+    busca.addEventListener('input', function () {
+        var termo = busca.value.trim().toLowerCase();
+        document.querySelectorAll('#tabelaClientes tbody tr[data-busca]').forEach(function (linha) {
+            linha.style.display = linha.getAttribute('data-busca').includes(termo) ? '' : 'none';
+        });
+    });
+});
+</script>
 
 <?php require __DIR__ . '/templates/footer.php'; ?>
