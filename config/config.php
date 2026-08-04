@@ -24,6 +24,14 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
     define('HESK_DB_NAME', getenv('ADMINPRIME_HESK_DB_NAME') ?: '');
     define('HESK_DB_USER', getenv('ADMINPRIME_HESK_DB_USER') ?: '');
     define('HESK_DB_PASS', getenv('ADMINPRIME_HESK_DB_PASS') ?: '');
+
+    // SMTP local: em branco por padrão (Mailer cai para mail() do PHP, que
+    // localmente nem chega a enviar de verdade -- é só pra não quebrar).
+    define('SMTP_HOST', getenv('ADMINPRIME_SMTP_HOST') ?: '');
+    define('SMTP_PORT', (int) (getenv('ADMINPRIME_SMTP_PORT') ?: 587));
+    define('SMTP_SECURE', getenv('ADMINPRIME_SMTP_SECURE') ?: 'tls'); // 'ssl' ou 'tls'
+    define('SMTP_USER', getenv('ADMINPRIME_SMTP_USER') ?: '');
+    define('SMTP_PASS', getenv('ADMINPRIME_SMTP_PASS') ?: '');
 } else {
     // --- Configuração de PRODUÇÃO (Hostinger) ---
     define('DB_HOST', 'localhost');
@@ -36,6 +44,19 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
     define('HESK_DB_NAME', 'u195563148_help');
     define('HESK_DB_USER', 'u195563148_help');
     define('HESK_DB_PASS', 'I31&vq~=k5');
+
+    // SMTP autenticado (Hostinger) -- e-mails de notificação (novo chamado,
+    // resposta da equipe, convite de acesso ao portal) passam a ser enviados
+    // de verdade via a caixa do Kleber, em vez do mail() nativo do PHP (mais
+    // confiável contra spam/rejeição). Confirmado via DNS (MX = mx1/mx2.
+    // hostinger.com, SPF inclui _spf.mail.hostinger.com) que o domínio usa o
+    // e-mail hospedado da própria Hostinger -- por isso host/porta abaixo
+    // seguem o padrão documentado da Hostinger para esse serviço.
+    define('SMTP_HOST', 'smtp.hostinger.com');
+    define('SMTP_PORT', 465);
+    define('SMTP_SECURE', 'ssl');
+    define('SMTP_USER', 'kleber.farias@primeerp.com.br');
+    define('SMTP_PASS', 'Km@2024@#$');
 }
 
 define('DB_CHARSET', 'utf8mb4');
@@ -46,8 +67,11 @@ define('DB_CHARSET', 'utf8mb4');
 define('APP_NAME', 'Prime Hub');
 define('APP_BASE_PATH', $isLocal ? '' : '/AdminPrime');
 
-// Notificações por e-mail (novos chamados avisam a equipe interna)
-define('MAIL_FROM', 'Prime Hub <nao-responda@primeerp.com.br>');
+// Notificações por e-mail (novos chamados avisam a equipe interna).
+// Envia como o próprio e-mail do Kleber (autenticado via SMTP, ver acima)
+// para cair na caixa de entrada normal do cliente, com o nome de exibição
+// "Prime Hub" mantendo a marca.
+define('MAIL_FROM', 'Prime Hub <' . (SMTP_USER !== '' ? SMTP_USER : 'nao-responda@primeerp.com.br') . '>');
 define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr@primeerp.com.br']);
 
 // Diretório de uploads (relativo à raiz do projeto)

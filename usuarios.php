@@ -5,9 +5,42 @@ require_once __DIR__ . '/bootstrap.php';
 use AdminPrime\Auth;
 use AdminPrime\Database;
 
-Auth::requireAdmin();
+// Aceita também o token temporário (?diag_token=...) além da sessão de admin
+// normal -- mesmo esquema usado em importar_chamados_hesk.php e
+// manutencao_clientes.php, pra permitir uma ação pontual (ex.: criar um
+// usuário) sem precisar de um segundo login manual do admin.
+Auth::requireAdminOrTempToken(Database::connection());
 
 $pdo = Database::connection();
+
+$mensagemAcaoToken = null;
+
+// Criação de usuário via GET com token temporário + confirmação explícita na
+// URL (usado quando quem está operando é o Claude, que só consegue fazer
+// requisições GET). Sempre exige e-mail ainda não cadastrado -- não
+// sobrescreve usuário existente.
+if ($_SERVER['REQUEST_METHOD'] === 'GET'
+    && ($_GET['acao'] ?? '') === 'criar_usuario'
+    && ($_GET['confirmar'] ?? '') === 'SIM'
+    && ($_GET['diag_token'] ?? '') !== ''
+) {
+    $nome = trim($_GET['nome'] ?? '');
+    $email = trim($_GET['email'] ?? '');
+    $senha = $_GET['senha'] ?? '';
+    $perfil = ($_GET['perfil'] ?? '') === 'admin' ? 'admin' : 'colaborador';
+
+    if ($nome === '' || $email === '' || strlen($senha) < 6) {
+        $mensagemAcaoToken = ['tipo' => 'erro', 'texto' => 'Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.'];
+    } else {
+        try {
+            $stmt = $pdo->prepare('INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (?, ?, ?, ?)');
+            $stmt->execute([$nome, $email, password_hash($senha, PASSWORD_DEFAULT), $perfil]);
+            $mensagemAcaoToken = ['tipo' => 'sucesso', 'texto' => 'Usuário "' . $nome . '" criado.'];
+        } catch (\PDOException $e) {
+            $mensagemAcaoToken = ['tipo' => 'erro', 'texto' => 'Não foi possível criar o usuário (e-mail já cadastrado?).'];
+        }
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
@@ -52,6 +85,10 @@ $usuarios = $pdo->query('SELECT * FROM usuarios ORDER BY nome ASC')->fetchAll();
 $tituloPagina = 'Usuários';
 require __DIR__ . '/templates/header.php';
 ?>
+
+<?php if ($mensagemAcaoToken): ?>
+    <div class="alert alert-<?= $mensagemAcaoToken['tipo'] === 'sucesso' ? 'success' : 'danger' ?>"><?= e($mensagemAcaoToken['texto']) ?></div>
+<?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0">Usuários</h4>
