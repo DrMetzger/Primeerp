@@ -19,11 +19,24 @@ class Migrations
                 nome VARCHAR(150) NOT NULL,
                 email VARCHAR(150) NOT NULL UNIQUE,
                 senha_hash VARCHAR(255) NOT NULL,
-                perfil ENUM('admin','colaborador') NOT NULL DEFAULT 'colaborador',
+                perfil ENUM('admin','colaborador','diretor','ceo') NOT NULL DEFAULT 'colaborador',
                 ativo TINYINT(1) NOT NULL DEFAULT 1,
                 criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Perfis novos (04/08/2026): além de admin/colaborador, agora tem
+        // diretor e ceo -- pedido do Kleber pensando no futuro módulo
+        // financeiro (contratos/faturas/CNAB, ainda em stand-by).
+        $colunaPerfil = $pdo->query("SHOW COLUMNS FROM usuarios LIKE 'perfil'")->fetch();
+        if ($colunaPerfil && stripos($colunaPerfil['Type'], 'ceo') === false) {
+            $pdo->exec("ALTER TABLE usuarios MODIFY COLUMN perfil ENUM('admin','colaborador','diretor','ceo') NOT NULL DEFAULT 'colaborador'");
+        }
+
+        // Perfil da equipe também pode ter telefone e foto (mesmo padrão do
+        // cliente) -- usados na página "Meu perfil".
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(50) NULL AFTER email");
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_perfil VARCHAR(255) NULL COMMENT 'Caminho da foto de perfil, relativo à raiz do projeto' AFTER telefone");
 
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS clientes (
@@ -139,7 +152,7 @@ class Migrations
                 titulo VARCHAR(200) NOT NULL,
                 descricao TEXT NOT NULL,
                 categoria VARCHAR(80) NULL,
-                status ENUM('aberto','em_andamento','respondido','resolvido','fechado') NOT NULL DEFAULT 'aberto',
+                status ENUM('aberto','aguardando_equipe','aguardando_cliente','fechado') NOT NULL DEFAULT 'aberto',
                 prioridade ENUM('baixa','media','alta','urgente') NOT NULL DEFAULT 'media',
                 aberto_por ENUM('cliente','equipe') NOT NULL DEFAULT 'cliente',
                 responsavel_id INT NULL,
@@ -165,6 +178,51 @@ class Migrations
                 CONSTRAINT fk_respostas_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Modelo de status dos chamados simplificado (04/08/2026). Antes eram
+        // 5 valores confusos e setados à mão em pontos diferentes do código
+        // de um jeito até invertido (ex.: "em_andamento" era ligado quando o
+        // CLIENTE respondia, e "respondido" quando a EQUIPE respondia -- o
+        // contrário do que o nome sugere). Agora são só 4, e os dois do meio
+        // são sempre RECALCULADOS a partir de quem respondeu por último
+        // (nunca setados à mão, ver recalcular_status_chamado() em
+        // helpers.php), então não tem como ficar incoerente:
+        //   aberto             -> ninguém da equipe respondeu ainda
+        //   aguardando_equipe  -> a equipe precisa responder (cliente foi o
+        //                         último a falar, ou o cliente reabriu)
+        //   aguardando_cliente -> a equipe já respondeu, esperando o cliente
+        //   fechado            -> encerrado (substitui "resolvido" também,
+        //                         que era a mesma coisa com nome diferente)
+        $colunaStatusChamado = $pdo->query("SHOW COLUMNS FROM chamados LIKE 'status'")->fetch();
+        if ($colunaStatusChamado && stripos($colunaStatusChamado['Type'], 'aguardando_equipe') === false) {
+            // 1) ENUM temporário que aceita os valores antigos E os novos ao
+            //    mesmo tempo, só pra dar espaço pro UPDATE de baixo rodar sem
+            //    dar erro de valor inválido.
+            $pdo->exec("ALTER TABLE chamados MODIFY COLUMN status ENUM('aberto','em_andamento','respondido','resolvido','fechado','aguardando_equipe','aguardando_cliente') NOT NULL DEFAULT 'aberto'");
+
+            // 2) Recalcula o status real de cada chamado já existente a
+            //    partir do histórico de respostas (mais confiável do que
+            //    confiar no valor antigo, que podia estar errado).
+            $pdo->exec("
+                UPDATE chamados c SET status = CASE
+                    WHEN status IN ('fechado', 'resolvido') THEN 'fechado'
+                    WHEN NOT EXISTS (
+                        SELECT 1 FROM chamado_respostas r
+                        WHERE r.chamado_id = c.id AND r.autor_tipo = 'equipe'
+                    ) THEN 'aberto'
+                    WHEN (
+                        SELECT r2.autor_tipo FROM chamado_respostas r2
+                        WHERE r2.chamado_id = c.id
+                        ORDER BY r2.criado_em DESC, r2.id DESC LIMIT 1
+                    ) = 'equipe' THEN 'aguardando_cliente'
+                    ELSE 'aguardando_equipe'
+                END
+            ");
+
+            // 3) Agora que não sobrou nenhum chamado com valor antigo,
+            //    restringe o ENUM de vez pros 4 valores novos.
+            $pdo->exec("ALTER TABLE chamados MODIFY COLUMN status ENUM('aberto','aguardando_equipe','aguardando_cliente','fechado') NOT NULL DEFAULT 'aberto'");
+        }
 
         // Usuário admin padrão, criado apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();

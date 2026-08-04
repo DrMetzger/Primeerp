@@ -70,7 +70,7 @@ echo "\xEF\xBB\xBF"; // BOM UTF-8
 $saida = fopen('php://output', 'w');
 fputcsv($saida, ['Título', 'Status', 'Prioridade', 'Categoria', 'Aberto por', 'Responsável', 'Aberto em', 'Descrição'], ';', '"', '\\');
 
-$mapaStatus = ['aberto' => 'Aberto', 'em_andamento' => 'Em andamento', 'respondido' => 'Respondido', 'resolvido' => 'Resolvido', 'fechado' => 'Fechado'];
+$mapaStatus = ['aberto' => 'Aberto', 'aguardando_equipe' => 'Aguardando nós', 'aguardando_cliente' => 'Aguardando cliente', 'fechado' => 'Fechado'];
 $mapaPrioridade = ['baixa' => 'Baixa', 'media' => 'Média', 'alta' => 'Alta', 'urgente' => 'Urgente'];
 
 foreach ($chamados as $c) {

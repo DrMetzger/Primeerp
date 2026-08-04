@@ -43,6 +43,7 @@
 html, body {
     margin: 0;
     padding: 0;
+    height: 100%;
 }
 
 body {
@@ -51,6 +52,21 @@ body {
     font-family: "Roboto", -apple-system, "Segoe UI", Arial, sans-serif;
     font-size: 1rem;
     line-height: 1.5;
+    /* Rodapé fixo: body em coluna ocupando pelo menos a viewport inteira,
+       o <main> cresce pra preencher o espaço sobrando e o <footer> só fica
+       "colado" embaixo quando o conteúdo é curto -- nunca flutua no meio
+       da tela nem cria espaço em branco estranho. */
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+body > main {
+    flex: 1 0 auto;
+}
+
+body > footer {
+    flex-shrink: 0;
 }
 
 a { color: var(--ph-primary); text-decoration: none; }
@@ -312,6 +328,11 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
 .badge-andamento { background-color: #ede9fe; color: #6d28d9; }
 .badge-concluida, .badge-resolvido { background-color: var(--ph-success-bg); color: var(--ph-success); }
 .badge-cancelada, .badge-fechado { background-color: var(--ph-neutral-bg); color: var(--ph-neutral); }
+/* Aguardando nós = precisa de ação AGORA, por isso a cor mais chamativa
+   (mesma família do "alta prioridade"). Aguardando cliente = já respondemos,
+   bola com o cliente, cor mais neutra/tranquila. */
+.badge-aguardando-equipe { background-color: #ffe4e6; color: #be123c; }
+.badge-aguardando-cliente { background-color: #ede9fe; color: #6d28d9; }
 
 .prio-baixa { background-color: var(--ph-success-bg); color: var(--ph-success); }
 .prio-media { background-color: var(--ph-warning-bg); color: var(--ph-warning); }
@@ -587,14 +608,21 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     margin-left: auto;
 }
 
+.busca-toolbar {
+    width: 320px;
+    max-width: 100%;
+}
+
 @media (max-width: 576px) {
     .toolbar .toolbar-filtros {
         margin-left: 0;
         width: 100%;
     }
     .toolbar .toolbar-filtros .btn,
-    .toolbar .toolbar-filtros select {
+    .toolbar .toolbar-filtros select,
+    .toolbar .toolbar-filtros .busca-toolbar {
         flex: 1 1 auto;
+        width: 100%;
     }
 }
 
@@ -694,17 +722,15 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .filtro-pill.filtro-todos { background-color: var(--ph-neutral-bg) !important; color: var(--ph-neutral) !important; }
 .filtro-pill.filtro-aberto { background-color: var(--ph-info-bg) !important; color: var(--ph-info) !important; }
-.filtro-pill.filtro-em_andamento { background-color: #ede9fe !important; color: #6d28d9 !important; }
-.filtro-pill.filtro-respondido { background-color: #ecfeff !important; color: var(--ph-accent) !important; }
-.filtro-pill.filtro-resolvido { background-color: var(--ph-success-bg) !important; color: var(--ph-success) !important; }
+.filtro-pill.filtro-aguardando_equipe { background-color: #ffe4e6 !important; color: #be123c !important; }
+.filtro-pill.filtro-aguardando_cliente { background-color: #ede9fe !important; color: #6d28d9 !important; }
 .filtro-pill.filtro-fechado { background-color: #f4f4f6 !important; color: #71717a !important; }
 
 .filtro-pill.active { color: #fff !important; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
 .filtro-pill.filtro-todos.active { background-color: var(--ph-neutral) !important; }
 .filtro-pill.filtro-aberto.active { background-color: var(--ph-info) !important; }
-.filtro-pill.filtro-em_andamento.active { background-color: #6d28d9 !important; }
-.filtro-pill.filtro-respondido.active { background-color: var(--ph-accent) !important; }
-.filtro-pill.filtro-resolvido.active { background-color: var(--ph-success) !important; }
+.filtro-pill.filtro-aguardando_equipe.active { background-color: #be123c !important; }
+.filtro-pill.filtro-aguardando_cliente.active { background-color: #6d28d9 !important; }
 .filtro-pill.filtro-fechado.active { background-color: #52525b !important; }
 
 .btn-exportar { background-color: #15803d !important; border-color: #15803d !important; color: #fff !important; }

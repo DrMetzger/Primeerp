@@ -103,13 +103,39 @@ function badge_status_chamado(string $status): string
 {
     $mapa = [
         'aberto' => ['Aberto', 'badge-aberto', 'bi-envelope-open'],
-        'em_andamento' => ['Em andamento', 'badge-andamento', 'bi-arrow-repeat'],
-        'respondido' => ['Respondido', 'badge-andamento', 'bi-reply-fill'],
-        'resolvido' => ['Resolvido', 'badge-resolvido', 'bi-check-circle-fill'],
+        'aguardando_equipe' => ['Aguardando nós', 'badge-aguardando-equipe', 'bi-exclamation-circle-fill'],
+        'aguardando_cliente' => ['Aguardando cliente', 'badge-aguardando-cliente', 'bi-hourglass-split'],
         'fechado' => ['Fechado', 'badge-fechado', 'bi-x-circle'],
     ];
     [$label, $classe, $icone] = $mapa[$status] ?? [$status, '', 'bi-circle'];
     return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
+}
+
+/**
+ * Recalcula o status de um chamado a partir de quem respondeu por último --
+ * nunca deve ser setado à mão (exceto o fechamento manual). Chamar sempre
+ * depois de inserir uma nova linha em chamado_respostas, e também ao
+ * reabrir um chamado fechado.
+ */
+function recalcular_status_chamado(\PDO $pdo, int $chamadoId): void
+{
+    $stmt = $pdo->prepare('SELECT autor_tipo FROM chamado_respostas WHERE chamado_id = ? ORDER BY criado_em DESC, id DESC LIMIT 1');
+    $stmt->execute([$chamadoId]);
+    $ultimoAutor = $stmt->fetchColumn();
+
+    if ($ultimoAutor === false) {
+        $novoStatus = 'aberto';
+    } else {
+        $temRespostaEquipe = $pdo->prepare('SELECT 1 FROM chamado_respostas WHERE chamado_id = ? AND autor_tipo = "equipe" LIMIT 1');
+        $temRespostaEquipe->execute([$chamadoId]);
+        if (!$temRespostaEquipe->fetchColumn()) {
+            $novoStatus = 'aberto';
+        } else {
+            $novoStatus = $ultimoAutor === 'equipe' ? 'aguardando_cliente' : 'aguardando_equipe';
+        }
+    }
+
+    $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ?')->execute([$novoStatus, $chamadoId]);
 }
 
 function badge_prioridade(string $prioridade): string

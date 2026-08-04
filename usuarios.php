@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET'
     $nome = trim($_GET['nome'] ?? '');
     $email = trim($_GET['email'] ?? '');
     $senha = $_GET['senha'] ?? '';
-    $perfil = ($_GET['perfil'] ?? '') === 'admin' ? 'admin' : 'colaborador';
+    $perfil = array_key_exists($_GET['perfil'] ?? '', PERFIS_USUARIO) ? $_GET['perfil'] : 'colaborador';
 
     if ($nome === '' || $email === '' || strlen($senha) < 6) {
         $mensagemAcaoToken = ['tipo' => 'erro', 'texto' => 'Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.'];
@@ -82,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nome = trim($_POST['nome'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $senha = $_POST['senha'] ?? '';
-        $perfil = $_POST['perfil'] === 'admin' ? 'admin' : 'colaborador';
+        $perfil = array_key_exists($_POST['perfil'] ?? '', PERFIS_USUARIO) ? $_POST['perfil'] : 'colaborador';
 
         if ($nome === '' || $email === '' || strlen($senha) < 6) {
             flash_set('erro', 'Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.');
@@ -175,7 +175,7 @@ require __DIR__ . '/templates/header.php';
                         <tr>
                             <td class="fw-semibold"><?= e($u['nome']) ?></td>
                             <td><?= e($u['email']) ?></td>
-                            <td><span class="badge bg-<?= $u['perfil'] === 'admin' ? 'dark' : 'secondary' ?>"><?= $u['perfil'] === 'admin' ? 'Administrador' : 'Colaborador' ?></span></td>
+                            <td><span class="badge bg-<?= $u['perfil'] === 'colaborador' ? 'secondary' : 'dark' ?>"><?= e(PERFIS_USUARIO[$u['perfil']] ?? $u['perfil']) ?></span></td>
                             <td><span class="badge bg-<?= $u['ativo'] ? 'success' : 'secondary' ?>"><?= $u['ativo'] ? 'Ativo' : 'Inativo' ?></span></td>
                             <td class="text-end">
                                 <?php if ((int)$u['id'] !== Auth::userId()): ?>
@@ -258,8 +258,9 @@ require __DIR__ . '/templates/header.php';
             <div class="mb-3"><label class="form-label">Senha *</label><input type="password" name="senha" class="form-control" minlength="6" required></div>
             <div class="mb-3"><label class="form-label">Perfil</label>
                 <select name="perfil" class="form-select">
-                    <option value="colaborador">Colaborador</option>
-                    <option value="admin">Administrador</option>
+                    <?php foreach (PERFIS_USUARIO as $valor => $label): ?>
+                        <option value="<?= e($valor) ?>" <?= $valor === 'colaborador' ? 'selected' : '' ?>><?= e($label) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
         </div>

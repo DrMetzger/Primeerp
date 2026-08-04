@@ -41,7 +41,11 @@ class Auth
 
     public static function isAdmin(): bool
     {
-        return ($_SESSION['usuario_perfil'] ?? null) === 'admin';
+        // Diretor e CEO têm o mesmo acesso de administrador por enquanto --
+        // o módulo financeiro que vai diferenciar o CEO (contratos, faturas,
+        // CNAB) ainda está em stand-by, então não faz sentido criar uma
+        // conta de CEO/Diretor que fica travada sem acesso a nada.
+        return in_array($_SESSION['usuario_perfil'] ?? null, ['admin', 'diretor', 'ceo'], true);
     }
 
     public static function userId(): ?int

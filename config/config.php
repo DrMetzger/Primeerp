@@ -78,6 +78,35 @@ define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
 
+// Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
+// acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
+// futuro módulo financeiro (contratos/faturas/CNAB), que ainda está em
+// stand-by.
+define('PERFIS_USUARIO', [
+    'colaborador' => 'Colaborador',
+    'admin' => 'Administrador',
+    'diretor' => 'Diretor',
+    'ceo' => 'CEO',
+]);
+
+// Categorias de chamado -- mesma lista de área que já existia no HESK (o
+// sistema de chamados antigo), pra manter a mesma linguagem que os clientes
+// já conhecem em vez de inventar uma nova.
+define('CATEGORIAS_CHAMADO', [
+    'Geral',
+    'Compras',
+    'Estoque/Custos',
+    'Faturamento',
+    'Financeiro',
+    'PCP',
+    'Gestão de Pessoal',
+    'Ponto Eletrônico',
+    'Fiscal',
+    'Contabilidade',
+    'Integrações',
+    'Desenvolvimento',
+]);
+
 // Timezone
 date_default_timezone_set('America/Sao_Paulo');
 

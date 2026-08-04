@@ -170,8 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($mensagem !== '') {
             $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, "equipe", ?, ?)')
                 ->execute([$chamadoId, Auth::userName(), $mensagem]);
-            $pdo->prepare("UPDATE chamados SET status = 'respondido' WHERE id = ? AND cliente_id = ?")
-                ->execute([$chamadoId, $clienteId]);
+            recalcular_status_chamado($pdo, $chamadoId);
 
             $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
             $chamadoAtualizado->execute([$chamadoId]);
@@ -181,10 +180,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($acao === 'atualizar_status_chamado') {
-        $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ? AND cliente_id = ?')
-            ->execute([$_POST['status'], (int) $_POST['chamado_id'], $clienteId]);
-        flash_set('sucesso', 'Status do chamado atualizado.');
+    if ($acao === 'fechar_chamado') {
+        $pdo->prepare("UPDATE chamados SET status = 'fechado' WHERE id = ? AND cliente_id = ?")
+            ->execute([(int) $_POST['chamado_id'], $clienteId]);
+        flash_set('sucesso', 'Chamado encerrado.');
+    }
+
+    if ($acao === 'reabrir_chamado') {
+        $chamadoId = (int) $_POST['chamado_id'];
+        // Confirma que o chamado é desse cliente antes de reabrir.
+        $confere = $pdo->prepare('SELECT 1 FROM chamados WHERE id = ? AND cliente_id = ?');
+        $confere->execute([$chamadoId, $clienteId]);
+        if ($confere->fetchColumn()) {
+            recalcular_status_chamado($pdo, $chamadoId);
+            flash_set('sucesso', 'Chamado reaberto.');
+        }
     }
 
     header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
@@ -192,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // --- Dados para exibição ---
-$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status NOT IN ("resolvido","fechado")) DESC, c.criado_em DESC');
+$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status = "fechado") ASC, (c.status = "aguardando_equipe") DESC, c.criado_em DESC');
 $chamados->execute([$clienteId]);
 $chamados = $chamados->fetchAll();
 
@@ -317,6 +327,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- CHAMADOS -->
     <div class="tab-pane" id="chamados">
+        <p class="text-muted small mb-2"><i class="bi bi-headset"></i> Atendimento e suporte -- dúvidas, problemas e pedidos pontuais do cliente, com resposta direta em formato de conversa.</p>
         <div class="toolbar">
             <div class="toolbar-acoes">
                 <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Registrar chamado</button>
@@ -325,9 +336,8 @@ require __DIR__ . '/templates/header.php';
                 <div class="btn-group flex-wrap" role="group" id="filtroStatusChamados">
                     <button type="button" class="btn btn-sm filtro-pill filtro-todos active" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-aberto" data-filtro="aberto"><i class="bi bi-envelope-open"></i> Abertos</button>
-                    <button type="button" class="btn btn-sm filtro-pill filtro-em_andamento" data-filtro="em_andamento"><i class="bi bi-arrow-repeat"></i> Em andamento</button>
-                    <button type="button" class="btn btn-sm filtro-pill filtro-respondido" data-filtro="respondido"><i class="bi bi-reply-fill"></i> Respondidos</button>
-                    <button type="button" class="btn btn-sm filtro-pill filtro-resolvido" data-filtro="resolvido"><i class="bi bi-check-circle-fill"></i> Resolvidos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-aguardando_equipe" data-filtro="aguardando_equipe"><i class="bi bi-exclamation-circle-fill"></i> Aguardando nós</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-aguardando_cliente" data-filtro="aguardando_cliente"><i class="bi bi-hourglass-split"></i> Aguardando cliente</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-fechado" data-filtro="fechado"><i class="bi bi-x-circle"></i> Fechados</button>
                 </div>
                 <button type="button" class="btn btn-sm btn-exportar" data-bs-toggle="modal" data-bs-target="#modalExportarChamados">
@@ -349,16 +359,19 @@ require __DIR__ . '/templates/header.php';
                             ? '<span class="badge badge-origem-cliente"><i class="bi bi-person-fill"></i> Aberto pelo cliente</span>'
                             : '<span class="badge badge-origem-equipe"><i class="bi bi-headset"></i> Aberto pela equipe</span>' ?>
                     </div>
-                    <form method="post" class="d-flex align-items-center gap-1">
+                    <!-- O status "no meio" (aguardando nós / aguardando cliente) é sempre
+                         automático, calculado por quem respondeu por último -- a única
+                         ação manual que sobra é encerrar ou reabrir o chamado. -->
+                    <form method="post" class="d-inline">
                         <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="atualizar_status_chamado">
+                        <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">
                         <input type="hidden" name="aba_retorno" value="chamados">
                         <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
-                        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
-                            <?php foreach (['aberto' => 'Aberto', 'em_andamento' => 'Em andamento', 'respondido' => 'Respondido', 'resolvido' => 'Resolvido', 'fechado' => 'Fechado'] as $val => $label): ?>
-                                <option value="<?= $val ?>" <?= $c['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                        <?php if ($c['status'] === 'fechado'): ?>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
+                        <?php else: ?>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
+                        <?php endif; ?>
                     </form>
                 </div>
             </div>
@@ -405,6 +418,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- DEMANDAS -->
     <div class="tab-pane" id="demandas">
+        <p class="text-muted small mb-2"><i class="bi bi-kanban"></i> Projetos e entregas -- desenvolvimentos, implementações e melhorias planejadas, com responsável e prazo definidos.</p>
         <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovaDemanda"><i class="bi bi-plus-lg"></i> Nova demanda</button>
         </div>
@@ -573,11 +587,9 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-6"><label class="form-label">Categoria</label>
                     <select name="categoria" class="form-select">
                         <option value="">-</option>
-                        <option>Suporte técnico</option>
-                        <option>Financeiro</option>
-                        <option>Dúvida</option>
-                        <option>Solicitação</option>
-                        <option>Outro</option>
+                        <?php foreach (CATEGORIAS_CHAMADO as $cat): ?>
+                            <option><?= e($cat) ?></option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Prioridade</label>
@@ -620,9 +632,8 @@ require __DIR__ . '/templates/header.php';
                 <select name="status" id="exportarStatus" class="form-select">
                     <option value="todos">Todos</option>
                     <option value="aberto">Aberto</option>
-                    <option value="em_andamento">Em andamento</option>
-                    <option value="respondido">Respondido</option>
-                    <option value="resolvido">Resolvido</option>
+                    <option value="aguardando_equipe">Aguardando nós</option>
+                    <option value="aguardando_cliente">Aguardando cliente</option>
                     <option value="fechado">Fechado</option>
                 </select>
             </div>

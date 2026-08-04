@@ -148,6 +148,15 @@ if ($heskPdo) {
                         ]);
                         $respostasImportadas++;
                     }
+
+                    // Chamado fechado no HESK continua fechado aqui. Se não
+                    // estava fechado, recalcula o status real a partir das
+                    // respostas que acabaram de ser importadas (em vez de
+                    // deixar tudo como "aberto" mesmo quando já tinha troca
+                    // de mensagens).
+                    if (!$fechado) {
+                        recalcular_status_chamado($pdo, $novoId);
+                    }
                 }
             }
             $pdo->commit();

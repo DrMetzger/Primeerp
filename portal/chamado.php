@@ -32,10 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
         $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, ?, ?, ?)')
             ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), $mensagem]);
 
-        // Reabre o chamado se o cliente respondeu depois de já ter sido respondido/resolvido.
-        if (in_array($chamado['status'], ['respondido', 'resolvido', 'fechado'], true)) {
-            $pdo->prepare("UPDATE chamados SET status = 'em_andamento' WHERE id = ?")->execute([$chamadoId]);
-        }
+        // Recalcula o status a partir de quem respondeu por último -- se o
+        // chamado estava fechado, isso também reabre automaticamente (o
+        // cliente respondendo é sinal suficiente de que precisa reabrir).
+        recalcular_status_chamado($pdo, $chamadoId);
 
         flash_set('sucesso', 'Resposta enviada.');
     }
@@ -89,15 +89,14 @@ require __DIR__ . '/../templates/portal_header.php';
     <p class="text-muted">Nenhuma resposta ainda.</p>
 <?php endif; ?>
 
-<?php if ($chamado['status'] !== 'fechado'): ?>
-<form method="post" class="mt-3">
+<?php if ($chamado['status'] === 'fechado'): ?>
+    <p class="text-muted small mt-3 mb-1"><i class="bi bi-info-circle"></i> Este chamado está fechado. Se responder, ele é reaberto automaticamente.</p>
+<?php endif; ?>
+<form method="post" class="mt-2">
     <?= csrf_field() ?>
     <input type="hidden" name="acao" value="responder">
     <textarea name="mensagem" class="form-control mb-2" rows="3" placeholder="Escreva uma resposta..." required></textarea>
     <button type="submit" class="btn btn-dark">Enviar resposta</button>
 </form>
-<?php else: ?>
-    <p class="text-muted mt-3">Este chamado está fechado.</p>
-<?php endif; ?>
 
 <?php require __DIR__ . '/../templates/portal_footer.php'; ?>

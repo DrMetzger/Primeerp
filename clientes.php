@@ -55,7 +55,7 @@ require __DIR__ . '/templates/header.php';
         </button>
     </div>
     <div class="toolbar-filtros">
-        <input type="text" class="form-control form-control-sm" id="buscaClientes" placeholder="Buscar por nome ou contato..." style="max-width: 260px;">
+        <input type="text" class="form-control form-control-sm busca-toolbar" id="buscaClientes" placeholder="Buscar por nome ou contato...">
     </div>
 </div>
 

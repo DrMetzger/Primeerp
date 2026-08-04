@@ -94,11 +94,9 @@ require __DIR__ . '/../templates/portal_header.php';
             <div class="mb-3"><label class="form-label">Categoria</label>
                 <select name="categoria" class="form-select">
                     <option value="">Selecione (opcional)</option>
-                    <option>Suporte técnico</option>
-                    <option>Financeiro</option>
-                    <option>Dúvida</option>
-                    <option>Solicitação</option>
-                    <option>Outro</option>
+                    <?php foreach (CATEGORIAS_CHAMADO as $cat): ?>
+                        <option><?= e($cat) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="mb-3"><label class="form-label">Prioridade</label>
