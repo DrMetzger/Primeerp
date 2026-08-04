@@ -1,0 +1,14 @@
+# AdminPrime - regras de segurança básicas
+
+# Nunca servir a pasta .git (caso seja copiada por engano em algum deploy)
+RedirectMatch 404 /\.git
+
+# Bloqueia arquivos ocultos e de backup comuns
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(bak|sql|log|env)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes

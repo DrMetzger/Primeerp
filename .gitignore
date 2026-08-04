@@ -1,0 +1,5 @@
+.DS_Store
+Thumbs.db
+*.log
+/uploads/clientes/*
+!/uploads/clientes/.gitkeep

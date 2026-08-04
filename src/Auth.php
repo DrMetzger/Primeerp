@@ -1,0 +1,77 @@
+<?php
+
+namespace AdminPrime;
+
+use PDO;
+
+class Auth
+{
+    public static function attempt(PDO $pdo, string $email, string $senha): bool
+    {
+        $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE email = ? AND ativo = 1 LIMIT 1');
+        $stmt->execute([$email]);
+        $usuario = $stmt->fetch();
+
+        if (!$usuario || !password_verify($senha, $usuario['senha_hash'])) {
+            return false;
+        }
+
+        session_regenerate_id(true);
+        $_SESSION['usuario_id'] = $usuario['id'];
+        $_SESSION['usuario_nome'] = $usuario['nome'];
+        $_SESSION['usuario_perfil'] = $usuario['perfil'];
+
+        return true;
+    }
+
+    public static function logout(): void
+    {
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+        }
+        session_destroy();
+    }
+
+    public static function check(): bool
+    {
+        return isset($_SESSION['usuario_id']);
+    }
+
+    public static function isAdmin(): bool
+    {
+        return ($_SESSION['usuario_perfil'] ?? null) === 'admin';
+    }
+
+    public static function userId(): ?int
+    {
+        return $_SESSION['usuario_id'] ?? null;
+    }
+
+    public static function userName(): string
+    {
+        return $_SESSION['usuario_nome'] ?? '';
+    }
+
+    /**
+     * Redireciona para o login se não estiver autenticado. Chamar no topo de
+     * toda página protegida.
+     */
+    public static function requireLogin(): void
+    {
+        if (!self::check()) {
+            header('Location: ' . APP_BASE_PATH . '/login.php');
+            exit;
+        }
+    }
+
+    public static function requireAdmin(): void
+    {
+        self::requireLogin();
+        if (!self::isAdmin()) {
+            http_response_code(403);
+            die('Acesso restrito a administradores.');
+        }
+    }
+}
