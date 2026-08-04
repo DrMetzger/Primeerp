@@ -192,6 +192,37 @@ require __DIR__ . '/templates/header.php';
     </form>
     <?php endif; ?>
 
+    <?php if (($_GET['resumo'] ?? '') === '1'): ?>
+        <?php
+        // Resumo diagnóstico: agrupa os "sem cliente identificado" por domínio
+        // de e-mail, pra achar rapidamente clusters grandes que talvez sejam
+        // de um cliente conhecido, mas com um domínio de e-mail que não bateu
+        // com o nome cadastrado (ex.: nome do cliente com abreviação diferente
+        // do domínio real).
+        $porDominio = [];
+        foreach ($resultado['semMatch'] as $t) {
+            $dominio = strtolower(trim(strrchr($t['email'] ?? '', '@') ?: '(sem e-mail)'));
+            $porDominio[$dominio] = ($porDominio[$dominio] ?? 0) + 1;
+        }
+        arsort($porDominio);
+        ?>
+        <div class="card card-stat mb-3">
+            <div class="card-header bg-white fw-bold">
+                Domínios mais frequentes em "sem cliente identificado" (<?= count($porDominio) ?> domínios distintos)
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Domínio</th><th class="text-center">Qtde</th></tr></thead>
+                    <tbody>
+                    <?php foreach (array_slice($porDominio, 0, 40, true) as $dominio => $qtde): ?>
+                        <tr><td><?= e($dominio) ?></td><td class="text-center"><?= $qtde ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <?php
     // Busca diagnóstica opcional (?busca=texto): mostra TODOS os chamados
     // (de qualquer bucket: por cliente / sem match / ambíguo) cujo e-mail ou
