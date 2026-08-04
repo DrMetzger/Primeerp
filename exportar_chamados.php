@@ -26,11 +26,33 @@ if (!$cliente) {
 
 $statusFiltro = $_GET['status'] ?? '';
 
+// Datas vêm de <input type="date"> (formato YYYY-MM-DD) -- valida antes de
+// usar na query pra não aceitar lixo.
+function data_valida(?string $valor): ?string
+{
+    if (!$valor) {
+        return null;
+    }
+    $d = \DateTime::createFromFormat('Y-m-d', $valor);
+    return ($d && $d->format('Y-m-d') === $valor) ? $valor : null;
+}
+
+$dataDe = data_valida($_GET['data_de'] ?? null);
+$dataAte = data_valida($_GET['data_ate'] ?? null);
+
 $sql = 'SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ?';
 $params = [$clienteId];
 if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
     $sql .= ' AND c.status = ?';
     $params[] = $statusFiltro;
+}
+if ($dataDe !== null) {
+    $sql .= ' AND c.criado_em >= ?';
+    $params[] = $dataDe . ' 00:00:00';
+}
+if ($dataAte !== null) {
+    $sql .= ' AND c.criado_em <= ?';
+    $params[] = $dataAte . ' 23:59:59';
 }
 $sql .= ' ORDER BY c.criado_em DESC';
 

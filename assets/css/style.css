@@ -177,15 +177,50 @@ body {
     border-top: 1px dashed #ececf1;
 }
 
-/* Grupo de filtro por status (pills clicáveis) */
+/* Grupo de filtro por status (pills clicáveis) -- cada status tem sua própria
+   cor (a mesma da badge correspondente), pra não ficar tudo com a mesma cara
+   quando nenhum filtro em especial está ativo. */
 .filtro-pill {
     border-radius: 999px !important;
+    border: 1px solid transparent !important;
+    background-color: #f4f4f6 !important;
+    color: #52525b !important;
+    font-weight: 500;
 }
 
+.filtro-pill:hover { filter: brightness(0.96); }
+
+.filtro-pill.filtro-todos { background-color: var(--ph-neutral-bg) !important; color: var(--ph-neutral) !important; }
+.filtro-pill.filtro-aberto { background-color: var(--ph-info-bg) !important; color: var(--ph-info) !important; }
+.filtro-pill.filtro-em_andamento { background-color: #ede9fe !important; color: #6d28d9 !important; }
+.filtro-pill.filtro-respondido { background-color: #ecfeff !important; color: var(--ph-accent) !important; }
+.filtro-pill.filtro-resolvido { background-color: var(--ph-success-bg) !important; color: var(--ph-success) !important; }
+.filtro-pill.filtro-fechado { background-color: #f4f4f6 !important; color: #71717a !important; }
+
 .filtro-pill.active {
-    background-color: var(--ph-primary) !important;
     color: #fff !important;
-    border-color: var(--ph-primary) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+}
+
+.filtro-pill.filtro-todos.active { background-color: var(--ph-neutral) !important; }
+.filtro-pill.filtro-aberto.active { background-color: var(--ph-info) !important; }
+.filtro-pill.filtro-em_andamento.active { background-color: #6d28d9 !important; }
+.filtro-pill.filtro-respondido.active { background-color: var(--ph-accent) !important; }
+.filtro-pill.filtro-resolvido.active { background-color: var(--ph-success) !important; }
+.filtro-pill.filtro-fechado.active { background-color: #52525b !important; }
+
+/* Botão de exportar -- verde do Excel, propositalmente diferente das cores
+   de ação (índigo) e dos filtros, pra ficar claro que é uma ação distinta. */
+.btn-exportar {
+    background-color: #15803d !important;
+    border-color: #15803d !important;
+    color: #fff !important;
+}
+
+.btn-exportar:hover {
+    background-color: #166534 !important;
+    border-color: #166534 !important;
+    color: #fff !important;
 }
 
 /* ---- Login ---- */

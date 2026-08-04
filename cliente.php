@@ -323,16 +323,16 @@ require __DIR__ . '/templates/header.php';
             </div>
             <div class="toolbar-filtros">
                 <div class="btn-group flex-wrap" role="group" id="filtroStatusChamados">
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill active" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="aberto"><i class="bi bi-envelope-open"></i> Abertos</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="em_andamento"><i class="bi bi-arrow-repeat"></i> Em andamento</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="respondido"><i class="bi bi-reply-fill"></i> Respondidos</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="resolvido"><i class="bi bi-check-circle-fill"></i> Resolvidos</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary filtro-pill" data-filtro="fechado"><i class="bi bi-x-circle"></i> Fechados</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-todos active" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-aberto" data-filtro="aberto"><i class="bi bi-envelope-open"></i> Abertos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-em_andamento" data-filtro="em_andamento"><i class="bi bi-arrow-repeat"></i> Em andamento</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-respondido" data-filtro="respondido"><i class="bi bi-reply-fill"></i> Respondidos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-resolvido" data-filtro="resolvido"><i class="bi bi-check-circle-fill"></i> Resolvidos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-fechado" data-filtro="fechado"><i class="bi bi-x-circle"></i> Fechados</button>
                 </div>
-                <a href="<?= url('exportar_chamados.php?id=' . $clienteId) ?>" class="btn btn-sm btn-outline-dark" id="linkExportarChamados">
+                <button type="button" class="btn btn-sm btn-exportar" data-bs-toggle="modal" data-bs-target="#modalExportarChamados">
                     <i class="bi bi-file-earmark-excel"></i> Exportar
-                </a>
+                </button>
             </div>
         </div>
 
@@ -607,6 +607,40 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
+<!-- Modal Exportar Chamados -->
+<div class="modal fade" id="modalExportarChamados" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="get" action="<?= url('exportar_chamados.php') ?>" target="_blank">
+        <input type="hidden" name="id" value="<?= $clienteId ?>">
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> Exportar chamados</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3">
+                <label class="form-label">Status</label>
+                <select name="status" id="exportarStatus" class="form-select">
+                    <option value="todos">Todos</option>
+                    <option value="aberto">Aberto</option>
+                    <option value="em_andamento">Em andamento</option>
+                    <option value="respondido">Respondido</option>
+                    <option value="resolvido">Resolvido</option>
+                    <option value="fechado">Fechado</option>
+                </select>
+            </div>
+            <div class="row g-2">
+                <div class="col-6"><label class="form-label">De</label><input type="date" name="data_de" class="form-control"></div>
+                <div class="col-6"><label class="form-label">Até</label><input type="date" name="data_ate" class="form-control"></div>
+            </div>
+            <p class="text-muted small mt-2 mb-0">Deixe as datas vazias para exportar todo o período. O arquivo abre direto no Excel.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-exportar"><i class="bi bi-download"></i> Exportar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Nova Demanda -->
 <div class="modal fade" id="modalNovaDemanda" tabindex="-1">
   <div class="modal-dialog">
@@ -812,14 +846,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Filtro de chamados por status (client-side, sem recarregar a página).
     var grupoFiltro = document.getElementById('filtroStatusChamados');
-    var linkExportar = document.getElementById('linkExportarChamados');
+    var filtroAtual = 'todos';
     if (grupoFiltro) {
-        var urlExportarBase = linkExportar ? linkExportar.getAttribute('href') : '';
         grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (botao) {
             botao.addEventListener('click', function () {
                 grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (b) { b.classList.remove('active'); });
                 botao.classList.add('active');
                 var filtro = botao.getAttribute('data-filtro');
+                filtroAtual = filtro;
                 var algumVisivel = false;
                 document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
                     var mostra = (filtro === 'todos' || card.getAttribute('data-status') === filtro);
@@ -828,11 +862,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
                 var aviso = document.getElementById('avisoFiltroVazio');
                 if (aviso) aviso.classList.toggle('d-none', algumVisivel || document.querySelectorAll('#listaChamados .chamado-card').length === 0);
-                if (linkExportar && urlExportarBase) {
-                    linkExportar.setAttribute('href', filtro === 'todos' ? urlExportarBase : urlExportarBase + '&status=' + encodeURIComponent(filtro));
-                }
             });
         });
+        // Ao abrir o modal de exportar, já vem com o status do filtro ativo
+        // selecionado (mas o usuário pode trocar antes de exportar).
+        var modalExportar = document.getElementById('modalExportarChamados');
+        if (modalExportar) {
+            modalExportar.addEventListener('show.bs.modal', function () {
+                var select = document.getElementById('exportarStatus');
+                if (select) select.value = filtroAtual;
+            });
+        }
     }
 });
 </script>
