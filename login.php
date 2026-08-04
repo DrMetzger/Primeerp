@@ -36,18 +36,19 @@ $tituloPagina = 'Login';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login · AdminPrime</title>
+    <link rel="icon" type="image/webp" href="<?= url('assets/img/logo.webp') ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="<?= url('assets/css/style.css') ?>" rel="stylesheet">
 </head>
 <body class="login-wrapper">
-    <div class="card login-card shadow-lg">
+    <div class="card login-card shadow-lg overflow-hidden">
+        <div class="login-logo-wrap text-center py-4">
+            <img src="<?= url('assets/img/logo.webp') ?>" alt="PrimeERP" height="36">
+            <div class="mt-2 text-white fw-semibold">AdminPrime</div>
+            <small class="text-white-50">Gestão de clientes</small>
+        </div>
         <div class="card-body p-4">
-            <div class="text-center mb-4">
-                <i class="bi bi-kanban-fill" style="font-size: 2.5rem; color:#2c3e50;"></i>
-                <h4 class="mt-2 mb-0">AdminPrime</h4>
-                <small class="text-muted">Gestão de clientes · PrimeERP</small>
-            </div>
             <?php if ($erro): ?>
                 <div class="alert alert-danger"><?= e($erro) ?></div>
             <?php endif; ?>
