@@ -4,6 +4,7 @@ require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\Auth;
 use AdminPrime\Database;
+use AdminPrime\Notificacoes;
 
 // Aceita também o token temporário (?diag_token=...) além da sessão de admin
 // normal -- mesmo esquema usado em importar_chamados_hesk.php e
@@ -42,6 +43,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET'
     }
 }
 
+// Mesmo esquema via GET+token, agora pra ações sobre contas de portal de
+// cliente (enviar convite / desativar acesso), pra eu conseguir operar sem
+// depender de clique do Kleber.
+if ($_SERVER['REQUEST_METHOD'] === 'GET'
+    && ($_GET['confirmar'] ?? '') === 'SIM'
+    && ($_GET['diag_token'] ?? '') !== ''
+    && in_array($_GET['acao'] ?? '', ['enviar_convite_portal', 'desativar_portal_cliente'], true)
+) {
+    $clienteId = (int) ($_GET['cliente_id'] ?? 0);
+    $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
+    $stmt->execute([$clienteId]);
+    $clienteAlvo = $stmt->fetch();
+
+    if (!$clienteAlvo) {
+        $mensagemAcaoToken = ['tipo' => 'erro', 'texto' => 'Cliente não encontrado.'];
+    } elseif ($_GET['acao'] === 'enviar_convite_portal') {
+        if (!$clienteAlvo['contato_email']) {
+            $mensagemAcaoToken = ['tipo' => 'erro', 'texto' => 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.'];
+        } else {
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
+                ->execute([$clienteId, $token]);
+            Notificacoes::conviteAcessoPortal($clienteAlvo, $token);
+            $mensagemAcaoToken = ['tipo' => 'sucesso', 'texto' => 'Convite enviado para ' . $clienteAlvo['contato_email'] . '.'];
+        }
+    } else {
+        $pdo->prepare('UPDATE clientes SET portal_ativo = 0, senha_hash = NULL WHERE id = ?')->execute([$clienteId]);
+        $mensagemAcaoToken = ['tipo' => 'sucesso', 'texto' => 'Acesso ao portal desativado para ' . $clienteAlvo['nome'] . '.'];
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
     $acao = $_POST['acao'] ?? '';
@@ -76,11 +108,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($acao === 'enviar_convite_portal') {
+        $clienteId = (int) $_POST['cliente_id'];
+        $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
+        $stmt->execute([$clienteId]);
+        $clienteAlvo = $stmt->fetch();
+
+        if (!$clienteAlvo) {
+            flash_set('erro', 'Cliente não encontrado.');
+        } elseif (!$clienteAlvo['contato_email']) {
+            flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
+        } else {
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
+                ->execute([$clienteId, $token]);
+            Notificacoes::conviteAcessoPortal($clienteAlvo, $token);
+            flash_set('sucesso', 'Convite enviado para ' . $clienteAlvo['contato_email'] . '.');
+        }
+    }
+
+    if ($acao === 'desativar_portal_cliente') {
+        $clienteId = (int) $_POST['cliente_id'];
+        $pdo->prepare('UPDATE clientes SET portal_ativo = 0, senha_hash = NULL WHERE id = ?')->execute([$clienteId]);
+        flash_set('sucesso', 'Acesso ao portal desativado.');
+    }
+
     header('Location: ' . url('usuarios.php'));
     exit;
 }
 
 $usuarios = $pdo->query('SELECT * FROM usuarios ORDER BY nome ASC')->fetchAll();
+$clientesPortal = $pdo->query('SELECT id, nome, contato_nome, contato_email, portal_ativo, foto_perfil FROM clientes ORDER BY nome ASC')->fetchAll();
 
 $tituloPagina = 'Usuários';
 require __DIR__ . '/templates/header.php';
@@ -92,42 +150,99 @@ require __DIR__ . '/templates/header.php';
 
 <h4 class="mb-3">Usuários</h4>
 
-<div class="toolbar">
-    <div class="toolbar-acoes">
-        <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
-    </div>
-</div>
+<ul class="nav nav-tabs mb-3" id="usuariosTabs">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#equipe"><i class="bi bi-person-badge"></i> Equipe <span class="badge bg-secondary"><?= count($usuarios) ?></span></a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#clientes-portal"><i class="bi bi-people"></i> Clientes (portal) <span class="badge bg-secondary"><?= count($clientesPortal) ?></span></a></li>
+</ul>
 
-<div class="card card-stat">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
-            <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-            <?php foreach ($usuarios as $u): ?>
-                <tr>
-                    <td class="fw-semibold"><?= e($u['nome']) ?></td>
-                    <td><?= e($u['email']) ?></td>
-                    <td><span class="badge bg-<?= $u['perfil'] === 'admin' ? 'dark' : 'secondary' ?>"><?= $u['perfil'] === 'admin' ? 'Administrador' : 'Colaborador' ?></span></td>
-                    <td><span class="badge bg-<?= $u['ativo'] ? 'success' : 'secondary' ?>"><?= $u['ativo'] ? 'Ativo' : 'Inativo' ?></span></td>
-                    <td class="text-end">
-                        <?php if ((int)$u['id'] !== Auth::userId()): ?>
-                        <form method="post" class="d-inline">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="alternar_status">
-                            <input type="hidden" name="usuario_id" value="<?= $u['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-dark"><?= $u['ativo'] ? 'Desativar' : 'Ativar' ?></button>
-                        </form>
-                        <?php else: ?>
-                            <span class="text-muted small">(você)</span>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
+<div class="tab-content">
+
+    <div class="tab-pane show active" id="equipe">
+
+        <div class="toolbar">
+            <div class="toolbar-acoes">
+                <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
+            </div>
         </div>
+
+        <div class="card card-stat">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($usuarios as $u): ?>
+                        <tr>
+                            <td class="fw-semibold"><?= e($u['nome']) ?></td>
+                            <td><?= e($u['email']) ?></td>
+                            <td><span class="badge bg-<?= $u['perfil'] === 'admin' ? 'dark' : 'secondary' ?>"><?= $u['perfil'] === 'admin' ? 'Administrador' : 'Colaborador' ?></span></td>
+                            <td><span class="badge bg-<?= $u['ativo'] ? 'success' : 'secondary' ?>"><?= $u['ativo'] ? 'Ativo' : 'Inativo' ?></span></td>
+                            <td class="text-end">
+                                <?php if ((int)$u['id'] !== Auth::userId()): ?>
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="alternar_status">
+                                    <input type="hidden" name="usuario_id" value="<?= $u['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-dark"><?= $u['ativo'] ? 'Desativar' : 'Ativar' ?></button>
+                                </form>
+                                <?php else: ?>
+                                    <span class="text-muted small">(você)</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
     </div>
+
+    <div class="tab-pane" id="clientes-portal">
+
+        <p class="text-muted small mb-3">Contas de acesso ao portal do cliente. O cadastro do cliente em si (nome, contato, etc.) é feito em <a href="<?= url('clientes.php') ?>">Clientes</a> — aqui você controla só o acesso ao portal.</p>
+
+        <div class="card card-stat">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th></th><th>Cliente</th><th>E-mail de contato</th><th>Status do portal</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($clientesPortal as $c): ?>
+                        <tr>
+                            <td><?= avatar_html($c['nome'], $c['foto_perfil'], 'cliente') ?></td>
+                            <td class="fw-semibold"><?= e($c['nome']) ?></td>
+                            <td><?= $c['contato_email'] ? e($c['contato_email']) : '<span class="text-muted">— sem e-mail cadastrado —</span>' ?></td>
+                            <td><span class="badge bg-<?= $c['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $c['portal_ativo'] ? 'Acesso ativo' : 'Sem acesso ainda' ?></span></td>
+                            <td class="text-end">
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="enviar_convite_portal">
+                                    <input type="hidden" name="cliente_id" value="<?= $c['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-dark" <?= $c['contato_email'] ? '' : 'disabled title="Cadastre um e-mail de contato primeiro"' ?>>
+                                        <i class="bi bi-send"></i> <?= $c['portal_ativo'] ? 'Reenviar convite' : 'Enviar convite' ?>
+                                    </button>
+                                </form>
+                                <?php if ($c['portal_ativo']): ?>
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="desativar_portal_cliente">
+                                    <input type="hidden" name="cliente_id" value="<?= $c['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
+                                </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
 </div>
 
 <div class="modal fade" id="modalNovoUsuario" tabindex="-1">
