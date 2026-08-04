@@ -192,6 +192,52 @@ require __DIR__ . '/templates/header.php';
     </form>
     <?php endif; ?>
 
+    <?php
+    // Busca diagnóstica opcional (?busca=texto): mostra TODOS os chamados
+    // (de qualquer bucket: por cliente / sem match / ambíguo) cujo e-mail ou
+    // nome contenha o texto, sem o limite de 50 linhas — útil pra investigar
+    // por que um chamado caiu em "sem cliente" ou "ambíguo" antes de decidir
+    // como resolver.
+    $busca = trim($_GET['busca'] ?? '');
+    ?>
+    <?php if ($busca !== ''): ?>
+        <?php
+        $buscaNormalizada = mb_strtolower($busca, 'UTF-8');
+        $achados = array_filter($tickets, function ($t) use ($buscaNormalizada) {
+            return str_contains(mb_strtolower($t['email'] ?? '', 'UTF-8'), $buscaNormalizada)
+                || str_contains(mb_strtolower($t['name'] ?? '', 'UTF-8'), $buscaNormalizada);
+        });
+        $classificacaoPorId = [];
+        foreach ($resultado['porCliente'] as $clienteId => $ticketsDoCliente) {
+            $nomeCliente = array_values(array_filter($clientes, fn($c) => $c['id'] == $clienteId))[0]['nome'] ?? '?';
+            foreach ($ticketsDoCliente as $t) {
+                $classificacaoPorId[$t['id']] = $nomeCliente;
+            }
+        }
+        foreach ($resultado['semMatch'] as $t) {
+            $classificacaoPorId[$t['id']] = 'sem cliente identificado';
+        }
+        foreach ($resultado['ambiguos'] as $t) {
+            $classificacaoPorId[$t['id']] = 'ambíguo';
+        }
+        ?>
+        <div class="card card-stat mb-3">
+            <div class="card-header bg-white fw-bold">
+                Busca "<?= e($busca) ?>" — <?= count($achados) ?> chamado(s) encontrado(s)
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>#</th><th>E-mail</th><th>Assunto</th><th>Classificação atual</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($achados as $t): ?>
+                        <tr><td><?= $t['id'] ?></td><td><?= e($t['email']) ?></td><td><?= e($t['subject']) ?></td><td><?= e($classificacaoPorId[$t['id']] ?? '?') ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <div class="card card-stat mb-3">
         <div class="card-header bg-white fw-bold">
             Sem cliente identificado (<?= count($resultado['semMatch']) ?>)
@@ -206,7 +252,7 @@ require __DIR__ . '/templates/header.php';
                 </tbody>
             </table>
             <?php if (count($resultado['semMatch']) > 50): ?>
-                <p class="text-muted small p-2 mb-0">Mostrando 50 de <?= count($resultado['semMatch']) ?>.</p>
+                <p class="text-muted small p-2 mb-0">Mostrando 50 de <?= count($resultado['semMatch']) ?>. Use <code>&amp;busca=texto</code> na URL pra procurar em todos.</p>
             <?php endif; ?>
         </div>
     </div>
