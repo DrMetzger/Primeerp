@@ -833,10 +833,10 @@ document.addEventListener('DOMContentLoaded', function () {
     var tabLink = document.querySelector('.nav-tabs a[href="' + hash + '"]');
     var tabPane = document.querySelector(hash);
     if (tabLink && tabPane) {
-        new bootstrap.Tab(tabLink).show();
+        PrimeUI.showTab(tabLink);
     } else {
         var first = document.querySelector('.nav-tabs a');
-        if (first) new bootstrap.Tab(first).show();
+        if (first) PrimeUI.showTab(first);
     }
     document.querySelectorAll('.nav-tabs a').forEach(function (link) {
         link.addEventListener('shown.bs.tab', function (e) {
