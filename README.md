@@ -1,6 +1,6 @@
 # AdminPrime
 
-Painel interno da PrimeERP para gestão de clientes: KPIs, demandas, documentações e treinamentos.
+Desenvolvimento de Ferramentas Inteligentes — painel interno da PrimeERP para gestão de clientes: KPIs, demandas, documentações e treinamentos.
 
 ## Stack
 
