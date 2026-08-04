@@ -63,8 +63,23 @@ if ($heskPdo) {
     }
 
     // --- Ação: importar de fato ---
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'importar' && Auth::check() && Auth::isAdmin()) {
-        csrf_verify();
+    // Duas formas de disparar, ambas já passaram pelo gate no topo do arquivo
+    // (Auth::requireAdminOrTempToken): sessão de admin real via POST (botão na
+    // tela, com CSRF normal) OU o próprio token temporário via GET com uma
+    // confirmação explícita na URL (usado quando quem está operando é o
+    // Claude, que só consegue fazer requisições GET) — como a importação é
+    // idempotente (hesk_ticket_id evita duplicar), disparar mais de uma vez
+    // não tem efeito colateral.
+    $viaPost = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'importar';
+    $viaGetComToken = $_SERVER['REQUEST_METHOD'] === 'GET'
+        && ($_GET['acao'] ?? '') === 'importar'
+        && ($_GET['confirmar'] ?? '') === 'SIM'
+        && ($_GET['diag_token'] ?? '') !== '';
+
+    if ($viaPost || $viaGetComToken) {
+        if ($viaPost) {
+            csrf_verify();
+        }
 
         $mapaPrioridade = ['0' => 'urgente', '1' => 'alta', '2' => 'media', '3' => 'baixa'];
         $importados = 0;
