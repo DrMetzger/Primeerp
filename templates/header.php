@@ -7,7 +7,7 @@ use AdminPrime\Auth;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= e($tituloPagina ?? 'AdminPrime') ?> · AdminPrime</title>
+    <title><?= e($tituloPagina ?? 'Prime Hub') ?> · Prime Hub</title>
     <link rel="icon" type="image/png" href="<?= asset_url('assets/img/favicon.png') ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -18,7 +18,7 @@ use AdminPrime\Auth;
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container-fluid">
     <a class="navbar-brand d-flex align-items-center" href="<?= url('dashboard.php') ?>">
-      <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="AdminPrime · PrimeERP">
+      <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="Prime Hub · PrimeERP">
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
       <span class="navbar-toggler-icon"></span>

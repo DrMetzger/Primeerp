@@ -149,6 +149,10 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Coluna adicionada depois que a tabela chamados já existia em produção
+        // (usada para não importar o mesmo chamado do HESK duas vezes).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS hesk_ticket_id MEDIUMINT NULL COMMENT 'Origem: id do chamado no HESK, quando migrado'");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamado_respostas (
                 id INT AUTO_INCREMENT PRIMARY KEY,

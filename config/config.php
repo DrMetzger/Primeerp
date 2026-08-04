@@ -1,6 +1,6 @@
 <?php
 /**
- * Configurações da aplicação AdminPrime.
+ * Configurações da aplicação Prime Hub.
  *
  * IMPORTANTE: este arquivo fica dentro de um repositório PRIVADO e é protegido
  * por .htaccess (acesso direto via navegador é bloqueado). Ainda assim, evite
@@ -18,11 +18,12 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
     define('DB_USER', getenv('ADMINPRIME_DB_USER') ?: 'adminprime');
     define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: 'testpass123');
 
-    // Banco do HESK (helpdesk) não existe localmente ainda — deixado em branco.
-    define('HESK_DB_HOST', '');
-    define('HESK_DB_NAME', '');
-    define('HESK_DB_USER', '');
-    define('HESK_DB_PASS', '');
+    // Banco do HESK (helpdesk) — em branco por padrão localmente, mas pode
+    // ser apontado para um banco de teste via variáveis de ambiente.
+    define('HESK_DB_HOST', getenv('ADMINPRIME_HESK_DB_HOST') ?: '');
+    define('HESK_DB_NAME', getenv('ADMINPRIME_HESK_DB_NAME') ?: '');
+    define('HESK_DB_USER', getenv('ADMINPRIME_HESK_DB_USER') ?: '');
+    define('HESK_DB_PASS', getenv('ADMINPRIME_HESK_DB_PASS') ?: '');
 } else {
     // --- Configuração de PRODUÇÃO (Hostinger) ---
     define('DB_HOST', 'localhost');
@@ -39,12 +40,14 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
 
 define('DB_CHARSET', 'utf8mb4');
 
-// Nome da aplicação / URL base (ajustado para a subpasta /AdminPrime no domínio)
-define('APP_NAME', 'AdminPrime');
+// Nome da aplicação (exibido nas telas) / URL base — a pasta no domínio
+// continua se chamando /AdminPrime (é só o diretório no servidor, não muda
+// os links do portal já enviados aos clientes), mas o nome mostrado é Prime Hub.
+define('APP_NAME', 'Prime Hub');
 define('APP_BASE_PATH', $isLocal ? '' : '/AdminPrime');
 
 // Notificações por e-mail (novos chamados avisam a equipe interna)
-define('MAIL_FROM', 'AdminPrime <nao-responda@primeerp.com.br>');
+define('MAIL_FROM', 'Prime Hub <nao-responda@primeerp.com.br>');
 define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr@primeerp.com.br']);
 
 // Diretório de uploads (relativo à raiz do projeto)

@@ -17,7 +17,7 @@ class Notificacoes
             <p><strong>Título:</strong> " . e($chamado['titulo']) . "</p>
             <p><strong>Prioridade:</strong> " . e($chamado['prioridade']) . "</p>
             <p><strong>Descrição:</strong><br>" . nl2br(e($chamado['descricao'])) . "</p>
-            <p><a href=\"$link\">Ver no AdminPrime</a></p>
+            <p><a href=\"$link\">Ver no Prime Hub</a></p>
         ";
 
         foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {

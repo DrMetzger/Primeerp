@@ -1,6 +1,8 @@
-# AdminPrime
+# Prime Hub
 
-Desenvolvimento de Ferramentas Inteligentes — painel interno da PrimeERP para gestão de clientes: KPIs, demandas, documentações e treinamentos.
+Desenvolvimento de Ferramentas Inteligentes — painel interno da PrimeERP para gestão de clientes: KPIs, demandas, chamados, documentações e treinamentos.
+
+(O código fica na pasta/repositório `AdminPrime` por motivos históricos — o nome do produto mostrado nas telas é **Prime Hub**.)
 
 ## Stack
 

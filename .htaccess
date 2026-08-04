@@ -1,4 +1,4 @@
-# AdminPrime - regras de segurança básicas
+# Prime Hub - regras de segurança básicas
 
 # Nunca servir a pasta .git (caso seja copiada por engano em algum deploy)
 RedirectMatch 404 /\.git

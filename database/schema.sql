@@ -1,4 +1,4 @@
--- AdminPrime - schema de referência
+-- Prime Hub - schema de referência
 -- Este arquivo é apenas para consulta/backup manual. A aplicação cria essas
 -- tabelas automaticamente na primeira execução (ver src/Migrations.php).
 
