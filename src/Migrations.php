@@ -114,6 +114,53 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // --- Portal do cliente (login + chamados) ---
+
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS senha_hash VARCHAR(255) NULL AFTER contato_telefone");
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS portal_ativo TINYINT(1) NOT NULL DEFAULT 0 AFTER senha_hash");
+
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_senha_tokens (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                usado TINYINT(1) NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expira_em DATETIME NOT NULL,
+                CONSTRAINT fk_senha_tokens_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS chamados (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                titulo VARCHAR(200) NOT NULL,
+                descricao TEXT NOT NULL,
+                categoria VARCHAR(80) NULL,
+                status ENUM('aberto','em_andamento','respondido','resolvido','fechado') NOT NULL DEFAULT 'aberto',
+                prioridade ENUM('baixa','media','alta','urgente') NOT NULL DEFAULT 'media',
+                aberto_por ENUM('cliente','equipe') NOT NULL DEFAULT 'cliente',
+                responsavel_id INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT fk_chamados_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_chamados_responsavel FOREIGN KEY (responsavel_id) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS chamado_respostas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chamado_id INT NOT NULL,
+                autor_tipo ENUM('cliente','equipe') NOT NULL,
+                autor_nome VARCHAR(150) NOT NULL,
+                mensagem TEXT NOT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_respostas_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Usuário admin padrão, criado apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
         if ($count === 0) {

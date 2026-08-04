@@ -4,6 +4,8 @@ require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\Auth;
 use AdminPrime\Database;
+use AdminPrime\Notificacoes;
+use AdminPrime\TempAccess;
 
 Auth::requireLogin();
 
@@ -135,11 +137,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($acao === 'enviar_convite_portal') {
+        if (!$cliente['contato_email']) {
+            flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
+        } else {
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
+                ->execute([$clienteId, $token]);
+            Notificacoes::conviteAcessoPortal($cliente, $token);
+            flash_set('sucesso', 'Convite enviado para ' . $cliente['contato_email'] . '.');
+        }
+    }
+
+    if ($acao === 'criar_chamado_equipe') {
+        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([
+            $clienteId,
+            trim($_POST['titulo']),
+            trim($_POST['descricao']),
+            trim($_POST['categoria'] ?? '') ?: null,
+            $_POST['prioridade'] ?? 'media',
+            'equipe',
+            $_POST['responsavel_id'] ?: null,
+        ]);
+        flash_set('sucesso', 'Chamado registrado.');
+    }
+
+    if ($acao === 'responder_chamado') {
+        $chamadoId = (int) $_POST['chamado_id'];
+        $mensagem = trim($_POST['mensagem'] ?? '');
+
+        if ($mensagem !== '') {
+            $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, "equipe", ?, ?)')
+                ->execute([$chamadoId, Auth::userName(), $mensagem]);
+            $pdo->prepare("UPDATE chamados SET status = 'respondido' WHERE id = ? AND cliente_id = ?")
+                ->execute([$chamadoId, $clienteId]);
+
+            $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+            $chamadoAtualizado->execute([$chamadoId]);
+            Notificacoes::novaRespostaEquipe($chamadoAtualizado->fetch(), $cliente);
+
+            flash_set('sucesso', 'Resposta enviada ao cliente.');
+        }
+    }
+
+    if ($acao === 'atualizar_status_chamado') {
+        $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ? AND cliente_id = ?')
+            ->execute([$_POST['status'], (int) $_POST['chamado_id'], $clienteId]);
+        flash_set('sucesso', 'Status do chamado atualizado.');
+    }
+
     header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
     exit;
 }
 
 // --- Dados para exibição ---
+$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status NOT IN ("resolvido","fechado")) DESC, c.criado_em DESC');
+$chamados->execute([$clienteId]);
+$chamados = $chamados->fetchAll();
+
+$respostasPorChamado = [];
+if ($chamados) {
+    $ids = array_column($chamados, 'id');
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmtResp = $pdo->prepare("SELECT * FROM chamado_respostas WHERE chamado_id IN ($placeholders) ORDER BY criado_em ASC");
+    $stmtResp->execute($ids);
+    foreach ($stmtResp->fetchAll() as $r) {
+        $respostasPorChamado[$r['chamado_id']][] = $r;
+    }
+}
+
 $demandas = $pdo->prepare('SELECT d.*, u.nome AS responsavel_nome FROM demandas d LEFT JOIN usuarios u ON u.id = d.responsavel_id WHERE d.cliente_id = ? ORDER BY (d.status IN ("aberta","em_andamento")) DESC, d.prazo IS NULL, d.prazo ASC, d.criado_em DESC');
 $demandas->execute([$clienteId]);
 $demandas = $demandas->fetchAll();
@@ -171,6 +238,7 @@ require __DIR__ . '/templates/header.php';
 
 <ul class="nav nav-tabs mb-3" id="clienteTabs">
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral">Visão geral</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados">Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#demandas">Demandas <span class="badge bg-secondary"><?= count($demandas) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis">KPIs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#documentos">Documentos <span class="badge bg-secondary"><?= count($documentos) ?></span></a></li>
@@ -225,6 +293,87 @@ require __DIR__ . '/templates/header.php';
                 </form>
             </div>
         </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <strong>Portal do cliente</strong>
+                    <div class="text-muted small">
+                        <?= $cliente['portal_ativo'] ? '<span class="badge bg-success">Acesso ativo</span>' : '<span class="badge bg-secondary">Sem acesso ainda</span>' ?>
+                        — o cliente usa este e-mail e uma senha própria para acompanhar chamados.
+                    </div>
+                </div>
+                <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="enviar_convite_portal">
+                    <input type="hidden" name="aba_retorno" value="visao-geral">
+                    <button type="submit" class="btn btn-outline-dark btn-sm" <?= $cliente['contato_email'] ? '' : 'disabled' ?>>
+                        <i class="bi bi-send"></i> <?= $cliente['portal_ativo'] ? 'Reenviar convite / redefinir senha' : 'Enviar convite de acesso' ?>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAMADOS -->
+    <div class="tab-pane" id="chamados">
+        <div class="d-flex justify-content-end mb-2">
+            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Registrar chamado</button>
+        </div>
+
+        <?php foreach ($chamados as $c): ?>
+        <div class="card card-stat mb-3">
+            <div class="card-header bg-white">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <strong><?= e($c['titulo']) ?></strong>
+                        <?= badge_status_chamado($c['status']) ?>
+                        <?= badge_prioridade($c['prioridade']) ?>
+                        <?= $c['aberto_por'] === 'cliente' ? '<span class="badge bg-light text-dark border">Aberto pelo cliente</span>' : '<span class="badge bg-light text-dark border">Aberto pela equipe</span>' ?>
+                    </div>
+                    <form method="post" class="d-flex align-items-center gap-1">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="atualizar_status_chamado">
+                        <input type="hidden" name="aba_retorno" value="chamados">
+                        <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <?php foreach (['aberto' => 'Aberto', 'em_andamento' => 'Em andamento', 'respondido' => 'Respondido', 'resolvido' => 'Resolvido', 'fechado' => 'Fechado'] as $val => $label): ?>
+                                <option value="<?= $val ?>" <?= $c['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </form>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-1">Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
+                <p style="white-space: pre-wrap;"><?= e($c['descricao']) ?></p>
+
+                <?php if (!empty($respostasPorChamado[$c['id']])): ?>
+                    <hr>
+                    <?php foreach ($respostasPorChamado[$c['id']] as $r): ?>
+                        <div class="mb-2">
+                            <strong><?= e($r['autor_nome']) ?></strong>
+                            <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge bg-primary">PrimeERP</span>' : '<span class="badge bg-secondary">Cliente</span>' ?>
+                            <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
+                            <p class="mb-0" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+                <form method="post" class="mt-3">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="responder_chamado">
+                    <input type="hidden" name="aba_retorno" value="chamados">
+                    <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                    <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
+                    <button type="submit" class="btn btn-sm btn-dark">Enviar resposta</button>
+                </form>
+            </div>
+        </div>
+        <?php endforeach; ?>
+        <?php if (empty($chamados)): ?>
+            <p class="text-muted text-center py-4">Nenhum chamado registrado ainda.</p>
+        <?php endif; ?>
     </div>
 
     <!-- DEMANDAS -->
@@ -379,6 +528,56 @@ require __DIR__ . '/templates/header.php';
         </div>
     </div>
 
+</div>
+
+<!-- Modal Novo Chamado (registrado pela equipe) -->
+<div class="modal fade" id="modalNovoChamado" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="criar_chamado_equipe">
+        <input type="hidden" name="aba_retorno" value="chamados">
+        <div class="modal-header"><h5 class="modal-title">Registrar chamado</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="3" required></textarea></div>
+            <div class="row g-2">
+                <div class="col-6"><label class="form-label">Categoria</label>
+                    <select name="categoria" class="form-select">
+                        <option value="">-</option>
+                        <option>Suporte técnico</option>
+                        <option>Financeiro</option>
+                        <option>Dúvida</option>
+                        <option>Solicitação</option>
+                        <option>Outro</option>
+                    </select>
+                </div>
+                <div class="col-6"><label class="form-label">Prioridade</label>
+                    <select name="prioridade" class="form-select">
+                        <option value="baixa">Baixa</option>
+                        <option value="media" selected>Média</option>
+                        <option value="alta">Alta</option>
+                        <option value="urgente">Urgente</option>
+                    </select>
+                </div>
+                <div class="col-12"><label class="form-label">Responsável</label>
+                    <select name="responsavel_id" class="form-select">
+                        <option value="">-</option>
+                        <?php foreach ($usuarios as $u): ?>
+                            <option value="<?= $u['id'] ?>"><?= e($u['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-dark">Registrar</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <!-- Modal Nova Demanda -->

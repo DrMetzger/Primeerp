@@ -1,0 +1,94 @@
+<?php
+
+require_once __DIR__ . '/../bootstrap.php';
+
+use AdminPrime\ClienteAuth;
+use AdminPrime\Database;
+
+ClienteAuth::requireLogin();
+
+$pdo = Database::connection();
+$clienteId = ClienteAuth::clienteId();
+$chamadoId = (int) ($_GET['id'] ?? 0);
+
+$stmt = $pdo->prepare('SELECT * FROM chamados WHERE id = ? AND cliente_id = ?');
+$stmt->execute([$chamadoId, $clienteId]);
+$chamado = $stmt->fetch();
+
+if (!$chamado) {
+    http_response_code(404);
+    die('Chamado não encontrado.');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'responder') {
+    csrf_verify();
+    $mensagem = trim($_POST['mensagem'] ?? '');
+
+    if ($mensagem !== '') {
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, ?, ?, ?)')
+            ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), $mensagem]);
+
+        // Reabre o chamado se o cliente respondeu depois de já ter sido respondido/resolvido.
+        if (in_array($chamado['status'], ['respondido', 'resolvido', 'fechado'], true)) {
+            $pdo->prepare("UPDATE chamados SET status = 'em_andamento' WHERE id = ?")->execute([$chamadoId]);
+        }
+
+        flash_set('sucesso', 'Resposta enviada.');
+    }
+
+    header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));
+    exit;
+}
+
+$respostas = $pdo->prepare('SELECT * FROM chamado_respostas WHERE chamado_id = ? ORDER BY criado_em ASC');
+$respostas->execute([$chamadoId]);
+$respostas = $respostas->fetchAll();
+
+$tituloPagina = $chamado['titulo'];
+require __DIR__ . '/../templates/portal_header.php';
+?>
+
+<a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
+
+<div class="card card-stat mt-3">
+    <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><?= e($chamado['titulo']) ?></h5>
+            <?= badge_status_chamado($chamado['status']) ?>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="mb-1"><?= badge_prioridade($chamado['prioridade']) ?> <?= $chamado['categoria'] ? '<span class="badge bg-light text-dark border">' . e($chamado['categoria']) . '</span>' : '' ?></p>
+        <p class="text-muted small">Aberto em <?= formatar_data($chamado['criado_em']) ?></p>
+        <p style="white-space: pre-wrap;"><?= e($chamado['descricao']) ?></p>
+    </div>
+</div>
+
+<h6 class="mt-4 mb-2">Respostas</h6>
+<?php foreach ($respostas as $r): ?>
+    <div class="card card-stat mb-2 <?= $r['autor_tipo'] === 'equipe' ? 'border-start border-4 border-primary' : '' ?>">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between">
+                <strong><?= e($r['autor_nome']) ?> <?= $r['autor_tipo'] === 'equipe' ? '<span class="badge bg-primary">PrimeERP</span>' : '' ?></strong>
+                <small class="text-muted"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></small>
+            </div>
+            <p class="mb-0 mt-1" style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></p>
+        </div>
+    </div>
+<?php endforeach; ?>
+<?php if (empty($respostas)): ?>
+    <p class="text-muted">Nenhuma resposta ainda.</p>
+<?php endif; ?>
+
+<?php if ($chamado['status'] !== 'fechado'): ?>
+<form method="post" class="mt-3">
+    <?= csrf_field() ?>
+    <input type="hidden" name="acao" value="responder">
+    <textarea name="mensagem" class="form-control mb-2" rows="3" placeholder="Escreva uma resposta..." required></textarea>
+    <button type="submit" class="btn btn-dark">Enviar resposta</button>
+</form>
+<?php else: ?>
+    <p class="text-muted mt-3">Este chamado está fechado.</p>
+<?php endif; ?>
+
+<?php require __DIR__ . '/../templates/portal_footer.php'; ?>

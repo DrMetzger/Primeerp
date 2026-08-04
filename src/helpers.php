@@ -14,6 +14,18 @@ function url(string $path = ''): string
     return APP_BASE_PATH . '/' . ltrim($path, '/');
 }
 
+/**
+ * Igual a url(), mas acrescenta ?v=<data de modificação do arquivo> para
+ * "quebrar" o cache do navegador sempre que o arquivo mudar (evita a tela
+ * ficar com CSS/imagem antiga presa em cache depois de um deploy).
+ */
+function asset_url(string $path): string
+{
+    $caminhoFisico = __DIR__ . '/../' . ltrim($path, '/');
+    $versao = is_file($caminhoFisico) ? filemtime($caminhoFisico) : time();
+    return url($path) . '?v=' . $versao;
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf_token'])) {
@@ -67,6 +79,19 @@ function badge_status_demanda(string $status): string
         'em_andamento' => ['Em andamento', 'badge-andamento'],
         'concluida' => ['Concluída', 'badge-concluida'],
         'cancelada' => ['Cancelada', 'badge-cancelada'],
+    ];
+    [$label, $classe] = $mapa[$status] ?? [$status, ''];
+    return '<span class="badge ' . e($classe) . '">' . e($label) . '</span>';
+}
+
+function badge_status_chamado(string $status): string
+{
+    $mapa = [
+        'aberto' => ['Aberto', 'badge-aberta'],
+        'em_andamento' => ['Em andamento', 'badge-andamento'],
+        'respondido' => ['Respondido', 'badge-andamento'],
+        'resolvido' => ['Resolvido', 'badge-concluida'],
+        'fechado' => ['Fechado', 'badge-cancelada'],
     ];
     [$label, $classe] = $mapa[$status] ?? [$status, ''];
     return '<span class="badge ' . e($classe) . '">' . e($label) . '</span>';

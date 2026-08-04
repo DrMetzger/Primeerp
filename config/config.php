@@ -43,6 +43,10 @@ define('DB_CHARSET', 'utf8mb4');
 define('APP_NAME', 'AdminPrime');
 define('APP_BASE_PATH', $isLocal ? '' : '/AdminPrime');
 
+// Notificações por e-mail (novos chamados avisam a equipe interna)
+define('MAIL_FROM', 'AdminPrime <nao-responda@primeerp.com.br>');
+define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr@primeerp.com.br']);
+
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
