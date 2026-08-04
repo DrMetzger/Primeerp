@@ -1,10 +1,11 @@
 <?php
 
 /**
- * Perfil do cliente no portal: hoje só permite enviar/trocar a foto usada
- * como avatar nos chamados (chat estilo WhatsApp). Guardada fora de
- * uploads/ (que é bloqueado por .htaccess) porque a foto precisa ser
- * exibida como <img> normal pra equipe e pro próprio cliente.
+ * Perfil do cliente no portal: foto de perfil (upload próprio ou escolher
+ * um avatar pré-definido) usada como avatar nos chamados (chat estilo
+ * WhatsApp). Foto enviada é guardada fora de uploads/ (que é bloqueado por
+ * .htaccess) porque precisa ser exibida como <img> normal pra equipe e pro
+ * próprio cliente.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -63,6 +64,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atualiz
     exit;
 }
 
+// Quem não quiser subir a própria foto pode escolher um dos avatares
+// prontos (SVG hospedado no próprio site, sem depender de nenhum serviço
+// externo).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'escolher_avatar_predefinido') {
+    csrf_verify();
+    $indice = (int) ($_POST['avatar'] ?? 0);
+    if ($indice >= 1 && $indice <= QUANTIDADE_AVATARES_PREDEFINIDOS) {
+        $pdo->prepare('UPDATE clientes SET foto_perfil = ? WHERE id = ?')
+            ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $clienteId]);
+        flash_set('sucesso', 'Avatar atualizado.');
+    }
+    header('Location: ' . url('portal/perfil.php'));
+    exit;
+}
+
 $tituloPagina = 'Meu perfil';
 require __DIR__ . '/../templates/portal_header.php';
 ?>
@@ -86,6 +102,20 @@ require __DIR__ . '/../templates/portal_header.php';
             </div>
             <button type="submit" class="btn btn-dark w-100"><i class="bi bi-upload"></i> Enviar foto</button>
         </form>
+
+        <p class="text-muted small mt-4 mb-2">Não quer subir uma foto? Escolha um avatar:</p>
+        <div class="galeria-avatares mx-auto">
+            <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                <form method="post" class="d-inline">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="escolher_avatar_predefinido">
+                    <input type="hidden" name="avatar" value="<?= $i ?>">
+                    <button type="submit" class="avatar-opcao" title="Usar este avatar">
+                        <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                    </button>
+                </form>
+            <?php endfor; ?>
+        </div>
     </div>
 </div>
 

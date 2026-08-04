@@ -89,6 +89,10 @@ define('PERFIS_USUARIO', [
     'ceo' => 'CEO',
 ]);
 
+// Quantidade de avatares prontos em assets/img/avatares/ (avatar-1.svg até
+// avatar-N.svg) -- opção pra quem não quiser subir a própria foto.
+define('QUANTIDADE_AVATARES_PREDEFINIDOS', 16);
+
 // Categorias de chamado -- mesma lista de área que já existia no HESK (o
 // sistema de chamados antigo), pra manter a mesma linguagem que os clientes
 // já conhecem em vez de inventar uma nova.

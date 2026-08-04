@@ -670,6 +670,31 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     font-size: 2.2rem;
 }
 
+/* Galeria de avatares pré-definidos (escolher em vez de subir foto) */
+.galeria-avatares {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .5rem;
+    max-width: 420px;
+}
+
+.avatar-opcao {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    background: none;
+    cursor: pointer;
+    line-height: 0;
+    transition: transform .1s, border-color .1s;
+}
+
+.avatar-opcao img { width: 100%; height: 100%; border-radius: 50%; display: block; }
+
+.avatar-opcao:hover { border-color: var(--ph-primary); transform: scale(1.08); }
+
 /* Chat de chamados (estilo WhatsApp) */
 
 .chat-thread {
