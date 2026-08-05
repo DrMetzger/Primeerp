@@ -142,6 +142,18 @@ class Migrations
         // cards com o logo de cada empresa em vez de tabela simples.
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo VARCHAR(255) NULL COMMENT 'Caminho do logo da empresa cliente, relativo à raiz do projeto' AFTER foto_perfil");
 
+        // Backup dos BYTES de cada foto/logo enviado por upload, guardado no
+        // próprio banco -- ver restaurarUploadsPerdidos() abaixo. O
+        // .gitignore já impede o GIT de apagar assets/avatars/ num deploy,
+        // mas isso não protege contra o próprio mecanismo de deploy do
+        // Hostinger recriar a pasta do zero (clone limpo/"reimplantar"), que
+        // não respeita .gitignore porque nem passa pelo git no destino. Com
+        // os bytes também no banco, o arquivo que desaparecer do disco volta
+        // sozinho na primeira requisição seguinte, sem precisar reenviar.
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_perfil_dados LONGBLOB NULL COMMENT 'Cópia dos bytes de foto_perfil, pra restaurar o arquivo se o deploy apagar assets/avatars/' AFTER foto_perfil");
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS foto_perfil_dados LONGBLOB NULL COMMENT 'Cópia dos bytes de foto_perfil, mesmo motivo de usuarios.foto_perfil_dados' AFTER foto_perfil");
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo_dados LONGBLOB NULL COMMENT 'Cópia dos bytes de logo, mesmo motivo de usuarios.foto_perfil_dados' AFTER logo");
+
         // CPF ou RG do contato -- pedido do Kleber depois de um cliente ter
         // aberto 37 chamados de madrugada de forma abusiva: quer um
         // documento com foto vinculado a cada contato, pra ter
@@ -312,10 +324,58 @@ class Migrations
             }
         }
 
+        // Restaura ANTES de limparReferenciasQuebradas() -- se o arquivo
+        // conseguir ser recriado a partir do backup no banco, não sobra
+        // "referência quebrada" nenhuma pra limpar.
+        self::restaurarUploadsPerdidos($pdo);
         self::limparReferenciasQuebradas($pdo);
         self::atribuirAvatarPadrao($pdo);
         self::vincularAutorRespostasAntigas($pdo);
         self::atribuirResponsavelPadrao($pdo);
+    }
+
+    /**
+     * Recria em disco (assets/avatars/) qualquer foto/logo enviado por
+     * upload que tenha desaparecido -- ex.: depois de um deploy que recriou
+     * a pasta do zero -- usando o backup dos bytes guardado no banco (ver
+     * colunas *_dados, preenchidas em perfil.php, portal/perfil.php e
+     * processar_upload_logo_cliente() no momento do upload). Roda em toda
+     * requisição, mas só lê o BLOB (potencialmente grande) do banco quando o
+     * arquivo realmente estiver faltando -- na maioria das requisições, só
+     * confere se o caminho existe no disco, sem tocar na coluna de bytes.
+     * Avatar pré-definido (assets/img/avatares/*.svg) não passa por aqui --
+     * é arquivo versionado no próprio código, nunca depende de upload.
+     */
+    private static function restaurarUploadsPerdidos(PDO $pdo): void
+    {
+        $raiz = __DIR__ . '/..';
+        foreach ([
+            ['usuarios', 'foto_perfil', 'foto_perfil_dados'],
+            ['clientes', 'foto_perfil', 'foto_perfil_dados'],
+            ['clientes', 'logo', 'logo_dados'],
+        ] as [$tabela, $colunaCaminho, $colunaDados]) {
+            $linhas = $pdo->query("SELECT id, $colunaCaminho AS caminho FROM $tabela WHERE $colunaCaminho IS NOT NULL AND $colunaDados IS NOT NULL")->fetchAll();
+            foreach ($linhas as $linha) {
+                if (!str_starts_with($linha['caminho'], 'assets/avatars/')) {
+                    continue;
+                }
+                $caminhoFisico = $raiz . '/' . $linha['caminho'];
+                if (is_file($caminhoFisico)) {
+                    continue;
+                }
+                $stmtDados = $pdo->prepare("SELECT $colunaDados FROM $tabela WHERE id = ?");
+                $stmtDados->execute([$linha['id']]);
+                $dados = $stmtDados->fetchColumn();
+                if ($dados === false || $dados === null) {
+                    continue;
+                }
+                $dir = dirname($caminhoFisico);
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0755, true);
+                }
+                file_put_contents($caminhoFisico, $dados);
+            }
+        }
     }
 
     /**

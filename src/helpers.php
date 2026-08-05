@@ -229,8 +229,9 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
         // no CSS) -- usa o dobro pra ficar nítido em tela retina/HiDPI, sem
         // deixar o arquivo do tamanho de uma foto de celular.
         redimensionar_imagem_se_necessario($caminhoDestino, $mime, 480, 184);
-        $pdo->prepare('UPDATE clientes SET logo = ? WHERE id = ?')
-            ->execute(['assets/avatars/' . $nomeArquivo, $clienteId]);
+        // Backup dos bytes no banco -- ver Migrations::restaurarUploadsPerdidos().
+        $pdo->prepare('UPDATE clientes SET logo = ?, logo_dados = ? WHERE id = ?')
+            ->execute(['assets/avatars/' . $nomeArquivo, file_get_contents($caminhoDestino), $clienteId]);
     }
 
     return null;

@@ -93,8 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
                         redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
                         $novoCaminho = 'assets/avatars/' . $nomeArquivo;
-                        $pdo->prepare('UPDATE usuarios SET foto_perfil = ? WHERE id = ?')
-                            ->execute([$novoCaminho, $usuarioId]);
+                        // Backup dos bytes no banco -- ver Migrations::restaurarUploadsPerdidos().
+                        $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
+                            ->execute([$novoCaminho, file_get_contents($caminhoDestino), $usuarioId]);
                         $_SESSION['usuario_foto'] = $novoCaminho;
                         flash_set('sucesso', 'Foto de perfil atualizada.');
                     } else {
@@ -109,7 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $indice = (int) ($_POST['avatar'] ?? 0);
         if ($indice >= 1 && $indice <= QUANTIDADE_AVATARES_PREDEFINIDOS) {
             $novoCaminho = 'assets/img/avatares/avatar-' . $indice . '.svg';
-            $pdo->prepare('UPDATE usuarios SET foto_perfil = ? WHERE id = ?')
+            // Avatar pré-definido é arquivo versionado no código -- zera o backup
+            // de bytes de uma foto enviada antes, que não serve mais pra nada.
+            $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
                 ->execute([$novoCaminho, $usuarioId]);
             $_SESSION['usuario_foto'] = $novoCaminho;
             flash_set('sucesso', 'Avatar atualizado.');
