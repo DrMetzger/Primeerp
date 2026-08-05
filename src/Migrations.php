@@ -135,6 +135,12 @@ class Migrations
 
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS senha_hash VARCHAR(255) NULL AFTER contato_telefone");
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS portal_ativo TINYINT(1) NOT NULL DEFAULT 0 AFTER senha_hash");
+        // Libera ALGUNS clientes (pedido pontual do Kleber) a usar o portal
+        // fora do horário comercial (ver PORTAL_CLIENTE_HORARIO_INICIO/FIM em
+        // config.php e ClienteAuth::bloquearForaDoHorario()) -- desligado por
+        // padrão pra todo mundo continuar caindo na regra normal, só quem for
+        // marcado explicitamente aqui ganha a exceção.
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS acesso_fora_horario TINYINT(1) NOT NULL DEFAULT 0 AFTER portal_ativo");
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS foto_perfil VARCHAR(255) NULL COMMENT 'Caminho da foto de perfil enviada pelo cliente, relativo à raiz do projeto' AFTER portal_ativo");
 
         // Logo da EMPRESA cliente (diferente da foto_perfil, que é a foto do

@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             $_POST['status'],
@@ -36,6 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             apenas_digitos($_POST['contato_telefone'] ?? ''),
             normalizar_documento($_POST['contato_documento'] ?? ''),
             trim($_POST['observacoes']) ?: null,
+            isset($_POST['acesso_fora_horario']) ? 1 : 0,
             $clienteId,
         ]);
 
@@ -459,6 +460,14 @@ require __DIR__ . '/templates/header.php';
                         <div class="col-12">
                             <label class="form-label">Observações</label>
                             <textarea name="observacoes" class="form-control" rows="4"><?= e($cliente['observacoes']) ?></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" name="acesso_fora_horario" id="acessoForaHorario" class="form-check-input" value="1" <?= $cliente['acesso_fora_horario'] ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="acessoForaHorario">
+                                    Liberar acesso ao portal fora do horário comercial (<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?>–<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?>) pra esse cliente
+                                </label>
+                            </div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3">Salvar alterações</button>

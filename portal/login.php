@@ -5,7 +5,12 @@ require_once __DIR__ . '/../bootstrap.php';
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
 
-ClienteAuth::bloquearForaDoHorario();
+// Não bloqueia a TELA de login em si (não dá pra saber ainda quem está
+// tentando entrar, e alguns clientes têm liberação pra usar fora do
+// horário -- ver clientes.acesso_fora_horario). O horário é conferido
+// dentro de ClienteAuth::attempt(), depois de confirmar as credenciais.
+// Já quem está com sessão aberta (chamados.php, chamado.php etc.) continua
+// batendo em requireLogin() -> bloquearForaDoHorario() normalmente.
 
 if (ClienteAuth::check()) {
     header('Location: ' . url('portal/chamados.php'));
@@ -50,6 +55,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <small class="text-white-50">Acompanhe seus chamados</small>
         </div>
         <div class="card-body p-4">
+            <?php if (!ClienteAuth::dentroHorarioComercial()): ?>
+                <div class="alert alert-warning small">
+                    <i class="bi bi-clock-history"></i> Fora do horário comercial (<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?> às <?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?>).
+                    Só entra quem tem liberação especial.
+                </div>
+            <?php endif; ?>
             <?php if ($erro): ?>
                 <div class="alert alert-danger"><?= e($erro) ?></div>
             <?php endif; ?>

@@ -20,6 +20,15 @@ class ClienteAuth
             return false;
         }
 
+        // Fora do horário comercial, só entra quem tem a liberação especial
+        // (clientes.acesso_fora_horario) -- credenciais certas mas sem
+        // liberação caem na mesma mensagem genérica de "e-mail ou senha
+        // inválidos" em login.php, sem entrar em detalhe do motivo (não é
+        // informação sensível o suficiente pra abrir uma exceção de UX aqui).
+        if (!self::dentroHorarioComercial() && !$cliente['acesso_fora_horario']) {
+            return false;
+        }
+
         session_regenerate_id(true);
         $_SESSION['portal_cliente_id'] = $cliente['id'];
         // "Nome" aqui é da PESSOA (contato/key user), não da empresa -- o
@@ -115,9 +124,27 @@ class ClienteAuth
         return $hora >= PORTAL_CLIENTE_HORARIO_INICIO && $hora < PORTAL_CLIENTE_HORARIO_FIM;
     }
 
+    /**
+     * Cliente com liberação especial (marcada em cliente.php/clientes.php,
+     * ver acao=atualizar_cliente) pode usar o portal fora do horário
+     * comercial normal -- pedido pontual do Kleber pra alguns clientes.
+     * SEMPRE busca no banco (mesmo motivo de clienteFoto()/userFoto(): não
+     * cachear em sessão, senão uma liberação dada/tirada só valeria a partir
+     * do próximo login).
+     */
+    public static function podeAcessarForaDoHorario(): bool
+    {
+        if (!self::check()) {
+            return false;
+        }
+        $stmt = Database::connection()->prepare('SELECT acesso_fora_horario FROM clientes WHERE id = ?');
+        $stmt->execute([self::clienteId()]);
+        return (bool) $stmt->fetchColumn();
+    }
+
     public static function bloquearForaDoHorario(): void
     {
-        if (self::dentroHorarioComercial()) {
+        if (self::dentroHorarioComercial() || self::podeAcessarForaDoHorario()) {
             return;
         }
 

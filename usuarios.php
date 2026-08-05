@@ -245,7 +245,7 @@ $usuarios = $pdo->query("
     FROM usuarios u
     ORDER BY u.nome ASC
 ")->fetchAll();
-$clientesPortal = $pdo->query('SELECT id, nome, contato_nome, contato_email, portal_ativo, foto_perfil FROM clientes ORDER BY nome ASC')->fetchAll();
+$clientesPortal = $pdo->query('SELECT id, nome, contato_nome, contato_email, portal_ativo, foto_perfil, acesso_fora_horario FROM clientes ORDER BY nome ASC')->fetchAll();
 
 $tituloPagina = 'Usuários';
 require __DIR__ . '/templates/header.php';
@@ -329,7 +329,12 @@ require __DIR__ . '/templates/header.php';
                             <td><?= avatar_html($c['nome'], $c['foto_perfil'], 'cliente') ?></td>
                             <td class="fw-semibold"><?= e($c['nome']) ?></td>
                             <td><?= $c['contato_email'] ? e($c['contato_email']) : '<span class="text-muted">— sem e-mail cadastrado —</span>' ?></td>
-                            <td><span class="badge bg-<?= $c['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $c['portal_ativo'] ? 'Acesso ativo' : 'Sem acesso ainda' ?></span></td>
+                            <td>
+                                <span class="badge bg-<?= $c['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $c['portal_ativo'] ? 'Acesso ativo' : 'Sem acesso ainda' ?></span>
+                                <?php if ($c['acesso_fora_horario']): ?>
+                                    <span class="badge bg-dark" title="Pode usar o portal fora do horário comercial"><i class="bi bi-clock-history"></i> 24h</span>
+                                <?php endif; ?>
+                            </td>
                             <td class="text-end">
                                 <form method="post" class="d-inline">
                                     <?= csrf_field() ?>
