@@ -50,8 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atualiz
                 }
                 $nomeArquivo = 'cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
                 if (move_uploaded_file($arquivo['tmp_name'], $dirAvatares . '/' . $nomeArquivo)) {
+                    $novoCaminho = 'assets/avatars/' . $nomeArquivo;
                     $pdo->prepare('UPDATE clientes SET foto_perfil = ? WHERE id = ?')
-                        ->execute(['assets/avatars/' . $nomeArquivo, $clienteId]);
+                        ->execute([$novoCaminho, $clienteId]);
+                    $_SESSION['portal_cliente_foto'] = $novoCaminho;
                     flash_set('sucesso', 'Foto de perfil atualizada.');
                 } else {
                     flash_set('erro', 'Não foi possível salvar a imagem no servidor.');
@@ -71,8 +73,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'escolhe
     csrf_verify();
     $indice = (int) ($_POST['avatar'] ?? 0);
     if ($indice >= 1 && $indice <= QUANTIDADE_AVATARES_PREDEFINIDOS) {
+        $novoCaminho = 'assets/img/avatares/avatar-' . $indice . '.svg';
         $pdo->prepare('UPDATE clientes SET foto_perfil = ? WHERE id = ?')
-            ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $clienteId]);
+            ->execute([$novoCaminho, $clienteId]);
+        $_SESSION['portal_cliente_foto'] = $novoCaminho;
         flash_set('sucesso', 'Avatar atualizado.');
     }
     header('Location: ' . url('portal/perfil.php'));

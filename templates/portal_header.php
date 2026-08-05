@@ -27,9 +27,9 @@ use AdminPrime\ClienteAuth;
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/perfil.php') ?>"><i class="bi bi-person-circle"></i> Meu Perfil</a></li>
       </ul>
-      <span class="navbar-text text-light me-3">
-        <i class="bi bi-person-circle"></i> <?= e(ClienteAuth::clienteNome()) ?>
-      </span>
+      <a href="<?= url('portal/perfil.php') ?>" class="navbar-text text-light me-3 d-flex align-items-center gap-2">
+        <?= avatar_html(ClienteAuth::clienteNome(), ClienteAuth::clienteFoto(), 'cliente') ?> <?= e(ClienteAuth::clienteNome()) ?>
+      </a>
       <a href="<?= url('portal/logout.php') ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-right"></i> Sair</a>
     </div>
   </div>

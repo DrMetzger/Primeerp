@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <circle cx="50" cy="50" r="50" fill="#b91c1c"/>
-  <circle cx="50" cy="40" r="18" fill="#ffffff" fill-opacity="0.92"/>
-  <path d="M50 62c-19 0-32 11-32 24v14h64V86c0-13-13-24-32-24z" fill="#ffffff" fill-opacity="0.92"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="#18181b"/>
+    <ellipse cx="50" cy="58" rx="27" ry="26" fill="#27272a"/>
+    <rect x="20" y="48" width="60" height="16" fill="#0a0a0a"/>
+    <ellipse cx="40" cy="56" rx="4.2" ry="5.2" fill="#fafafa"/>
+    <ellipse cx="60" cy="56" rx="4.2" ry="5.2" fill="#fafafa"/>
+    <circle cx="40" cy="57" r="2" fill="#1c1917"/>
+    <circle cx="60" cy="57" r="2" fill="#1c1917"/>
+    <polygon points="10,44 24,50 24,38" fill="#dc2626"/>
 </svg>

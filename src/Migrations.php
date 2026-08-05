@@ -198,6 +198,12 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Qual usuário da equipe (id) escreveu a resposta -- antes só se
+        // guardava o nome em texto (autor_nome), então não tinha como saber
+        // a foto/avatar de quem respondeu pra mostrar no chat. Respostas
+        // antigas (e as importadas do HESK) ficam com NULL, cai pra inicial.
+        $pdo->exec("ALTER TABLE chamado_respostas ADD COLUMN IF NOT EXISTS autor_usuario_id INT NULL AFTER autor_nome");
+
         // Anexos de chamado -- podem vir da mensagem de abertura (resposta_id
         // NULL) ou de qualquer resposta, tanto do cliente (portal) quanto da
         // equipe (cliente.php), além do futuro formulário público sem login

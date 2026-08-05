@@ -20,6 +20,7 @@ class Auth
         $_SESSION['usuario_id'] = $usuario['id'];
         $_SESSION['usuario_nome'] = $usuario['nome'];
         $_SESSION['usuario_perfil'] = $usuario['perfil'];
+        $_SESSION['usuario_foto'] = $usuario['foto_perfil'] ?? null;
 
         return true;
     }
@@ -56,6 +57,25 @@ class Auth
     public static function userName(): string
     {
         return $_SESSION['usuario_nome'] ?? '';
+    }
+
+    /**
+     * Caminho da foto/avatar do usuário logado (ou null = cai pro círculo
+     * com a inicial do nome em avatar_html()). Atualizado na sessão sempre
+     * que o usuário troca a foto em perfil.php, pra refletir na hora sem
+     * precisar deslogar. Sessões abertas ANTES desse campo existir não têm
+     * a chave -- nesse caso busca uma vez no banco e guarda na sessão, pra
+     * não obrigar todo mundo a deslogar/logar de novo depois do deploy.
+     */
+    public static function userFoto(): ?string
+    {
+        if (!array_key_exists('usuario_foto', $_SESSION) && self::check()) {
+            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM usuarios WHERE id = ?');
+            $stmt->execute([self::userId()]);
+            $_SESSION['usuario_foto'] = $stmt->fetchColumn() ?: null;
+        }
+
+        return $_SESSION['usuario_foto'] ?? null;
     }
 
     /**

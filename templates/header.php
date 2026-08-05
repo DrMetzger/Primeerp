@@ -33,8 +33,8 @@ use AdminPrime\Auth;
         <li class="nav-item"><a class="nav-link" href="<?= url('usuarios.php') ?>"><i class="bi bi-person-gear"></i> Usuários</a></li>
         <?php endif; ?>
       </ul>
-      <a href="<?= url('perfil.php') ?>" class="navbar-text text-light me-3">
-        <i class="bi bi-person-circle"></i> <?= e(Auth::userName()) ?>
+      <a href="<?= url('perfil.php') ?>" class="navbar-text text-light me-3 d-flex align-items-center gap-2">
+        <?= avatar_html(Auth::userName(), Auth::userFoto(), 'equipe') ?> <?= e(Auth::userName()) ?>
       </a>
       <a href="<?= url('logout.php') ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-right"></i> Sair</a>
     </div>

@@ -11,7 +11,7 @@ $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
 $chamadoId = (int) ($_GET['id'] ?? 0);
 
-$stmt = $pdo->prepare('SELECT * FROM chamados WHERE id = ? AND cliente_id = ?');
+$stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ?');
 $stmt->execute([$chamadoId, $clienteId]);
 $chamado = $stmt->fetch();
 
@@ -33,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
         $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, ?, ?, ?)')
             ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
         $respostaId = (int) $pdo->lastInsertId();
+        // (Cliente não tem usuario_id de equipe -- autor_usuario_id fica NULL aqui, o que é correto.)
 
         $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'cliente');
 
@@ -61,14 +62,28 @@ foreach ($stmtAnexos->fetchAll() as $a) {
     $anexosPorLinha[$chave][] = $a;
 }
 
+// Foto de cada membro da equipe que respondeu -- mesma ideia de cliente.php:
+// antes só se sabia o NOME (autor_nome, texto solto), nunca a foto de qual
+// usuário era, então toda resposta da equipe caía na inicial genérica.
+$idsAutoresEquipe = array_unique(array_filter(array_column($respostas, 'autor_usuario_id')));
+$fotoPorUsuarioId = [];
+if ($idsAutoresEquipe) {
+    $placeholdersUsuarios = implode(',', array_fill(0, count($idsAutoresEquipe), '?'));
+    $stmtFotos = $pdo->prepare("SELECT id, foto_perfil FROM usuarios WHERE id IN ($placeholdersUsuarios)");
+    $stmtFotos->execute(array_values($idsAutoresEquipe));
+    foreach ($stmtFotos->fetchAll() as $u) {
+        $fotoPorUsuarioId[$u['id']] = $u['foto_perfil'];
+    }
+}
+
 // Normaliza a mensagem de abertura + as respostas num único formato, igual
 // ao que já é feito em cliente.php -- antes a mensagem de abertura ficava
 // fora do chat, sem bolha, cor ou nome de contato.
 $linhasChat = [];
 $linhasChat[] = [
     'autor_tipo' => $chamado['aberto_por'] === 'equipe' ? 'equipe' : 'cliente',
-    'autor_nome' => $chamado['aberto_por'] === 'equipe' ? 'Equipe PrimeERP' : ClienteAuth::clienteNome(),
-    'foto' => $chamado['aberto_por'] === 'equipe' ? null : $fotoPerfilCliente,
+    'autor_nome' => $chamado['aberto_por'] === 'equipe' ? ($chamado['responsavel_nome'] ?: 'Equipe PrimeERP') : ClienteAuth::clienteNome(),
+    'foto' => $chamado['aberto_por'] === 'equipe' ? ($chamado['responsavel_foto'] ?? null) : $fotoPerfilCliente,
     'mensagem' => $chamado['descricao'],
     'criado_em' => $chamado['criado_em'],
     'anexos' => $anexosPorLinha['abertura'] ?? [],
@@ -77,7 +92,9 @@ foreach ($respostas as $r) {
     $linhasChat[] = [
         'autor_tipo' => $r['autor_tipo'],
         'autor_nome' => $r['autor_nome'],
-        'foto' => $r['autor_tipo'] === 'cliente' ? $fotoPerfilCliente : null,
+        'foto' => $r['autor_tipo'] === 'cliente'
+            ? $fotoPerfilCliente
+            : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? null),
         'mensagem' => $r['mensagem'],
         'criado_em' => $r['criado_em'],
         'anexos' => $anexosPorLinha[$r['id']] ?? [],

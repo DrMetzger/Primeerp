@@ -169,8 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
 
         if ($mensagem !== '' || $temAnexo) {
-            $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, "equipe", ?, ?)')
-                ->execute([$chamadoId, Auth::userName(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+            $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
+                ->execute([$chamadoId, Auth::userName(), Auth::userId(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
             $respostaId = (int) $pdo->lastInsertId();
 
             $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'equipe');
@@ -206,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // --- Dados para exibição ---
-$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status = "fechado") ASC, (c.status = "aguardando_equipe") DESC, c.criado_em DESC');
+$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status = "fechado") ASC, (c.status = "aguardando_equipe") DESC, c.criado_em DESC');
 $chamados->execute([$clienteId]);
 $chamados = $chamados->fetchAll();
 
@@ -235,13 +235,29 @@ if ($chamados) {
         $anexosPorChamado[$a['chamado_id']][$chave][] = $a;
     }
 
+    // Foto de cada membro da equipe que respondeu -- antes o chat só sabia o
+    // NOME de quem respondeu (autor_nome, texto solto), sem saber a foto de
+    // qual usuário era, então toda resposta da equipe caía na inicial "K"
+    // genérica. Respostas antigas/importadas do HESK não têm
+    // autor_usuario_id (NULL) e continuam caindo na inicial, sem problema.
+    $idsAutoresEquipe = array_unique(array_filter(array_column($respostasPorChamado ? array_merge(...array_values($respostasPorChamado)) : [], 'autor_usuario_id')));
+    $fotoPorUsuarioId = [];
+    if ($idsAutoresEquipe) {
+        $placeholdersUsuarios = implode(',', array_fill(0, count($idsAutoresEquipe), '?'));
+        $stmtFotos = $pdo->prepare("SELECT id, foto_perfil FROM usuarios WHERE id IN ($placeholdersUsuarios)");
+        $stmtFotos->execute(array_values($idsAutoresEquipe));
+        foreach ($stmtFotos->fetchAll() as $u) {
+            $fotoPorUsuarioId[$u['id']] = $u['foto_perfil'];
+        }
+    }
+
     foreach ($chamados as $c) {
         $linhas = [];
 
         if ($c['aberto_por'] === 'equipe') {
             $autorTipo = 'equipe';
             $nomeAutor = $c['responsavel_nome'] ?: 'Equipe PrimeERP';
-            $foto = null;
+            $foto = $c['responsavel_foto'] ?? null;
         } elseif ($c['aberto_por'] === 'publico') {
             $autorTipo = 'cliente';
             $nomeAutor = $c['contato_nome_publico'] ?: ($c['empresa_informada'] ?: 'Cliente');
@@ -265,7 +281,9 @@ if ($chamados) {
             $linhas[] = [
                 'autor_tipo' => $r['autor_tipo'],
                 'autor_nome' => $r['autor_nome'],
-                'foto' => $r['autor_tipo'] === 'cliente' ? ($cliente['foto_perfil'] ?? null) : null,
+                'foto' => $r['autor_tipo'] === 'cliente'
+                    ? ($cliente['foto_perfil'] ?? null)
+                    : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? null),
                 'mensagem' => $r['mensagem'],
                 'criado_em' => $r['criado_em'],
                 'anexos' => $anexosPorChamado[$c['id']][$r['id']] ?? [],

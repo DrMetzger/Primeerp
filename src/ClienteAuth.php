@@ -24,6 +24,7 @@ class ClienteAuth
         $_SESSION['portal_cliente_id'] = $cliente['id'];
         $_SESSION['portal_cliente_nome'] = $cliente['nome'];
         $_SESSION['portal_cliente_email'] = $cliente['contato_email'];
+        $_SESSION['portal_cliente_foto'] = $cliente['foto_perfil'] ?? null;
 
         return true;
     }
@@ -46,6 +47,24 @@ class ClienteAuth
     public static function clienteNome(): string
     {
         return $_SESSION['portal_cliente_nome'] ?? '';
+    }
+
+    /**
+     * Caminho da foto/avatar do cliente logado no portal (ou null = cai
+     * pro círculo com a inicial do nome). Atualizado sempre que o cliente
+     * troca a foto em portal/perfil.php. Sessões abertas antes desse campo
+     * existir buscam uma vez no banco e guardam na sessão (sem precisar
+     * deslogar/logar de novo depois do deploy).
+     */
+    public static function clienteFoto(): ?string
+    {
+        if (!array_key_exists('portal_cliente_foto', $_SESSION) && self::check()) {
+            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+            $stmt->execute([self::clienteId()]);
+            $_SESSION['portal_cliente_foto'] = $stmt->fetchColumn() ?: null;
+        }
+
+        return $_SESSION['portal_cliente_foto'] ?? null;
     }
 
     public static function requireLogin(): void
