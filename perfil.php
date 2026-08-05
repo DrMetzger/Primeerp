@@ -89,7 +89,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         @unlink($antigo);
                     }
                     $nomeArquivo = 'usuario_' . $usuarioId . '.' . $tiposPermitidos[$mime];
-                    if (move_uploaded_file($arquivo['tmp_name'], $dirAvatares . '/' . $nomeArquivo)) {
+                    $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
+                    if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+                        redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
                         $novoCaminho = 'assets/avatars/' . $nomeArquivo;
                         $pdo->prepare('UPDATE usuarios SET foto_perfil = ? WHERE id = ?')
                             ->execute([$novoCaminho, $usuarioId]);

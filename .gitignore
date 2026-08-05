@@ -5,3 +5,14 @@ Thumbs.db
 !/uploads/clientes/.gitkeep
 /uploads/chamados/*
 !/uploads/chamados/.gitkeep
+
+# Fotos de perfil (equipe/cliente) e logos de empresa enviados pelos
+# próprios usuários -- NÃO são código, são dados. Precisam sobreviver ao
+# deploy automático (git pull/checkout no Hostinger), senão toda vez que
+# a gente sobe uma alteração de código o deploy também apaga essas fotos
+# e logos do disco (o arquivo nunca esteve versionado, então um checkout
+# limpo do repositório os remove). Mesmo esquema já usado com sucesso pra
+# /uploads/clientes e /uploads/chamados acima.
+/assets/avatars/*
+!/assets/avatars/.htaccess
+!/assets/avatars/.gitkeep

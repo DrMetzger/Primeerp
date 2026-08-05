@@ -49,7 +49,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atualiz
                     @unlink($antigo);
                 }
                 $nomeArquivo = 'cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
-                if (move_uploaded_file($arquivo['tmp_name'], $dirAvatares . '/' . $nomeArquivo)) {
+                $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
+                if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+                    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
                     $novoCaminho = 'assets/avatars/' . $nomeArquivo;
                     $pdo->prepare('UPDATE clientes SET foto_perfil = ? WHERE id = ?')
                         ->execute([$novoCaminho, $clienteId]);

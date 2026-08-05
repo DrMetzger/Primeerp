@@ -372,7 +372,7 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="aba_retorno" value="visao-geral">
                     <div class="row g-3">
                         <div class="col-12 d-flex align-items-center gap-3">
-                            <?php if ($cliente['logo']): ?>
+                            <?php if (arquivo_publico_existe($cliente['logo'])): ?>
                                 <img src="<?= e(asset_url($cliente['logo'])) ?>" alt="Logo" class="logo-preview-alterar">
                             <?php else: ?>
                                 <div class="logo-preview-alterar logo-preview-vazio"><i class="bi bi-building"></i></div>
@@ -380,7 +380,8 @@ require __DIR__ . '/templates/header.php';
                             <div class="flex-grow-1">
                                 <label class="form-label mb-1">Logo da empresa</label>
                                 <input type="file" name="logo" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/svg+xml">
-                                <small class="text-muted">PNG, JPG, WEBP ou SVG, até 5MB.</small>
+                                <small class="text-muted">PNG, JPG, WEBP ou SVG, até 5MB. A imagem é redimensionada automaticamente pro tamanho ideal do card.</small>
+                                <button type="submit" class="btn btn-sm btn-outline-dark mt-2"><i class="bi bi-upload"></i> Enviar logo</button>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -486,7 +487,7 @@ require __DIR__ . '/templates/header.php';
                     <!-- O status "no meio" (aguardando nós / aguardando cliente) é sempre
                          automático, calculado por quem respondeu por último -- a única
                          ação manual que sobra é encerrar ou reabrir o chamado. -->
-                    <div class="d-flex gap-2">
+                    <div class="chamado-acoes">
                         <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
                         <form method="post" class="d-inline">
                             <?= csrf_field() ?>

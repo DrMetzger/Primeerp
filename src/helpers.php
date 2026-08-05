@@ -26,6 +26,22 @@ function asset_url(string $path): string
     return url($path) . '?v=' . $versao;
 }
 
+/**
+ * Confere se um caminho relativo (guardado no banco, tipo
+ * "assets/avatars/logo_cliente_3.png") existe de fato no disco. Usado
+ * antes de desenhar um <img> pra foto/logo enviada por upload -- se o
+ * registro no banco ainda aponta pra um arquivo que não existe mais (foi
+ * perdido/apagado), cai no placeholder em vez de mostrar ícone de imagem
+ * quebrada.
+ */
+function arquivo_publico_existe(?string $caminhoRelativo): bool
+{
+    if (!$caminhoRelativo) {
+        return false;
+    }
+    return is_file(__DIR__ . '/../' . ltrim($caminhoRelativo, '/'));
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf_token'])) {
@@ -71,7 +87,12 @@ function flash_get(string $key): ?string
  */
 function avatar_html(string $nome, ?string $caminhoFoto, string $classeTipo): string
 {
-    if ($caminhoFoto) {
+    // Confere se o arquivo realmente existe no disco antes de confiar no
+    // caminho que está no banco -- evita ícone de imagem quebrada quando a
+    // foto foi perdida (ex.: apagada por engano, ou por algum problema no
+    // deploy) mas o banco ainda guarda o caminho antigo. Nesse caso cai
+    // graciosamente na inicial coloridas, igual a quem nunca teve foto.
+    if (arquivo_publico_existe($caminhoFoto)) {
         return '<img src="' . e(asset_url($caminhoFoto)) . '" class="avatar-circle avatar-foto ' . e($classeTipo) . '" alt="' . e($nome) . '">';
     }
     $inicial = $nome !== '' ? mb_strtoupper(mb_substr($nome, 0, 1)) : '?';
@@ -99,6 +120,69 @@ function normalizar_documento(?string $valor): ?string
 {
     $limpo = strtoupper(preg_replace('/[^0-9Xx]/', '', $valor ?? ''));
     return $limpo !== '' ? $limpo : null;
+}
+
+/**
+ * Redimensiona (só encolhe, nunca aumenta) uma imagem já salva em disco pra
+ * caber dentro de uma caixa máxima de $larguraMax x $alturaMax, mantendo a
+ * proporção original -- pra logo de cliente não subir do tamanho de uma
+ * foto de celular (vários MB, milhares de pixels) quando o card onde ela
+ * aparece tem só ~92px de altura. SVG não passa por aqui (é vetor, não
+ * precisa). Se o GD falhar por qualquer motivo, simplesmente mantém o
+ * arquivo original -- redimensionar é otimização, não pode quebrar o
+ * upload.
+ */
+function redimensionar_imagem_se_necessario(string $caminhoArquivo, string $mime, int $larguraMax, int $alturaMax): void
+{
+    if (!extension_loaded('gd')) {
+        return;
+    }
+
+    try {
+        $origem = match ($mime) {
+            'image/jpeg' => imagecreatefromjpeg($caminhoArquivo),
+            'image/png' => imagecreatefrompng($caminhoArquivo),
+            'image/webp' => imagecreatefromwebp($caminhoArquivo),
+            default => null,
+        };
+        if (!$origem) {
+            return;
+        }
+
+        $largura = imagesx($origem);
+        $altura = imagesy($origem);
+        if ($largura <= $larguraMax && $altura <= $alturaMax) {
+            imagedestroy($origem);
+            return; // já cabe na caixa, não precisa reduzir.
+        }
+
+        $escala = min($larguraMax / $largura, $alturaMax / $altura);
+        $novaLargura = max(1, (int) round($largura * $escala));
+        $novaAltura = max(1, (int) round($altura * $escala));
+
+        $destino = imagecreatetruecolor($novaLargura, $novaAltura);
+        if ($mime === 'image/png' || $mime === 'image/webp') {
+            // Preserva transparência (fundo transparente não pode virar preto).
+            imagealphablending($destino, false);
+            imagesavealpha($destino, true);
+            $transparente = imagecolorallocatealpha($destino, 0, 0, 0, 127);
+            imagefilledrectangle($destino, 0, 0, $novaLargura, $novaAltura, $transparente);
+        }
+        imagecopyresampled($destino, $origem, 0, 0, 0, 0, $novaLargura, $novaAltura, $largura, $altura);
+
+        match ($mime) {
+            'image/jpeg' => imagejpeg($destino, $caminhoArquivo, 85),
+            'image/png' => imagepng($destino, $caminhoArquivo),
+            'image/webp' => imagewebp($destino, $caminhoArquivo, 85),
+            default => null,
+        };
+
+        imagedestroy($origem);
+        imagedestroy($destino);
+    } catch (\Throwable $e) {
+        // Mantém o arquivo original enviado -- melhor um logo grande do que
+        // nenhum logo.
+    }
 }
 
 /**
@@ -139,7 +223,12 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
         @unlink($antigo);
     }
     $nomeArquivo = 'logo_cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
-    if (move_uploaded_file($arquivo['tmp_name'], $dirLogos . '/' . $nomeArquivo)) {
+    $caminhoDestino = $dirLogos . '/' . $nomeArquivo;
+    if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+        // Tamanho ideal do card = 92px de altura (ver .card-cliente-logo-wrap
+        // no CSS) -- usa o dobro pra ficar nítido em tela retina/HiDPI, sem
+        // deixar o arquivo do tamanho de uma foto de celular.
+        redimensionar_imagem_se_necessario($caminhoDestino, $mime, 480, 184);
         $pdo->prepare('UPDATE clientes SET logo = ? WHERE id = ?')
             ->execute(['assets/avatars/' . $nomeArquivo, $clienteId]);
     }

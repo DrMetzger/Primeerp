@@ -131,7 +131,7 @@ require __DIR__ . '/templates/header.php';
              role="button" tabindex="0"
              data-cliente='<?= e(json_encode($c, JSON_UNESCAPED_UNICODE)) ?>'>
             <div class="card-cliente-logo-wrap">
-                <?php if ($c['logo']): ?>
+                <?php if (arquivo_publico_existe($c['logo'])): ?>
                     <img src="<?= e(asset_url($c['logo'])) ?>" alt="Logo <?= e($c['nome']) ?>" class="card-cliente-logo">
                 <?php else: ?>
                     <div class="card-cliente-logo-vazio"><i class="bi bi-building"></i></div>
@@ -274,7 +274,8 @@ require __DIR__ . '/templates/header.php';
                             <div class="flex-grow-1">
                                 <label class="form-label mb-1">Logo da empresa</label>
                                 <input type="file" name="logo" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/svg+xml">
-                                <small class="text-muted">PNG, JPG, WEBP ou SVG, até 5MB.</small>
+                                <small class="text-muted">PNG, JPG, WEBP ou SVG, até 5MB. A imagem é redimensionada automaticamente pro tamanho ideal do card.</small>
+                                <button type="submit" class="btn btn-sm btn-outline-dark mt-2"><i class="bi bi-upload"></i> Enviar logo</button>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -359,6 +360,14 @@ document.addEventListener('DOMContentLoaded', function () {
         var img = document.getElementById(imgId);
         var vazio = document.getElementById(vazioId);
         if (dados.logo) {
+            // Se o arquivo não existir mais no servidor (ex.: foto perdida),
+            // a imagem dispara "error" em vez de aparecer quebrada -- nesse
+            // caso cai no mesmo placeholder de "sem logo".
+            img.onerror = function () {
+                img.style.display = 'none';
+                vazio.style.display = '';
+                img.onerror = null;
+            };
             img.src = baseUrlLogo + dados.logo;
             img.style.display = '';
             vazio.style.display = 'none';

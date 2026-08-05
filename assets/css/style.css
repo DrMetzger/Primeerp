@@ -241,6 +241,12 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .btn-group { display: inline-flex; }
 .btn-group .btn { border-radius: var(--ph-radius-sm); }
 
+/* Botões de ação de um chamado (Imprimir / Encerrar / Reabrir) -- largura
+   mínima igual pros dois lados não ficarem "desbalanceados" só porque um
+   ícone+texto é mais largo que o outro (ex.: "Imprimir" x "Encerrar"). */
+.chamado-acoes { display: flex; gap: .5rem; flex-wrap: wrap; }
+.chamado-acoes .btn { min-width: 112px; }
+
 .btn-close {
     background: transparent;
     border: none;

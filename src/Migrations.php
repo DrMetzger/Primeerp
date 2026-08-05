@@ -312,7 +312,63 @@ class Migrations
             }
         }
 
+        self::limparReferenciasQuebradas($pdo);
         self::atribuirAvatarPadrao($pdo);
+        self::vincularAutorRespostasAntigas($pdo);
+    }
+
+    /**
+     * Auto-cura de foto/logo "quebrados": se o arquivo enviado por upload
+     * não existe mais em disco (ex.: perdido num deploy antes do
+     * assets/avatars/ ter entrado no .gitignore, ou apagado por qualquer
+     * outro motivo) mas o banco ainda guarda o caminho antigo, zera o campo.
+     * Assim o site nunca fica preso mostrando ícone de imagem quebrada --
+     * cai no fallback normal (inicial colorida pra foto de pessoa, ou o
+     * próximo run já reatribui um avatar padrão via atribuirAvatarPadrao(),
+     * ou o ícone de "sem logo" pra logo de empresa).
+     */
+    private static function limparReferenciasQuebradas(PDO $pdo): void
+    {
+        $raiz = __DIR__ . '/..';
+        foreach ([
+            ['usuarios', 'foto_perfil'],
+            ['clientes', 'foto_perfil'],
+            ['clientes', 'logo'],
+        ] as [$tabela, $coluna]) {
+            $linhas = $pdo->query("SELECT id, $coluna AS caminho FROM $tabela WHERE $coluna IS NOT NULL")->fetchAll();
+            foreach ($linhas as $linha) {
+                // Avatares pré-definidos (SVG em assets/img/avatares) são
+                // parte do código versionado, sempre existem -- só upload
+                // real (assets/avatars/...) pode ter se perdido.
+                if (!str_starts_with($linha['caminho'], 'assets/avatars/')) {
+                    continue;
+                }
+                if (!is_file($raiz . '/' . $linha['caminho'])) {
+                    $pdo->prepare("UPDATE $tabela SET $coluna = NULL WHERE id = ?")->execute([$linha['id']]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Preenche autor_usuario_id em respostas de chamado antigas (criadas
+     * antes dessa coluna existir) tentando casar autor_nome com o nome de
+     * um usuário da equipe -- só assim essas respostas antigas passam a
+     * mostrar a foto de perfil de quem escreveu, em vez de cair pra sempre
+     * na inicial genérica. Se dois usuários tiverem o mesmo nome, ou o nome
+     * salvo não bater com nenhum usuário atual, a resposta continua com
+     * autor_usuario_id NULL (comportamento de antes, sem piorar nada).
+     */
+    private static function vincularAutorRespostasAntigas(PDO $pdo): void
+    {
+        $pdo->exec("
+            UPDATE chamado_respostas r
+            INNER JOIN (
+                SELECT nome, MIN(id) AS id FROM usuarios GROUP BY nome HAVING COUNT(*) = 1
+            ) u ON u.nome = r.autor_nome
+            SET r.autor_usuario_id = u.id
+            WHERE r.autor_tipo = 'equipe' AND r.autor_usuario_id IS NULL
+        ");
     }
 
     /**

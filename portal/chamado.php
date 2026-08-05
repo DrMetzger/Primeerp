@@ -24,6 +24,20 @@ if (!$chamado) {
     die('Chamado não encontrado.');
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['acao'] ?? '', ['encerrar_chamado', 'reabrir_chamado'], true)) {
+    csrf_verify();
+    // O SELECT lá em cima já garante "AND c.cliente_id = ?" -- ou seja, só
+    // chega até aqui se o chamado for mesmo desse cliente logado. Sem essa
+    // trava, um cliente poderia encerrar/reabrir chamado de outra empresa
+    // só trocando o id na URL.
+    $novoStatus = $_POST['acao'] === 'encerrar_chamado' ? 'fechado' : 'aguardando_equipe';
+    $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ? AND cliente_id = ?')
+        ->execute([$novoStatus, $chamadoId, $clienteId]);
+    flash_set('sucesso', $_POST['acao'] === 'encerrar_chamado' ? 'Chamado encerrado.' : 'Chamado reaberto.');
+    header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'responder') {
     csrf_verify();
     $mensagem = trim($_POST['mensagem'] ?? '');
@@ -105,9 +119,20 @@ $tituloPagina = $chamado['titulo'];
 require __DIR__ . '/../templates/portal_header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
-    <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+    <div class="chamado-acoes">
+        <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+        <form method="post" class="d-inline">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="<?= $chamado['status'] === 'fechado' ? 'reabrir_chamado' : 'encerrar_chamado' ?>">
+            <?php if ($chamado['status'] === 'fechado'): ?>
+                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
+            <?php else: ?>
+                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
+            <?php endif; ?>
+        </form>
+    </div>
 </div>
 
 <div class="card card-stat mt-3">
