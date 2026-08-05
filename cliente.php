@@ -157,20 +157,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_chamado_equipe') {
-        // Título padronizado em MAIÚSCULAS (mesma regra do chamado aberto
-        // pelo cliente no portal) -- pedido do Kleber pra não ter títulos
-        // com capitalização diferente misturados na listagem.
-        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([
-            $clienteId,
-            mb_strtoupper(trim($_POST['titulo']), 'UTF-8'),
-            trim($_POST['descricao']),
-            trim($_POST['categoria'] ?? '') ?: null,
-            $_POST['prioridade'] ?? 'media',
-            'equipe',
-            $_POST['responsavel_id'] ?: null,
-        ]);
-        flash_set('sucesso', 'Chamado registrado.');
+        $categoriaNovoChamado = trim($_POST['categoria'] ?? '');
+        if (trim($_POST['titulo'] ?? '') === '' || trim($_POST['descricao'] ?? '') === '' || $categoriaNovoChamado === '') {
+            flash_set('erro', 'Preencha título, categoria e descrição do chamado.');
+        } else {
+            // Título padronizado em MAIÚSCULAS (mesma regra do chamado aberto
+            // pelo cliente no portal) -- pedido do Kleber pra não ter títulos
+            // com capitalização diferente misturados na listagem.
+            $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $stmt->execute([
+                $clienteId,
+                mb_strtoupper(trim($_POST['titulo']), 'UTF-8'),
+                trim($_POST['descricao']),
+                $categoriaNovoChamado,
+                $_POST['prioridade'] ?? 'media',
+                'equipe',
+                $_POST['responsavel_id'] ?: null,
+            ]);
+            flash_set('sucesso', 'Chamado registrado.');
+        }
     }
 
     if ($acao === 'responder_chamado') {
@@ -767,16 +772,16 @@ require __DIR__ . '/templates/header.php';
             <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" style="text-transform:uppercase" required></div>
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="3" required></textarea></div>
             <div class="row g-2">
-                <div class="col-6"><label class="form-label">Categoria</label>
-                    <select name="categoria" class="form-select">
-                        <option value="">-</option>
+                <div class="col-6"><label class="form-label">Categoria *</label>
+                    <select name="categoria" class="form-select" required>
+                        <option value="" disabled selected>Selecione</option>
                         <?php foreach (CATEGORIAS_CHAMADO as $cat): ?>
                             <option><?= e($cat) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="col-6"><label class="form-label">Prioridade</label>
-                    <select name="prioridade" class="form-select">
+                <div class="col-6"><label class="form-label">Prioridade *</label>
+                    <select name="prioridade" class="form-select" required>
                         <?= opcoes_prioridade_html('media') ?>
                     </select>
                 </div>
@@ -818,10 +823,10 @@ require __DIR__ . '/templates/header.php';
                 </select>
             </div>
             <div class="row g-2">
-                <div class="col-6"><label class="form-label">De</label><input type="date" name="data_de" class="form-control"></div>
-                <div class="col-6"><label class="form-label">Até</label><input type="date" name="data_ate" class="form-control"></div>
+                <div class="col-6"><label class="form-label">De *</label><input type="date" name="data_de" class="form-control" required></div>
+                <div class="col-6"><label class="form-label">Até *</label><input type="date" name="data_ate" class="form-control" required></div>
             </div>
-            <p class="text-muted small mt-2 mb-0">Deixe as datas vazias para exportar todo o período. O arquivo abre direto no Excel.</p>
+            <p class="text-muted small mt-2 mb-0">O arquivo abre direto no Excel.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>

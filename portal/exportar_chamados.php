@@ -20,8 +20,30 @@ $clienteId = ClienteAuth::clienteId();
 
 $statusFiltro = $_GET['status'] ?? '';
 
-$sql = 'SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ?';
-$params = [$clienteId];
+// Datas vêm de <input type="date"> (formato YYYY-MM-DD) -- valida antes de
+// usar na query pra não aceitar lixo. Mesmo esquema de exportar_chamados.php
+// (lado da equipe).
+function data_valida(?string $valor): ?string
+{
+    if (!$valor) {
+        return null;
+    }
+    $d = \DateTime::createFromFormat('Y-m-d', $valor);
+    return ($d && $d->format('Y-m-d') === $valor) ? $valor : null;
+}
+
+$dataDe = data_valida($_GET['data_de'] ?? null);
+$dataAte = data_valida($_GET['data_ate'] ?? null);
+
+// Período obrigatório -- pedido do Kleber pra não deixar exportar sem
+// querer o histórico inteiro (arquivo enorme, difícil de abrir/analisar).
+if ($dataDe === null || $dataAte === null) {
+    http_response_code(400);
+    die('Informe o período (data de / data até) antes de exportar.');
+}
+
+$sql = 'SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? AND c.criado_em >= ? AND c.criado_em <= ?';
+$params = [$clienteId, $dataDe . ' 00:00:00', $dataAte . ' 23:59:59'];
 if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
     $sql .= ' AND c.status = ?';
     $params[] = $statusFiltro;

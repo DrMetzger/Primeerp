@@ -148,6 +148,37 @@
         }
     });
 
+    // ----------------------------------------------- Cor no select de prioridade
+    // opcoes_prioridade_html() (helpers.php) já colore cada <option> -- mas
+    // isso só aparece com a lista ABERTA. A caixa fechada (valor
+    // selecionado) não herda a cor da option em nenhum navegador, ficando
+    // sempre em preto/cinza padrão. Copia a cor da option escolhida pro
+    // próprio <select> sempre que o valor mudar (e uma vez ao carregar a
+    // página, pro valor padrão/pré-preenchido já vir colorido).
+    function colorirSelectPrioridade(select) {
+        var opcao = select.options[select.selectedIndex];
+        if (!opcao) return;
+        select.style.color = opcao.style.color || '';
+        select.style.fontWeight = opcao.style.color ? '600' : '';
+    }
+
+    document.querySelectorAll('select[name="prioridade"]').forEach(colorirSelectPrioridade);
+
+    document.addEventListener('change', function (e) {
+        if (e.target.matches && e.target.matches('select[name="prioridade"]')) {
+            colorirSelectPrioridade(e.target);
+        }
+    });
+
+    // Modal aberto depois do carregamento inicial (ex.: "Registrar chamado")
+    // ainda não tinha o select no DOM na hora do querySelectorAll acima --
+    // aplica de novo quando qualquer modal é mostrado.
+    document.addEventListener('show.bs.modal', function (e) {
+        if (e.target.querySelectorAll) {
+            e.target.querySelectorAll('select[name="prioridade"]').forEach(colorirSelectPrioridade);
+        }
+    });
+
     // API mínima exposta pra scripts inline de cada página (ex.: ativar a
     // aba certa com base no hash da URL).
     window.PrimeUI = {

@@ -16,9 +16,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
 
     $titulo = trim($_POST['titulo'] ?? '');
     $descricao = trim($_POST['descricao'] ?? '');
+    $categoria = trim($_POST['categoria'] ?? '');
 
-    if ($titulo === '' || $descricao === '') {
-        flash_set('erro', 'Preencha o título e a descrição do chamado.');
+    if ($titulo === '' || $descricao === '' || $categoria === '') {
+        flash_set('erro', 'Preencha o título, a categoria e a descrição do chamado.');
     } else {
         // Título padronizado em MAIÚSCULAS -- pedido do Kleber pra não ter
         // cada chamado com uma capitalização diferente ("Erro no sistema",
@@ -28,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
             $clienteId,
             mb_strtoupper($titulo, 'UTF-8'),
             $descricao,
-            trim($_POST['categoria'] ?? '') ?: null,
+            $categoria,
             $_POST['prioridade'] ?? 'media',
             'cliente',
         ]);
@@ -160,16 +161,16 @@ require __DIR__ . '/../templates/portal_header.php';
         <div class="modal-header"><h5 class="modal-title">Abrir novo chamado</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" style="text-transform:uppercase" required></div>
-            <div class="mb-3"><label class="form-label">Categoria</label>
-                <select name="categoria" class="form-select">
-                    <option value="">Selecione (opcional)</option>
+            <div class="mb-3"><label class="form-label">Categoria *</label>
+                <select name="categoria" class="form-select" required>
+                    <option value="" disabled selected>Selecione</option>
                     <?php foreach (CATEGORIAS_CHAMADO as $cat): ?>
                         <option><?= e($cat) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="mb-3"><label class="form-label">Prioridade</label>
-                <select name="prioridade" class="form-select">
+            <div class="mb-3"><label class="form-label">Prioridade *</label>
+                <select name="prioridade" class="form-select" required>
                     <?= opcoes_prioridade_html('media') ?>
                 </select>
             </div>
@@ -210,7 +211,11 @@ require __DIR__ . '/../templates/portal_header.php';
                     <option value="fechado">Encerrados</option>
                 </select>
             </div>
-            <p class="text-muted small mb-0">O arquivo abre direto no Excel.</p>
+            <div class="row g-2">
+                <div class="col-6"><label class="form-label">De *</label><input type="date" name="data_de" class="form-control" required></div>
+                <div class="col-6"><label class="form-label">Até *</label><input type="date" name="data_ate" class="form-control" required></div>
+            </div>
+            <p class="text-muted small mt-2 mb-0">O arquivo abre direto no Excel.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>

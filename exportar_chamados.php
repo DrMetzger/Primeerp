@@ -40,19 +40,18 @@ function data_valida(?string $valor): ?string
 $dataDe = data_valida($_GET['data_de'] ?? null);
 $dataAte = data_valida($_GET['data_ate'] ?? null);
 
-$sql = 'SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ?';
-$params = [$clienteId];
+// Período obrigatório -- pedido do Kleber pra não deixar exportar sem
+// querer o histórico inteiro (arquivo enorme, difícil de abrir/analisar).
+if ($dataDe === null || $dataAte === null) {
+    http_response_code(400);
+    die('Informe o período (data de / data até) antes de exportar.');
+}
+
+$sql = 'SELECT c.*, u.nome AS responsavel_nome FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? AND c.criado_em >= ? AND c.criado_em <= ?';
+$params = [$clienteId, $dataDe . ' 00:00:00', $dataAte . ' 23:59:59'];
 if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
     $sql .= ' AND c.status = ?';
     $params[] = $statusFiltro;
-}
-if ($dataDe !== null) {
-    $sql .= ' AND c.criado_em >= ?';
-    $params[] = $dataDe . ' 00:00:00';
-}
-if ($dataAte !== null) {
-    $sql .= ' AND c.criado_em <= ?';
-    $params[] = $dataAte . ' 23:59:59';
 }
 $sql .= ' ORDER BY c.criado_em DESC';
 
