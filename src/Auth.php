@@ -61,21 +61,24 @@ class Auth
 
     /**
      * Caminho da foto/avatar do usuário logado (ou null = cai pro círculo
-     * com a inicial do nome em avatar_html()). Atualizado na sessão sempre
-     * que o usuário troca a foto em perfil.php, pra refletir na hora sem
-     * precisar deslogar. Sessões abertas ANTES desse campo existir não têm
-     * a chave -- nesse caso busca uma vez no banco e guarda na sessão, pra
-     * não obrigar todo mundo a deslogar/logar de novo depois do deploy.
+     * com a inicial do nome em avatar_html()). SEMPRE busca no banco (não
+     * guarda em sessão) -- já tentamos cachear na sessão antes, mas isso
+     * criava uma tela "descompassada": se a foto mudar por qualquer motivo
+     * que não seja a própria pessoa trocando em perfil.php (ex.: uma
+     * migração de auto-cura reatribuindo avatar padrão, ver
+     * Migrations::atribuirAvatarPadrao()), a sessão já aberta ficava com o
+     * valor antigo pra sempre, mostrando uma foto no cabeçalho e outra
+     * (a certa) em "Meu perfil". É uma consulta simples por chave primária,
+     * custo desprezível pro tamanho desse sistema.
      */
     public static function userFoto(): ?string
     {
-        if (!array_key_exists('usuario_foto', $_SESSION) && self::check()) {
-            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM usuarios WHERE id = ?');
-            $stmt->execute([self::userId()]);
-            $_SESSION['usuario_foto'] = $stmt->fetchColumn() ?: null;
+        if (!self::check()) {
+            return null;
         }
-
-        return $_SESSION['usuario_foto'] ?? null;
+        $stmt = Database::connection()->prepare('SELECT foto_perfil FROM usuarios WHERE id = ?');
+        $stmt->execute([self::userId()]);
+        return $stmt->fetchColumn() ?: null;
     }
 
     /**

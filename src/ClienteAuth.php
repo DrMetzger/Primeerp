@@ -77,20 +77,20 @@ class ClienteAuth
 
     /**
      * Caminho da foto/avatar do cliente logado no portal (ou null = cai
-     * pro círculo com a inicial do nome). Atualizado sempre que o cliente
-     * troca a foto em portal/perfil.php. Sessões abertas antes desse campo
-     * existir buscam uma vez no banco e guardam na sessão (sem precisar
-     * deslogar/logar de novo depois do deploy).
+     * pro círculo com a inicial do nome). SEMPRE busca no banco (não guarda
+     * em sessão) -- mesmo motivo do Auth::userFoto(): cachear na sessão
+     * deixava a tela "descompassada" quando a foto mudava por outro motivo
+     * que não fosse o próprio cliente trocando em portal/perfil.php (ex.:
+     * migração de auto-cura). Consulta simples por chave primária.
      */
     public static function clienteFoto(): ?string
     {
-        if (!array_key_exists('portal_cliente_foto', $_SESSION) && self::check()) {
-            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
-            $stmt->execute([self::clienteId()]);
-            $_SESSION['portal_cliente_foto'] = $stmt->fetchColumn() ?: null;
+        if (!self::check()) {
+            return null;
         }
-
-        return $_SESSION['portal_cliente_foto'] ?? null;
+        $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+        $stmt->execute([self::clienteId()]);
+        return $stmt->fetchColumn() ?: null;
     }
 
     public static function requireLogin(): void

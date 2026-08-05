@@ -938,6 +938,49 @@ a.card-cliente, a.card-cliente:hover {
     flex-shrink: 0;
 }
 
+/* Aba "Visualizar" do modal de cliente -- antes era uma <dl> simples e crua
+   (rótulo/valor empilhado sem hierarquia visual nenhuma). Reorganizado em
+   blocos: cabeçalho com logo grande + nome + status, dois números em
+   destaque (pendentes/total), grade de contato com ícone, e observações só
+   aparecem quando existem (em vez de mostrar "-" pra todo cliente sem
+   observação cadastrada). */
+.ver-cliente-topo { display: flex; align-items: center; gap: .85rem; margin-bottom: 1rem; }
+.ver-cliente-topo .logo-preview-alterar { width: 64px; height: 64px; }
+.min-width-0 { min-width: 0; }
+
+.ver-cliente-stats {
+    display: flex;
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+.ver-cliente-stat {
+    flex: 1;
+    background-color: var(--ph-neutral-bg);
+    border-radius: var(--ph-radius-sm);
+    padding: .75rem 1rem;
+    text-align: center;
+}
+.ver-cliente-stat-valor { font-size: 1.6rem; font-weight: 700; color: var(--ph-text); line-height: 1.1; }
+.ver-cliente-stat-rotulo { font-size: .75rem; color: var(--ph-text-muted); margin-top: .15rem; }
+
+.ver-cliente-info {
+    display: flex;
+    flex-direction: column;
+    gap: .65rem;
+    margin-bottom: 1rem;
+}
+.ver-cliente-info-item { display: flex; align-items: flex-start; gap: .65rem; }
+.ver-cliente-info-item > i { font-size: 1rem; color: var(--ph-primary); margin-top: .2rem; flex-shrink: 0; width: 1.1rem; text-align: center; }
+.ver-cliente-info-rotulo { font-size: .72rem; color: var(--ph-text-muted); text-transform: uppercase; letter-spacing: .02em; font-weight: 600; }
+
+.ver-cliente-observacoes {
+    background-color: var(--ph-warning-bg);
+    border-radius: var(--ph-radius-sm);
+    padding: .65rem .85rem;
+    margin-bottom: .5rem;
+    font-size: .9rem;
+}
+
 .logo-preview-vazio {
     display: flex;
     align-items: center;

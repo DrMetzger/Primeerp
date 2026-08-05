@@ -241,24 +241,50 @@ require __DIR__ . '/templates/header.php';
 
             <!-- Visualizar -->
             <div class="tab-pane show active" id="modalClienteVer">
-                <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="ver-cliente-topo">
                     <img id="verLogoPreview" src="" alt="Logo" class="logo-preview-alterar" style="display:none;">
                     <div class="logo-preview-alterar logo-preview-vazio" id="verLogoVazio"><i class="bi bi-building"></i></div>
-                    <div>
-                        <div class="fw-semibold" id="verNomeCliente"></div>
+                    <div class="flex-grow-1 min-width-0">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <div class="fw-semibold fs-5" id="verNomeCliente"></div>
+                            <span id="verStatus"></span>
+                        </div>
                         <small class="text-muted">Documento: <span id="verContatoDocumento"></span></small>
                     </div>
                 </div>
-                <dl class="row mb-0">
-                    <dt class="col-4">Status</dt><dd class="col-8" id="verStatus"></dd>
-                    <dt class="col-4">Contato</dt><dd class="col-8" id="verContatoNome"></dd>
-                    <dt class="col-4">E-mail</dt><dd class="col-8" id="verContatoEmail"></dd>
-                    <dt class="col-4">Telefone</dt><dd class="col-8" id="verContatoTelefone"></dd>
-                    <dt class="col-4">Observações</dt><dd class="col-8" id="verObservacoes"></dd>
-                    <dt class="col-4">Chamados pendentes</dt><dd class="col-8" id="verChamadosPendentes"></dd>
-                    <dt class="col-4">Chamados (total)</dt><dd class="col-8" id="verChamados"></dd>
-                </dl>
-                <a href="#" id="verLinkAbrir" class="btn btn-dark mt-2"><i class="bi bi-box-arrow-up-right"></i> Abrir página completa do cliente</a>
+
+                <div class="ver-cliente-stats">
+                    <div class="ver-cliente-stat">
+                        <div class="ver-cliente-stat-valor" id="verChamadosPendentes"></div>
+                        <div class="ver-cliente-stat-rotulo">Pendentes</div>
+                    </div>
+                    <div class="ver-cliente-stat">
+                        <div class="ver-cliente-stat-valor" id="verChamados"></div>
+                        <div class="ver-cliente-stat-rotulo">Chamados no total</div>
+                    </div>
+                </div>
+
+                <div class="ver-cliente-info">
+                    <div class="ver-cliente-info-item">
+                        <i class="bi bi-person-fill"></i>
+                        <div><div class="ver-cliente-info-rotulo">Contato</div><div id="verContatoNome"></div></div>
+                    </div>
+                    <div class="ver-cliente-info-item">
+                        <i class="bi bi-envelope-fill"></i>
+                        <div><div class="ver-cliente-info-rotulo">E-mail</div><div id="verContatoEmail"></div></div>
+                    </div>
+                    <div class="ver-cliente-info-item">
+                        <i class="bi bi-telephone-fill"></i>
+                        <div><div class="ver-cliente-info-rotulo">Telefone</div><div id="verContatoTelefone"></div></div>
+                    </div>
+                </div>
+
+                <div class="ver-cliente-observacoes" id="verObservacoesWrap" style="display:none;">
+                    <div class="ver-cliente-info-rotulo mb-1"><i class="bi bi-sticky-fill"></i> Observações</div>
+                    <div id="verObservacoes"></div>
+                </div>
+
+                <a href="#" id="verLinkAbrir" class="btn btn-dark w-100 mt-3"><i class="bi bi-box-arrow-up-right"></i> Abrir página completa do cliente</a>
             </div>
 
             <!-- Alterar -->
@@ -383,15 +409,26 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('verNomeCliente').textContent = dados.nome;
         document.getElementById('verContatoDocumento').textContent = dados.contato_documento || 'não informado';
         aplicarLogoPreview(dados, 'verLogoPreview', 'verLogoVazio');
-        document.getElementById('verStatus').textContent = dados.status.charAt(0).toUpperCase() + dados.status.slice(1);
-        document.getElementById('verContatoNome').textContent = dados.contato_nome || '-';
+
+        var statusCores = {ativo: 'success', pausado: 'warning', encerrado: 'secondary'};
+        var statusLabel = dados.status.charAt(0).toUpperCase() + dados.status.slice(1);
+        document.getElementById('verStatus').innerHTML = '<span class="badge bg-' + (statusCores[dados.status] || 'secondary') + '">' + statusLabel + '</span>';
+
+        document.getElementById('verContatoNome').textContent = dados.contato_nome || 'Sem contato cadastrado';
         document.getElementById('verContatoEmail').textContent = dados.contato_email || '-';
         document.getElementById('verContatoTelefone').textContent = dados.contato_telefone ? PrimeUI.formatarTelefone(dados.contato_telefone) : '-';
-        document.getElementById('verObservacoes').textContent = dados.observacoes || '-';
-        document.getElementById('verChamadosPendentes').innerHTML = (dados.urgentes > 0)
-            ? dados.chamados_pendentes + ' pendente(s) <span class="badge prio-urgente ms-1"><i class="bi bi-exclamation-circle-fill"></i> ' + dados.urgentes + ' urgente(s)</span>'
-            : dados.chamados_pendentes + ' pendente(s)';
-        document.getElementById('verChamados').textContent = dados.total_chamados + ' no total';
+
+        var wrapObs = document.getElementById('verObservacoesWrap');
+        if (dados.observacoes) {
+            document.getElementById('verObservacoes').textContent = dados.observacoes;
+            wrapObs.style.display = '';
+        } else {
+            wrapObs.style.display = 'none';
+        }
+
+        document.getElementById('verChamadosPendentes').innerHTML = dados.chamados_pendentes
+            + (dados.urgentes > 0 ? '<span class="badge prio-urgente ms-1" style="font-size:.65rem;vertical-align:middle;"><i class="bi bi-exclamation-circle-fill"></i> ' + dados.urgentes + ' urgente(s)</span>' : '');
+        document.getElementById('verChamados').textContent = dados.total_chamados;
         document.getElementById('verLinkAbrir').href = baseUrlCliente + dados.id;
 
         aplicarLogoPreview(dados, 'alterarLogoPreview', 'alterarLogoVazio');

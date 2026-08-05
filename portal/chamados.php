@@ -121,9 +121,9 @@ require __DIR__ . '/../templates/portal_header.php';
             <button type="button" class="btn btn-sm filtro-pill filtro-fechado" data-filtro="fechado"><i class="bi bi-x-circle"></i> Encerrados</button>
         </div>
     </div>
-    <a href="<?= url('portal/exportar_chamados.php') ?>" id="linkExportarChamados" class="btn btn-sm btn-exportar" target="_blank" title="Exporta só os chamados do filtro selecionado acima">
-        <i class="bi bi-file-earmark-excel"></i> Exportar <span id="linkExportarFiltroLabel"></span>
-    </a>
+    <button type="button" class="btn btn-sm btn-exportar" data-bs-toggle="modal" data-bs-target="#modalExportarChamadosPortal">
+        <i class="bi bi-file-earmark-excel"></i> Exportar
+    </button>
 </div>
 
 <div class="card card-stat">
@@ -189,15 +189,44 @@ require __DIR__ . '/../templates/portal_header.php';
   </div>
 </div>
 
+<!-- Exportar: tela explícita pra escolher o status antes de baixar (mesmo
+     esquema já usado do lado da equipe em cliente.php) -- antes era só um
+     link que exportava direto o que já estava filtrado na tela, mas isso
+     confundia (clicar Exportar sem antes escolher um filtro baixava TUDO,
+     porque "Todos" é o filtro padrão da tela). Aqui fica explícito. -->
+<div class="modal fade" id="modalExportarChamadosPortal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="get" action="<?= url('portal/exportar_chamados.php') ?>" target="_blank">
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> Exportar meus chamados</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3">
+                <label class="form-label">Quais chamados exportar?</label>
+                <select name="status" id="exportarStatusPortal" class="form-select">
+                    <option value="todos">Todos</option>
+                    <option value="aberto">Abertos</option>
+                    <option value="aguardando_equipe">Pendentes (com a PrimeERP)</option>
+                    <option value="aguardando_cliente">Atrasados (com você)</option>
+                    <option value="fechado">Encerrados</option>
+                </select>
+            </div>
+            <p class="text-muted small mb-0">O arquivo abre direto no Excel.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-exportar"><i class="bi bi-download"></i> Exportar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    var baseUrlExportar = <?= json_encode(url('portal/exportar_chamados.php')) ?>;
-    var rotulosFiltro = {
-        todos: '', aberto: '(Abertos)', aguardando_equipe: '(Pendentes)',
-        aguardando_cliente: '(Atrasados)', fechado: '(Encerrados)'
-    };
+    var filtroAtual = 'todos';
 
     function aplicarFiltro(filtro) {
+        filtroAtual = filtro;
         var algumVisivel = false;
         document.querySelectorAll('#tabelaMeusChamados tbody tr[data-status]').forEach(function (linha) {
             var mostra = filtro === 'todos' || linha.getAttribute('data-status') === filtro;
@@ -208,12 +237,16 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('#filtroStatusPortal .filtro-pill').forEach(function (pill) {
             pill.classList.toggle('active', pill.getAttribute('data-filtro') === filtro);
         });
+    }
 
-        // O botão Exportar sempre exporta só o que está filtrado na tela
-        // agora -- antes exportava tudo, ignorando o filtro selecionado.
-        var linkExportar = document.getElementById('linkExportarChamados');
-        linkExportar.href = filtro === 'todos' ? baseUrlExportar : (baseUrlExportar + '?status=' + encodeURIComponent(filtro));
-        document.getElementById('linkExportarFiltroLabel').textContent = rotulosFiltro[filtro] || '';
+    // Ao abrir a tela de exportar, já vem pré-selecionado o mesmo filtro que
+    // está sendo exibido na tabela agora -- só um atalho, o usuário ainda
+    // escolhe explicitamente antes de baixar (pode mudar se quiser).
+    var modalExportarPortal = document.getElementById('modalExportarChamadosPortal');
+    if (modalExportarPortal) {
+        modalExportarPortal.addEventListener('show.bs.modal', function () {
+            document.getElementById('exportarStatusPortal').value = filtroAtual;
+        });
     }
 
     document.querySelectorAll('#filtroStatusPortal .filtro-pill').forEach(function (pill) {
