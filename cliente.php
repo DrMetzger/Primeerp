@@ -538,7 +538,7 @@ require __DIR__ . '/templates/header.php';
                          automático, calculado por quem respondeu por último -- a única
                          ação manual que sobra é encerrar ou reabrir o chamado. -->
                     <div class="chamado-acoes">
-                        <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+                        <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-printer"></i> Imprimir</a>
                         <form method="post" class="d-inline">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">

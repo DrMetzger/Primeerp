@@ -125,7 +125,7 @@ require __DIR__ . '/../templates/portal_header.php';
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
     <div class="chamado-acoes">
-        <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+        <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-printer"></i> Imprimir</a>
         <form method="post" class="d-inline">
             <?= csrf_field() ?>
             <input type="hidden" name="acao" value="<?= $chamado['status'] === 'fechado' ? 'reabrir_chamado' : 'encerrar_chamado' ?>">
