@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'atualizar_dados') {
         $nome = trim($_POST['nome'] ?? '');
         $email = trim($_POST['email'] ?? '');
-        $telefone = trim($_POST['telefone'] ?? '') ?: null;
+        $telefone = apenas_digitos($_POST['telefone'] ?? '');
 
         if ($nome === '' || $email === '') {
             flash_set('erro', 'Nome e e-mail são obrigatórios.');
@@ -178,7 +178,7 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Telefone</label>
-                            <input type="text" name="telefone" class="form-control" value="<?= e($usuario['telefone'] ?? '') ?>" placeholder="(00) 00000-0000">
+                            <input type="text" name="telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($usuario['telefone'] ?? '')) ?>" placeholder="(00) 00000-0000">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar dados</button>

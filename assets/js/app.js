@@ -121,11 +121,39 @@
         }
     });
 
+    // ------------------------------------------------------ Máscara de telefone
+    // Formata (XX) XXXXX-XXXX (celular) ou (XX) XXXX-XXXX (fixo) enquanto a
+    // pessoa digita. Delegado no document (funciona também em campos
+    // preenchidos depois via JS, ex. o modal de Clientes).
+    function formatarTelefone(valor) {
+        var digitos = (valor || '').replace(/\D/g, '').slice(0, 11);
+        if (digitos.length > 10) {
+            return digitos.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3').replace(/-$/, '');
+        }
+        if (digitos.length > 5) {
+            return digitos.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3').replace(/-$/, '');
+        }
+        if (digitos.length > 2) {
+            return digitos.replace(/(\d{2})(\d{0,5})/, '($1) $2');
+        }
+        if (digitos.length > 0) {
+            return '(' + digitos;
+        }
+        return '';
+    }
+
+    document.addEventListener('input', function (e) {
+        if (e.target.classList && e.target.classList.contains('input-telefone')) {
+            e.target.value = formatarTelefone(e.target.value);
+        }
+    });
+
     // API mínima exposta pra scripts inline de cada página (ex.: ativar a
     // aba certa com base no hash da URL).
     window.PrimeUI = {
         showTab: mostrarAba,
         openModal: abrirModal,
         closeModal: fecharModal,
+        formatarTelefone: formatarTelefone,
     };
 })();

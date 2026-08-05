@@ -27,16 +27,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, observacoes=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             $_POST['status'],
             trim($_POST['contato_nome']) ?: null,
             trim($_POST['contato_email']) ?: null,
-            trim($_POST['contato_telefone']) ?: null,
+            apenas_digitos($_POST['contato_telefone'] ?? ''),
+            normalizar_documento($_POST['contato_documento'] ?? ''),
             trim($_POST['observacoes']) ?: null,
             $clienteId,
         ]);
+
+        $erroLogo = processar_upload_logo_cliente($pdo, $clienteId);
+        if ($erroLogo) {
+            flash_set('erro', $erroLogo);
+        }
+
         flash_set('sucesso', 'Dados do cliente atualizados.');
     }
 
@@ -338,11 +345,23 @@ require __DIR__ . '/templates/header.php';
     <div class="tab-pane" id="visao-geral">
         <div class="card card-stat">
             <div class="card-body">
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="atualizar_cliente">
                     <input type="hidden" name="aba_retorno" value="visao-geral">
                     <div class="row g-3">
+                        <div class="col-12 d-flex align-items-center gap-3">
+                            <?php if ($cliente['logo']): ?>
+                                <img src="<?= e(asset_url($cliente['logo'])) ?>" alt="Logo" class="logo-preview-alterar">
+                            <?php else: ?>
+                                <div class="logo-preview-alterar logo-preview-vazio"><i class="bi bi-building"></i></div>
+                            <?php endif; ?>
+                            <div class="flex-grow-1">
+                                <label class="form-label mb-1">Logo da empresa</label>
+                                <input type="file" name="logo" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/svg+xml">
+                                <small class="text-muted">PNG, JPG, WEBP ou SVG, até 5MB.</small>
+                            </div>
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label">Nome</label>
                             <input type="text" name="nome" class="form-control" value="<?= e($cliente['nome']) ?>" required>
@@ -369,7 +388,11 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Contato - telefone</label>
-                            <input type="text" name="contato_telefone" class="form-control" value="<?= e($cliente['contato_telefone']) ?>">
+                            <input type="text" name="contato_telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($cliente['contato_telefone'])) ?>" placeholder="(00) 00000-0000">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">CPF ou RG do contato *</label>
+                            <input type="text" name="contato_documento" class="form-control" required value="<?= e($cliente['contato_documento']) ?>" placeholder="Só números (RG pode terminar em X)">
                         </div>
                         <div class="col-12">
                             <label class="form-label">Observações</label>
@@ -411,7 +434,8 @@ require __DIR__ . '/templates/header.php';
             </div>
             <div class="toolbar-filtros">
                 <div class="btn-group flex-wrap" role="group" id="filtroStatusChamados">
-                    <button type="button" class="btn btn-sm filtro-pill filtro-todos active" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-pendentes active" data-filtro="pendentes"><i class="bi bi-exclamation-diamond"></i> Pendentes</button>
+                    <button type="button" class="btn btn-sm filtro-pill filtro-todos" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-aberto" data-filtro="aberto"><i class="bi bi-envelope-open"></i> Abertos</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-aguardando_equipe" data-filtro="aguardando_equipe"><i class="bi bi-exclamation-circle-fill"></i> Aguardando nós</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-aguardando_cliente" data-filtro="aguardando_cliente"><i class="bi bi-hourglass-split"></i> Aguardando cliente</button>
@@ -427,29 +451,34 @@ require __DIR__ . '/templates/header.php';
         <?php foreach ($chamados as $c): ?>
         <div class="card chamado-card mb-3" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>">
             <div class="card-header">
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <div class="d-flex align-items-center flex-wrap gap-2">
-                        <strong><?= e($c['titulo']) ?></strong>
-                        <?= badge_status_chamado($c['status']) ?>
-                        <?= badge_prioridade($c['prioridade']) ?>
-                        <?= $c['aberto_por'] === 'cliente'
-                            ? '<span class="badge badge-origem-cliente"><i class="bi bi-person-fill"></i> Aberto pelo cliente</span>'
-                            : '<span class="badge badge-origem-equipe"><i class="bi bi-headset"></i> Aberto pela equipe</span>' ?>
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div>
+                        <strong class="d-block mb-1"><?= e($c['titulo']) ?></strong>
+                        <div class="d-flex align-items-center flex-wrap gap-3">
+                            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado($c['status']) ?></span>
+                            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Prioridade</span> <?= badge_prioridade($c['prioridade']) ?></span>
+                            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Origem</span> <?= $c['aberto_por'] === 'cliente'
+                                ? '<span class="badge badge-origem-cliente"><i class="bi bi-person-fill"></i> Cliente</span>'
+                                : '<span class="badge badge-origem-equipe"><i class="bi bi-headset"></i> Equipe</span>' ?></span>
+                        </div>
                     </div>
                     <!-- O status "no meio" (aguardando nós / aguardando cliente) é sempre
                          automático, calculado por quem respondeu por último -- a única
                          ação manual que sobra é encerrar ou reabrir o chamado. -->
-                    <form method="post" class="d-inline">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">
-                        <input type="hidden" name="aba_retorno" value="chamados">
-                        <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
-                        <?php if ($c['status'] === 'fechado'): ?>
-                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
-                        <?php else: ?>
-                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
-                        <?php endif; ?>
-                    </form>
+                    <div class="d-flex gap-2">
+                        <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                            <?php if ($c['status'] === 'fechado'): ?>
+                                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
+                            <?php else: ?>
+                                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
+                            <?php endif; ?>
+                        </form>
+                    </div>
                 </div>
             </div>
             <div class="card-body">
@@ -937,22 +966,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Filtro de chamados por status (client-side, sem recarregar a página).
     var grupoFiltro = document.getElementById('filtroStatusChamados');
-    var filtroAtual = 'todos';
+    var filtroAtual = 'pendentes';
+    function aplicarFiltroChamados(filtro) {
+        filtroAtual = filtro;
+        var algumVisivel = false;
+        document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
+            var status = card.getAttribute('data-status');
+            var mostra = filtro === 'todos' || (filtro === 'pendentes' ? status !== 'fechado' : status === filtro);
+            card.style.display = mostra ? '' : 'none';
+            if (mostra) algumVisivel = true;
+        });
+        var aviso = document.getElementById('avisoFiltroVazio');
+        if (aviso) aviso.classList.toggle('d-none', algumVisivel || document.querySelectorAll('#listaChamados .chamado-card').length === 0);
+    }
     if (grupoFiltro) {
+        aplicarFiltroChamados('pendentes');
         grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (botao) {
             botao.addEventListener('click', function () {
                 grupoFiltro.querySelectorAll('.filtro-pill').forEach(function (b) { b.classList.remove('active'); });
                 botao.classList.add('active');
-                var filtro = botao.getAttribute('data-filtro');
-                filtroAtual = filtro;
-                var algumVisivel = false;
-                document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
-                    var mostra = (filtro === 'todos' || card.getAttribute('data-status') === filtro);
-                    card.style.display = mostra ? '' : 'none';
-                    if (mostra) algumVisivel = true;
-                });
-                var aviso = document.getElementById('avisoFiltroVazio');
-                if (aviso) aviso.classList.toggle('d-none', algumVisivel || document.querySelectorAll('#listaChamados .chamado-card').length === 0);
+                aplicarFiltroChamados(botao.getAttribute('data-filtro'));
             });
         });
         // Ao abrir o modal de exportar, já vem com o status do filtro ativo

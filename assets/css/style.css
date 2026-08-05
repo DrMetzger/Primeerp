@@ -163,6 +163,7 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 
 .col-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
 .col-6 { flex: 0 0 50%; max-width: 50%; }
+.col-8 { flex: 0 0 66.6667%; max-width: 66.6667%; }
 .col-12 { flex: 0 0 100%; max-width: 100%; }
 
 @media (min-width: 576px) {
@@ -643,6 +644,14 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .chamado-card:hover { box-shadow: var(--ph-elev-2); }
 
+.badge-rotulo {
+    font-size: .64rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    font-weight: 700;
+    color: #a1a1aa;
+}
+
 .chamado-card[data-prioridade="urgente"] { border-left-color: var(--ph-danger); }
 .chamado-card[data-prioridade="alta"] { border-left-color: #be123c; }
 .chamado-card[data-prioridade="media"] { border-left-color: var(--ph-warning); }
@@ -776,6 +785,7 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .filtro-pill:hover { filter: brightness(0.96); }
 
+.filtro-pill.filtro-pendentes { background-color: #fef3c7 !important; color: #b45309 !important; }
 .filtro-pill.filtro-todos { background-color: var(--ph-neutral-bg) !important; color: var(--ph-neutral) !important; }
 .filtro-pill.filtro-aberto { background-color: var(--ph-info-bg) !important; color: var(--ph-info) !important; }
 .filtro-pill.filtro-aguardando_equipe { background-color: #ffe4e6 !important; color: #be123c !important; }
@@ -783,6 +793,7 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 .filtro-pill.filtro-fechado { background-color: #f4f4f6 !important; color: #71717a !important; }
 
 .filtro-pill.active { color: #fff !important; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+.filtro-pill.filtro-pendentes.active { background-color: #b45309 !important; }
 .filtro-pill.filtro-todos.active { background-color: var(--ph-neutral) !important; }
 .filtro-pill.filtro-aberto.active { background-color: var(--ph-info) !important; }
 .filtro-pill.filtro-aguardando_equipe.active { background-color: #be123c !important; }
@@ -791,3 +802,87 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .btn-exportar { background-color: #15803d !important; border-color: #15803d !important; color: #fff !important; }
 .btn-exportar:hover { background-color: #166534 !important; border-color: #166534 !important; color: #fff !important; }
+
+/* --------------------------------------------------- Cards de clientes */
+
+.grid-clientes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--ph-gap);
+}
+
+.card-cliente {
+    background-color: var(--ph-surface);
+    border-radius: var(--ph-radius);
+    box-shadow: var(--ph-elev-1);
+    padding: 1.1rem;
+    cursor: pointer;
+    transition: box-shadow .15s ease, transform .15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+}
+
+.card-cliente:hover, .card-cliente:focus {
+    box-shadow: var(--ph-elev-2);
+    transform: translateY(-2px);
+    outline: none;
+}
+
+.card-cliente-topo {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+}
+
+.card-cliente-logo {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    object-fit: contain;
+    background-color: var(--ph-neutral-bg);
+    flex-shrink: 0;
+}
+
+.card-cliente-logo-vazio {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    color: var(--ph-text-muted);
+}
+
+.card-cliente-nome { min-width: 0; }
+.card-cliente-nome .fw-semibold { font-size: 1rem; }
+
+.card-cliente-contato { font-size: .85rem; color: var(--ph-text-muted); }
+
+.card-cliente-modulos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: auto;
+}
+
+.modulo-pill { font-size: .72rem; }
+.modulo-pendente { background-color: var(--ph-warning-bg); color: var(--ph-warning); }
+.modulo-ok { background-color: var(--ph-success-bg); color: var(--ph-success); }
+.modulo-neutro { background-color: var(--ph-neutral-bg); color: var(--ph-neutral); }
+
+/* Preview do logo dentro do modal de cliente (aba Visualizar/Alterar) */
+.logo-preview-alterar {
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    object-fit: contain;
+    background-color: var(--ph-neutral-bg);
+    flex-shrink: 0;
+}
+
+.logo-preview-vazio {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--ph-text-muted);
+}

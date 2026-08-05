@@ -18,6 +18,51 @@ Auth::requireAdminOrTempToken(Database::connection());
 $pdo = Database::connection();
 $heskPdo = HeskDatabase::connection();
 
+// Correção pontual (05/08/2026): o título dos chamados importados (HESK
+// guarda o "subject" já com entidades HTML, ex. "&amp;" em vez de "&") nunca
+// passava por html_entity_decode() como descrição/mensagens já passavam --
+// isso fazia o "&" aparecer literalmente como "&amp;" na tela (duplamente
+// escapado: banco tinha "&amp;", e()/htmlspecialchars() escapava de novo).
+// A importação já foi corrigida pra próximas vezes; isso aqui conserta o que
+// já tinha sido importado antes da correção.
+$mensagemCorrecao = null;
+if (($_GET['acao'] ?? $_POST['acao'] ?? '') === 'corrigir_titulos'
+    && (($_SERVER['REQUEST_METHOD'] === 'POST') || ($_GET['confirmar'] ?? '') === 'SIM')) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        csrf_verify();
+    }
+
+    $corrigidos = 0;
+    foreach ($pdo->query('SELECT id, titulo FROM chamados') as $c) {
+        $novoTitulo = trim(html_entity_decode($c['titulo'], ENT_QUOTES));
+        if ($novoTitulo !== $c['titulo']) {
+            $pdo->prepare('UPDATE chamados SET titulo = ? WHERE id = ?')->execute([$novoTitulo, $c['id']]);
+            $corrigidos++;
+        }
+    }
+    foreach ($pdo->query('SELECT id, autor_nome FROM chamado_respostas') as $r) {
+        $novoNome = trim(html_entity_decode($r['autor_nome'], ENT_QUOTES));
+        if ($novoNome !== $r['autor_nome']) {
+            $pdo->prepare('UPDATE chamado_respostas SET autor_nome = ? WHERE id = ?')->execute([$novoNome, $r['id']]);
+            $corrigidos++;
+        }
+    }
+    $mensagemCorrecao = "Correção concluída: $corrigidos título(s)/nome(s) com caracteres HTML corrigidos.";
+}
+
+// Diagnóstico pontual (05/08/2026): Kleber pediu pra ver se dá pra importar
+// os ANEXOS históricos do HESK também (não só texto). Antes de tentar
+// escrever a importação, precisa confirmar se o banco do HESK realmente tem
+// uma tabela de anexos e como ela referencia os tickets -- ?diag=tabelas
+// lista as tabelas do HESK que parecem guardar arquivo/anexo.
+$tabelasHeskAnexos = null;
+if ($heskPdo && ($_GET['diag'] ?? '') === 'tabelas') {
+    $todasTabelas = $heskPdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
+    $tabelasHeskAnexos = array_values(array_filter($todasTabelas, function ($t) {
+        return preg_match('/attach|file|anexo|upload/i', $t);
+    }));
+}
+
 function normalizar_chave(string $texto): string
 {
     $texto = mb_strtolower($texto, 'UTF-8');
@@ -124,7 +169,7 @@ if ($heskPdo) {
                     $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, prioridade, status, aberto_por, hesk_ticket_id, criado_em) VALUES (?, ?, ?, ?, ?, "cliente", ?, ?)');
                     $stmt->execute([
                         $clienteId,
-                        mb_substr($t['subject'] ?: '(sem título)', 0, 200),
+                        mb_substr(trim(html_entity_decode($t['subject'] ?? '', ENT_QUOTES)) ?: '(sem título)', 0, 200),
                         $descricao !== '' ? $descricao : '(sem descrição)',
                         $mapaPrioridade[$t['priority']] ?? 'media',
                         $fechado ? 'fechado' : 'aberto',
@@ -142,7 +187,7 @@ if ($heskPdo) {
                         $stmt2->execute([
                             $novoId,
                             ((int) $r['staffid']) > 0 ? 'equipe' : 'cliente',
-                            $r['name'] ?: 'PrimeERP',
+                            trim(html_entity_decode($r['name'] ?? '', ENT_QUOTES)) ?: 'PrimeERP',
                             $mensagemResposta !== '' ? $mensagemResposta : '(sem conteúdo)',
                             $r['dt'],
                         ]);
@@ -182,6 +227,33 @@ require __DIR__ . '/templates/header.php';
 
 <?php if ($mensagemImportacao): ?>
     <div class="alert alert-success"><?= e($mensagemImportacao) ?></div>
+<?php endif; ?>
+<?php if ($mensagemCorrecao): ?>
+    <div class="alert alert-success"><?= e($mensagemCorrecao) ?></div>
+<?php endif; ?>
+
+<div class="card card-stat mb-3">
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <strong>Corrigir caracteres HTML nos títulos já importados</strong>
+            <p class="text-muted small mb-0">Ex.: títulos com "&amp;amp;" na tela em vez de "&amp;" (bug de importação já corrigido pra próximas vezes -- isso aqui conserta o que já foi importado antes da correção).</p>
+        </div>
+        <form method="post">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="corrigir_titulos">
+            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Corrigir agora</button>
+        </form>
+    </div>
+</div>
+
+<?php if ($tabelasHeskAnexos !== null): ?>
+    <div class="alert <?= $tabelasHeskAnexos ? 'alert-info' : 'alert-warning' ?>">
+        <?php if ($tabelasHeskAnexos): ?>
+            Tabelas do HESK que parecem guardar anexo/arquivo: <strong><?= e(implode(', ', $tabelasHeskAnexos)) ?></strong>
+        <?php else: ?>
+            Nenhuma tabela do HESK com nome de anexo/arquivo/upload foi encontrada -- os anexos históricos podem estar só no disco (fora do banco) ou o HESK desse cliente nunca teve anexo habilitado.
+        <?php endif; ?>
+    </div>
 <?php endif; ?>
 
 <?php if (!$heskPdo): ?>

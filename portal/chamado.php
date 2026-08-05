@@ -105,17 +105,23 @@ $tituloPagina = $chamado['titulo'];
 require __DIR__ . '/../templates/portal_header.php';
 ?>
 
-<a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
+<div class="d-flex justify-content-between align-items-center">
+    <a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
+    <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> Imprimir</a>
+</div>
 
 <div class="card card-stat mt-3">
     <div class="card-header bg-white">
-        <div class="d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><?= e($chamado['titulo']) ?></h5>
-            <?= badge_status_chamado($chamado['status']) ?>
+        <h5 class="mb-2"><?= e($chamado['titulo']) ?></h5>
+        <div class="d-flex align-items-center flex-wrap gap-3">
+            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado($chamado['status']) ?></span>
+            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Prioridade</span> <?= badge_prioridade($chamado['prioridade']) ?></span>
+            <?php if ($chamado['categoria']): ?>
+                <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Categoria</span> <span class="badge bg-light text-dark border"><?= e($chamado['categoria']) ?></span></span>
+            <?php endif; ?>
         </div>
     </div>
     <div class="card-body">
-        <p class="mb-1"><?= badge_prioridade($chamado['prioridade']) ?> <?= $chamado['categoria'] ? '<span class="badge bg-light text-dark border">' . e($chamado['categoria']) . '</span>' : '' ?></p>
         <p class="text-muted small mb-0">Aberto em <?= formatar_data($chamado['criado_em']) ?></p>
     </div>
 </div>

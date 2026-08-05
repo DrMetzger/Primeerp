@@ -78,6 +78,102 @@ function avatar_html(string $nome, ?string $caminhoFoto, string $classeTipo): st
     return '<span class="avatar-circle ' . e($classeTipo) . '">' . e($inicial) . '</span>';
 }
 
+/**
+ * Guarda telefone só com os dígitos no banco (sem máscara) -- importante
+ * pra integração futura com WhatsApp Cloud API, que precisa do número
+ * "cru". A máscara é só visual, aplicada na hora de exibir/preencher campo
+ * (formatar_telefone()) ou enquanto a pessoa digita (JS, ver app.js).
+ */
+function apenas_digitos(?string $valor): ?string
+{
+    $digitos = preg_replace('/\D/', '', $valor ?? '');
+    return $digitos !== '' ? $digitos : null;
+}
+
+/**
+ * Normaliza CPF/RG do contato -- guarda só dígitos (e o "X" que o RG pode
+ * terminar com), sem pontos/traços, pra não ter o mesmo documento salvo de
+ * formas diferentes.
+ */
+function normalizar_documento(?string $valor): ?string
+{
+    $limpo = strtoupper(preg_replace('/[^0-9Xx]/', '', $valor ?? ''));
+    return $limpo !== '' ? $limpo : null;
+}
+
+/**
+ * Processa o upload do LOGO DA EMPRESA de um cliente (campo separado da foto
+ * do contato/avatar) -- usado tanto no cadastro rápido (clientes.php) quanto
+ * na página completa do cliente (cliente.php), pra não duplicar a mesma regra
+ * de validação/limite em dois lugares. Só faz algo se o campo $_FILES['logo']
+ * tiver sido enviado; se não, não retorna erro (upload de logo é opcional).
+ * Retorna null se deu tudo certo (ou se não tinha arquivo), ou uma mensagem
+ * de erro pra mostrar via flash_set().
+ */
+function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
+{
+    if (empty($_FILES['logo']) || $_FILES['logo']['error'] === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+
+    $arquivo = $_FILES['logo'];
+    $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/svg+xml' => 'svg'];
+
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        return 'Falha no upload do logo.';
+    }
+    if ($arquivo['size'] > 5 * 1024 * 1024) {
+        return 'Logo maior que o limite permitido (5MB).';
+    }
+
+    $mime = mime_content_type($arquivo['tmp_name']);
+    if (!isset($tiposPermitidos[$mime])) {
+        return 'Formato de logo não suportado. Envie JPG, PNG, WEBP ou SVG.';
+    }
+
+    $dirLogos = __DIR__ . '/../assets/avatars';
+    if (!is_dir($dirLogos)) {
+        mkdir($dirLogos, 0755, true);
+    }
+    foreach (glob($dirLogos . '/logo_cliente_' . $clienteId . '.*') as $antigo) {
+        @unlink($antigo);
+    }
+    $nomeArquivo = 'logo_cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
+    if (move_uploaded_file($arquivo['tmp_name'], $dirLogos . '/' . $nomeArquivo)) {
+        $pdo->prepare('UPDATE clientes SET logo = ? WHERE id = ?')
+            ->execute(['assets/avatars/' . $nomeArquivo, $clienteId]);
+    }
+
+    return null;
+}
+
+/**
+ * Formata telefone brasileiro pra exibição/preenchimento inicial de campo
+ * (a máscara ENQUANTO a pessoa digita é feita em JS, ver assets/js/app.js
+ * -- essa função aqui é só pra quando o valor já vem do banco sem máscara,
+ * ex. registros antigos digitados como "17981368201").
+ */
+function formatar_telefone(?string $telefone): string
+{
+    $digitos = preg_replace('/\D/', '', $telefone ?? '');
+    if ($digitos === '') {
+        return '';
+    }
+    $digitos = substr($digitos, 0, 11);
+
+    if (strlen($digitos) > 10) {
+        return preg_replace('/(\d{2})(\d{5})(\d{0,4})/', '($1) $2-$3', $digitos);
+    }
+    if (strlen($digitos) > 5) {
+        return preg_replace('/(\d{2})(\d{4})(\d{0,4})/', '($1) $2-$3', $digitos);
+    }
+    if (strlen($digitos) > 2) {
+        return preg_replace('/(\d{2})(\d{0,5})/', '($1) $2', $digitos);
+    }
+
+    return '(' . $digitos;
+}
+
 function formatar_data(?string $data): string
 {
     if (!$data) {

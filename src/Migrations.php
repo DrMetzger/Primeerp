@@ -133,6 +133,20 @@ class Migrations
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS portal_ativo TINYINT(1) NOT NULL DEFAULT 0 AFTER senha_hash");
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS foto_perfil VARCHAR(255) NULL COMMENT 'Caminho da foto de perfil enviada pelo cliente, relativo à raiz do projeto' AFTER portal_ativo");
 
+        // Logo da EMPRESA cliente (diferente da foto_perfil, que é a foto do
+        // contato/pessoa) -- pedido do Kleber pra lista de clientes virar
+        // cards com o logo de cada empresa em vez de tabela simples.
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo VARCHAR(255) NULL COMMENT 'Caminho do logo da empresa cliente, relativo à raiz do projeto' AFTER foto_perfil");
+
+        // CPF ou RG do contato -- pedido do Kleber depois de um cliente ter
+        // aberto 37 chamados de madrugada de forma abusiva: quer um
+        // documento com foto vinculado a cada contato, pra ter
+        // responsabilização/identificação de quem usa o sistema. Cadastros
+        // NOVOS/editados exigem o campo (validação em clientes.php); os já
+        // existentes ficam com NULL até serem atualizados -- não dá pra
+        // forçar retroativamente sem parar o sistema pra todo mundo.
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contato_documento VARCHAR(20) NULL COMMENT 'CPF ou RG do contato, só dígitos' AFTER contato_telefone");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS cliente_senha_tokens (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -291,6 +305,34 @@ class Migrations
                 'GEOMAQ', 'ICOMON', 'LQF', 'VITAPET', '3LIFE',
             ] as $nomeCliente) {
                 $stmt->execute([$nomeCliente]);
+            }
+        }
+
+        self::atribuirAvatarPadrao($pdo);
+    }
+
+    /**
+     * Kleber reportou que os avatares/fotos "não apareciam" nos chamados --
+     * na prática era porque cada usuário/contato de cliente só ganha uma
+     * foto/avatar quando ALGUÉM entra no próprio perfil e escolhe um, e
+     * praticamente ninguém tinha feito isso ainda (foto_perfil = NULL cai na
+     * inicial da letra, que é o comportamento correto, só que feio quando
+     * quase todo mundo está assim). Em vez de esperar cada pessoa configurar
+     * manualmente, atribui automaticamente um avatar variado (por id, pra não
+     * repetir sempre o mesmo) pra quem ainda não tem foto nenhuma -- só
+     * preenche o que está NULL, nunca sobrescreve uma foto/avatar já
+     * escolhido por alguém.
+     */
+    private static function atribuirAvatarPadrao(PDO $pdo): void
+    {
+        $qtd = defined('QUANTIDADE_AVATARES_PREDEFINIDOS') ? QUANTIDADE_AVATARES_PREDEFINIDOS : 16;
+
+        foreach (['usuarios', 'clientes'] as $tabela) {
+            $pendentes = $pdo->query("SELECT id FROM $tabela WHERE foto_perfil IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($pendentes as $id) {
+                $indice = ((int) $id % $qtd) + 1;
+                $pdo->prepare("UPDATE $tabela SET foto_perfil = ? WHERE id = ? AND foto_perfil IS NULL")
+                    ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $id]);
             }
         }
     }

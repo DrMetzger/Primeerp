@@ -121,6 +121,13 @@ define('CATEGORIAS_CHAMADO', [
     'Desenvolvimento',
 ]);
 
+// Horário comercial em que o PORTAL DO CLIENTE fica acessível (login E
+// qualquer página, mesmo já logado) -- pedido do Kleber depois de um
+// cliente ter aberto 37 chamados de madrugada (1h às 7h) de forma abusiva.
+// Só afeta o portal do cliente; equipe (Auth) não tem essa restrição.
+define('PORTAL_CLIENTE_HORARIO_INICIO', 9);  // 09:00
+define('PORTAL_CLIENTE_HORARIO_FIM', 18);    // até 17:59
+
 // Timezone
 date_default_timezone_set('America/Sao_Paulo');
 

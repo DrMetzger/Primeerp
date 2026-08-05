@@ -69,9 +69,45 @@ class ClienteAuth
 
     public static function requireLogin(): void
     {
+        self::bloquearForaDoHorario();
+
         if (!self::check()) {
             header('Location: ' . APP_BASE_PATH . '/portal/login.php');
             exit;
         }
+    }
+
+    /**
+     * Portal do cliente só funciona em horário comercial (ver config.php) --
+     * inclusive pra quem já está logado (não é só bloquear o login). Se
+     * abrir uma página fora do horário, mostra um aviso simples e para a
+     * execução, em vez de deixar ver/usar o sistema.
+     */
+    public static function dentroHorarioComercial(): bool
+    {
+        $hora = (int) date('G');
+        return $hora >= PORTAL_CLIENTE_HORARIO_INICIO && $hora < PORTAL_CLIENTE_HORARIO_FIM;
+    }
+
+    public static function bloquearForaDoHorario(): void
+    {
+        if (self::dentroHorarioComercial()) {
+            return;
+        }
+
+        http_response_code(503);
+        $inicio = sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO);
+        $fim = sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM);
+        echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+            . '<title>Portal fora do horário · Prime Hub</title>'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            . '<style>body{font-family:Arial,sans-serif;background:#f4f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}'
+            . '.caixa{background:#fff;border-radius:12px;padding:2.5rem;max-width:420px;text-align:center;box-shadow:0 1px 8px rgba(0,0,0,.08);}'
+            . 'h1{font-size:1.1rem;color:#27272a;}p{color:#71717a;font-size:.92rem;}</style></head><body>'
+            . '<div class="caixa"><h1>⏰ Portal disponível em horário comercial</h1>'
+            . '<p>O acesso ao portal do cliente funciona das <strong>' . $inicio . '</strong> às <strong>' . $fim . '</strong>.</p>'
+            . '<p>Volte dentro desse horário para abrir ou acompanhar chamados.</p></div>'
+            . '</body></html>';
+        exit;
     }
 }

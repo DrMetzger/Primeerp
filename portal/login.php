@@ -5,6 +5,8 @@ require_once __DIR__ . '/../bootstrap.php';
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
 
+ClienteAuth::bloquearForaDoHorario();
+
 if (ClienteAuth::check()) {
     header('Location: ' . url('portal/chamados.php'));
     exit;
