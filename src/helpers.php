@@ -389,6 +389,23 @@ function formatar_duracao_minutos(?float $minutos): string
     return $dias . ' dia' . ($dias > 1 ? 's' : '') . ($restoHoras > 0 ? ' e ' . $restoHoras . 'h' : '');
 }
 
+/**
+ * Texto pequeno de comparação com o mês anterior, usado nos cards de KPI do
+ * dashboard (chamados abertos/fechados no mês). Não usa cor de "bom/ruim"
+ * -- mais chamado aberto não é necessariamente uma notícia ruim (pode ser só
+ * mais cliente ativo), então fica neutro, só informando a variação.
+ */
+function tile_delta_html(int $atual, int $anterior): string
+{
+    if ($anterior === 0) {
+        return '<div class="small text-muted mt-1">Mês passado: 0</div>';
+    }
+    $variacao = (($atual - $anterior) / $anterior) * 100;
+    $icone = $variacao > 0 ? 'bi-arrow-up' : ($variacao < 0 ? 'bi-arrow-down' : 'bi-dash');
+    $texto = ($variacao > 0 ? '+' : '') . number_format($variacao, 0) . '%';
+    return '<div class="small text-muted mt-1"><i class="bi ' . $icone . '"></i> ' . e($texto) . ' vs mês passado (' . $anterior . ')</div>';
+}
+
 function badge_status_demanda(string $status): string
 {
     $mapa = [

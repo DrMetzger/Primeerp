@@ -310,6 +310,13 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
 
 .card-stat .stat-value { font-size: 2rem; font-weight: 700; }
 
+/* Gráficos do dashboard (Chart.js) -- altura fixa pro canvas não colapsar
+   pra 0px (Chart.js precisa de um container com altura definida pra
+   calcular responsive:true corretamente) nem crescer sem limite. */
+.chart-wrap { position: relative; height: 280px; }
+.chart-wrap-sm { height: 220px; }
+.chart-wrap-bar-h { height: 200px; } /* sobrescrita inline por cliente (ver dashboard.php) */
+
 /* Cards de visão geral clicáveis (ex.: portal/chamados.php) -- reseta o
    estilo padrão de link (sublinhado/azul) e dá um feedback visual de que
    são clicáveis, igual ao .card-cliente. */
