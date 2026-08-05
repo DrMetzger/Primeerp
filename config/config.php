@@ -78,6 +78,16 @@ define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
 
+// Anexos do formulário público de abertura de chamado.
+define('ANEXO_CHAMADO_MAX_SIZE', 10 * 1024 * 1024); // 10MB por arquivo
+define('ANEXO_CHAMADO_MAX_QUANTIDADE', 5);
+define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
+    'image/jpeg' => 'jpg',
+    'image/png' => 'png',
+    'image/webp' => 'webp',
+    'application/pdf' => 'pdf',
+]);
+
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
 // futuro módulo financeiro (contratos/faturas/CNAB), que ainda está em

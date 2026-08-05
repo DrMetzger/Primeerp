@@ -662,7 +662,7 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 }
 
 .avatar-circle.equipe { background-color: var(--ph-primary); }
-.avatar-circle.cliente { background-color: var(--ph-accent); }
+.avatar-circle.cliente { background-color: var(--ph-success); }
 
 .avatar-circle.avatar-foto {
     object-fit: cover;
@@ -730,12 +730,37 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     word-wrap: break-word;
 }
 
-.chat-esquerda .chat-bolha { background-color: #f0f0f3; color: #27272a; border-bottom-left-radius: 4px; }
-.chat-direita .chat-bolha { background-color: var(--ph-primary); color: #fff; border-bottom-right-radius: 4px; }
+.chat-esquerda .chat-bolha { border-bottom-left-radius: 4px; }
+.chat-direita .chat-bolha { border-bottom-right-radius: 4px; }
+
+/* Cor da bolha segue quem escreveu (cliente = verde, equipe = azul/roxo),
+   não o lado em que aparece -- no portal do cliente as próprias mensagens
+   dele ficam à direita (convenção normal de chat), então cor por posição
+   ficava errada lá (cliente apareceria azul). */
+.chat-bolha.bolha-cliente { background-color: var(--ph-success-bg); color: #14532d; }
+.chat-bolha.bolha-equipe { background-color: var(--ph-primary); color: #fff; }
 
 .chat-bolha .chat-autor { font-size: .72rem; font-weight: 700; opacity: .75; display: block; margin-bottom: .1rem; }
-.chat-direita .chat-bolha .chat-autor { color: #e0e7ff; }
+.chat-bolha.bolha-equipe .chat-autor { color: #e0e7ff; }
 .chat-bolha .chat-hora { font-size: .68rem; opacity: .65; display: block; margin-top: .25rem; text-align: right; }
+
+.chat-anexos { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.chat-anexos .anexo-link {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .78rem;
+    padding: .2rem .55rem;
+    border-radius: 999px;
+    background-color: rgba(255,255,255,.6);
+    border: 1px solid rgba(0,0,0,.08);
+    color: inherit;
+    text-decoration: none;
+}
+.chat-direita .chat-anexos .anexo-link { background-color: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); color: #fff; }
+.chat-anexos .anexo-link:hover { text-decoration: underline; }
+
+.anexos-upload-preview { font-size: .78rem; color: #64748b; margin-top: .25rem; }
 
 @media (max-width: 576px) { .chat-bolha { max-width: 85%; } }
 

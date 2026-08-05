@@ -3,3 +3,5 @@ Thumbs.db
 *.log
 /uploads/clientes/*
 !/uploads/clientes/.gitkeep
+/uploads/chamados/*
+!/uploads/chamados/.gitkeep

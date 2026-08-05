@@ -27,6 +27,35 @@ class Notificacoes
         self::whatsapp(null, "Novo chamado de {$cliente['nome']}: {$chamado['titulo']}");
     }
 
+    /**
+     * Chamado aberto pelo formulário público (abrir_chamado.php, sem login).
+     * $clienteId é null quando não foi possível casar automaticamente com
+     * nenhum cliente cadastrado -- nesse caso o chamado precisa de triagem
+     * manual em chamados_sem_cliente.php.
+     */
+    public static function novoChamadoPublico(array $chamado, string $nomeExibicao, ?int $clienteId): void
+    {
+        $link = self::baseUrlAbsoluta() . url($clienteId ? ('cliente.php?id=' . $clienteId . '#chamados') : 'chamados_sem_cliente.php');
+        $aviso = $clienteId
+            ? ''
+            : '<p style="color:#b91c1c"><strong>Atenção:</strong> não foi possível identificar automaticamente o cliente pelo nome da empresa informado. Precisa de triagem manual.</p>';
+
+        $corpo = "
+            <p>Novo chamado aberto pelo formulário público do site, de <strong>" . e($nomeExibicao) . "</strong>.</p>
+            $aviso
+            <p><strong>Título:</strong> " . e($chamado['titulo']) . "</p>
+            <p><strong>Prioridade:</strong> " . e($chamado['prioridade']) . "</p>
+            <p><strong>Descrição:</strong><br>" . nl2br(e($chamado['descricao'])) . "</p>
+            <p><a href=\"$link\">Ver no Prime Hub</a></p>
+        ";
+
+        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+            Mailer::enviar($emailEquipe, "Novo chamado (formulário público): {$chamado['titulo']}", $corpo);
+        }
+
+        self::whatsapp(null, "Novo chamado público de {$nomeExibicao}: {$chamado['titulo']}");
+    }
+
     public static function novaRespostaEquipe(array $chamado, array $cliente): void
     {
         if (!$cliente['contato_email']) {

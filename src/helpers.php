@@ -138,6 +138,102 @@ function recalcular_status_chamado(\PDO $pdo, int $chamadoId): void
     $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ?')->execute([$novoStatus, $chamadoId]);
 }
 
+/**
+ * Processa o upload de anexos de uma mensagem de chamado (abertura ou
+ * resposta) -- usado tanto pela resposta da equipe (cliente.php) quanto pela
+ * resposta do cliente no portal (portal/chamado.php), e futuramente pelo
+ * formulário público de abertura. Espera um campo de upload múltiplo, ex.:
+ * <input type="file" name="anexos[]" multiple>. Retorna um array de
+ * mensagens de erro (vazio = tudo certo, mesmo que nenhum arquivo tenha
+ * sido enviado -- anexo é sempre opcional).
+ */
+function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $campoArquivo = 'anexos'): array
+{
+    $erros = [];
+
+    if (empty($_FILES[$campoArquivo]) || empty($_FILES[$campoArquivo]['name'][0])) {
+        return $erros;
+    }
+
+    $arquivos = $_FILES[$campoArquivo];
+    $quantidade = count($arquivos['name']);
+
+    if ($quantidade > ANEXO_CHAMADO_MAX_QUANTIDADE) {
+        $erros[] = 'Envie no máximo ' . ANEXO_CHAMADO_MAX_QUANTIDADE . ' arquivos por vez.';
+        return $erros;
+    }
+
+    $dirChamado = UPLOADS_DIR . '/chamados/' . $chamadoId;
+
+    for ($i = 0; $i < $quantidade; $i++) {
+        if ($arquivos['error'][$i] === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        if ($arquivos['error'][$i] !== UPLOAD_ERR_OK) {
+            $erros[] = 'Falha no upload de "' . $arquivos['name'][$i] . '".';
+            continue;
+        }
+        if ($arquivos['size'][$i] > ANEXO_CHAMADO_MAX_SIZE) {
+            $erros[] = '"' . $arquivos['name'][$i] . '" é maior que o limite de ' . (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) . 'MB.';
+            continue;
+        }
+
+        $tipoMime = mime_content_type($arquivos['tmp_name'][$i]);
+        $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$tipoMime] ?? null;
+        if (!$extensaoPermitida) {
+            $erros[] = '"' . $arquivos['name'][$i] . '" não é um tipo de arquivo permitido (use imagem ou PDF).';
+            continue;
+        }
+
+        if (!is_dir($dirChamado)) {
+            mkdir($dirChamado, 0755, true);
+        }
+
+        $nomeArmazenado = bin2hex(random_bytes(16)) . '.' . $extensaoPermitida;
+        $destino = $dirChamado . '/' . $nomeArmazenado;
+
+        if (move_uploaded_file($arquivos['tmp_name'][$i], $destino)) {
+            $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([
+                    $chamadoId,
+                    $respostaId,
+                    $enviadoPor,
+                    $arquivos['name'][$i],
+                    'chamados/' . $chamadoId . '/' . $nomeArmazenado,
+                    $arquivos['size'][$i],
+                ]);
+        } else {
+            $erros[] = 'Não foi possível salvar "' . $arquivos['name'][$i] . '" no servidor.';
+        }
+    }
+
+    return $erros;
+}
+
+/**
+ * Renderiza a lista de anexos de uma bolha de chat (mensagem de abertura ou
+ * resposta), com link pra baixar cada um via download_anexo_chamado.php
+ * (que checa se quem está baixando é a equipe ou o próprio cliente do
+ * chamado antes de servir o arquivo).
+ */
+function render_anexos_html(array $anexos): string
+{
+    if (!$anexos) {
+        return '';
+    }
+
+    $html = '<div class="chat-anexos">';
+    foreach ($anexos as $a) {
+        $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
+        $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
+        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link" target="_blank" rel="noopener">'
+            . '<i class="bi ' . $icone . '"></i> ' . e($a['arquivo_nome_original']) . '</a>';
+    }
+    $html .= '</div>';
+
+    return $html;
+}
+
 function badge_prioridade(string $prioridade): string
 {
     $mapa = [

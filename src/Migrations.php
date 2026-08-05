@@ -148,13 +148,13 @@ class Migrations
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamados (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                cliente_id INT NOT NULL,
+                cliente_id INT NULL,
                 titulo VARCHAR(200) NOT NULL,
                 descricao TEXT NOT NULL,
                 categoria VARCHAR(80) NULL,
                 status ENUM('aberto','aguardando_equipe','aguardando_cliente','fechado') NOT NULL DEFAULT 'aberto',
                 prioridade ENUM('baixa','media','alta','urgente') NOT NULL DEFAULT 'media',
-                aberto_por ENUM('cliente','equipe') NOT NULL DEFAULT 'cliente',
+                aberto_por ENUM('cliente','equipe','publico') NOT NULL DEFAULT 'cliente',
                 responsavel_id INT NULL,
                 criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -167,6 +167,25 @@ class Migrations
         // (usada para não importar o mesmo chamado do HESK duas vezes).
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS hesk_ticket_id MEDIUMINT NULL COMMENT 'Origem: id do chamado no HESK, quando migrado'");
 
+        // Formulário público de abertura de chamado (abrir_chamado.php, sem
+        // login): quem preenche pode não ter batido com nenhum cliente
+        // cadastrado (nome da empresa digitado errado, cliente novo, etc.),
+        // então cliente_id passa a aceitar NULL e os dados de contato brutos
+        // ficam guardados aqui até um humano vincular a um cliente na
+        // triagem (chamados_sem_cliente.php).
+        $colunaClienteId = $pdo->query("SHOW COLUMNS FROM chamados LIKE 'cliente_id'")->fetch();
+        if ($colunaClienteId && stripos($colunaClienteId['Null'], 'YES') === false) {
+            $pdo->exec("ALTER TABLE chamados MODIFY COLUMN cliente_id INT NULL");
+        }
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS contato_nome_publico VARCHAR(150) NULL COMMENT 'Preenchido só quando veio do formulário público sem cliente identificado' AFTER cliente_id");
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS contato_email_publico VARCHAR(150) NULL AFTER contato_nome_publico");
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS empresa_informada VARCHAR(150) NULL COMMENT 'Nome da empresa como a pessoa digitou no formulário público' AFTER contato_email_publico");
+
+        $colunaAbertoPor = $pdo->query("SHOW COLUMNS FROM chamados LIKE 'aberto_por'")->fetch();
+        if ($colunaAbertoPor && stripos($colunaAbertoPor['Type'], 'publico') === false) {
+            $pdo->exec("ALTER TABLE chamados MODIFY COLUMN aberto_por ENUM('cliente','equipe','publico') NOT NULL DEFAULT 'cliente'");
+        }
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamado_respostas (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -176,6 +195,25 @@ class Migrations
                 mensagem TEXT NOT NULL,
                 criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT fk_respostas_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Anexos de chamado -- podem vir da mensagem de abertura (resposta_id
+        // NULL) ou de qualquer resposta, tanto do cliente (portal) quanto da
+        // equipe (cliente.php), além do futuro formulário público sem login
+        // (abrir_chamado.php).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS chamado_anexos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chamado_id INT NOT NULL,
+                resposta_id INT NULL COMMENT 'NULL = anexo da mensagem de abertura do chamado; senão, de qual resposta',
+                enviado_por ENUM('cliente','equipe') NOT NULL DEFAULT 'cliente',
+                arquivo_nome_original VARCHAR(255) NOT NULL,
+                arquivo_caminho VARCHAR(255) NOT NULL,
+                arquivo_tamanho INT NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_anexos_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE,
+                CONSTRAINT fk_anexos_resposta FOREIGN KEY (resposta_id) REFERENCES chamado_respostas(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 

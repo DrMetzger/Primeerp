@@ -166,17 +166,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'responder_chamado') {
         $chamadoId = (int) $_POST['chamado_id'];
         $mensagem = trim($_POST['mensagem'] ?? '');
+        $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
 
-        if ($mensagem !== '') {
+        if ($mensagem !== '' || $temAnexo) {
             $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, "equipe", ?, ?)')
-                ->execute([$chamadoId, Auth::userName(), $mensagem]);
+                ->execute([$chamadoId, Auth::userName(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+            $respostaId = (int) $pdo->lastInsertId();
+
+            $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'equipe');
             recalcular_status_chamado($pdo, $chamadoId);
 
             $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
             $chamadoAtualizado->execute([$chamadoId]);
             Notificacoes::novaRespostaEquipe($chamadoAtualizado->fetch(), $cliente);
 
-            flash_set('sucesso', 'Resposta enviada ao cliente.');
+            flash_set('sucesso', $errosAnexo ? 'Resposta enviada, mas: ' . implode(' ', $errosAnexo) : 'Resposta enviada ao cliente.');
         }
     }
 
@@ -206,14 +210,69 @@ $chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome FROM chamados 
 $chamados->execute([$clienteId]);
 $chamados = $chamados->fetchAll();
 
-$respostasPorChamado = [];
+// Monta a conversa completa de cada chamado (mensagem de abertura + todas as
+// respostas + anexos de cada uma), já num formato único pro template só
+// percorrer e desenhar as bolhas -- antes a mensagem de abertura ficava de
+// fora do chat, sem bolha/cor/nome do contato, o que ficava estranho.
+$linhasChatPorChamado = [];
 if ($chamados) {
     $ids = array_column($chamados, 'id');
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
     $stmtResp = $pdo->prepare("SELECT * FROM chamado_respostas WHERE chamado_id IN ($placeholders) ORDER BY criado_em ASC");
     $stmtResp->execute($ids);
+    $respostasPorChamado = [];
     foreach ($stmtResp->fetchAll() as $r) {
         $respostasPorChamado[$r['chamado_id']][] = $r;
+    }
+
+    $stmtAnexos = $pdo->prepare("SELECT * FROM chamado_anexos WHERE chamado_id IN ($placeholders) ORDER BY criado_em ASC");
+    $stmtAnexos->execute($ids);
+    $anexosPorChamado = [];
+    foreach ($stmtAnexos->fetchAll() as $a) {
+        // resposta_id NULL = anexo da mensagem de abertura (chave 'abertura').
+        $chave = $a['resposta_id'] ?? 'abertura';
+        $anexosPorChamado[$a['chamado_id']][$chave][] = $a;
+    }
+
+    foreach ($chamados as $c) {
+        $linhas = [];
+
+        if ($c['aberto_por'] === 'equipe') {
+            $autorTipo = 'equipe';
+            $nomeAutor = $c['responsavel_nome'] ?: 'Equipe PrimeERP';
+            $foto = null;
+        } elseif ($c['aberto_por'] === 'publico') {
+            $autorTipo = 'cliente';
+            $nomeAutor = $c['contato_nome_publico'] ?: ($c['empresa_informada'] ?: 'Cliente');
+            $foto = null;
+        } else {
+            $autorTipo = 'cliente';
+            $nomeAutor = $cliente['contato_nome'] ?: $cliente['nome'];
+            $foto = $cliente['foto_perfil'] ?? null;
+        }
+
+        $linhas[] = [
+            'autor_tipo' => $autorTipo,
+            'autor_nome' => $nomeAutor,
+            'foto' => $foto,
+            'mensagem' => $c['descricao'],
+            'criado_em' => $c['criado_em'],
+            'anexos' => $anexosPorChamado[$c['id']]['abertura'] ?? [],
+        ];
+
+        foreach ($respostasPorChamado[$c['id']] ?? [] as $r) {
+            $linhas[] = [
+                'autor_tipo' => $r['autor_tipo'],
+                'autor_nome' => $r['autor_nome'],
+                'foto' => $r['autor_tipo'] === 'cliente' ? ($cliente['foto_perfil'] ?? null) : null,
+                'mensagem' => $r['mensagem'],
+                'criado_em' => $r['criado_em'],
+                'anexos' => $anexosPorChamado[$c['id']][$r['id']] ?? [],
+            ];
+        }
+
+        $linhasChatPorChamado[$c['id']] = $linhas;
     }
 }
 
@@ -377,34 +436,37 @@ require __DIR__ . '/templates/header.php';
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-1"><i class="bi bi-clock"></i> Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
-                <p style="white-space: pre-wrap;"><?= e($c['descricao']) ?></p>
 
-                <?php if (!empty($respostasPorChamado[$c['id']])): ?>
-                    <hr>
-                    <!-- Cliente sempre à esquerda, equipe (nós) sempre à direita -- convenção
-                         pedida pelo Kleber, igual estilo WhatsApp. -->
-                    <div class="chat-thread">
-                    <?php foreach ($respostasPorChamado[$c['id']] as $r): ?>
-                        <?php $ladoDireita = $r['autor_tipo'] === 'equipe'; ?>
-                        <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
-                            <?= avatar_html($r['autor_nome'], $ladoDireita ? null : ($cliente['foto_perfil'] ?? null), $ladoDireita ? 'equipe' : 'cliente') ?>
-                            <div class="chat-bolha">
-                                <span class="chat-autor"><?= e($r['autor_nome']) ?></span>
-                                <span style="white-space: pre-wrap;"><?= e($r['mensagem']) ?></span>
-                                <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($r['criado_em'])) ?></span>
-                            </div>
+                <!-- Toda a conversa (mensagem de abertura + respostas) já vem normalizada
+                     em $linhasChatPorChamado -- cliente sempre à esquerda e em verde,
+                     equipe (nós) sempre à direita e em azul/roxo, com nome do contato,
+                     avatar e anexos em todas as linhas, inclusive a de abertura. -->
+                <div class="chat-thread">
+                <?php foreach ($linhasChatPorChamado[$c['id']] ?? [] as $linha): ?>
+                    <?php $ladoDireita = $linha['autor_tipo'] === 'equipe'; ?>
+                    <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
+                        <?= avatar_html($linha['autor_nome'], $linha['foto'], $linha['autor_tipo']) ?>
+                        <div class="chat-bolha bolha-<?= e($linha['autor_tipo']) ?>">
+                            <span class="chat-autor"><?= e($linha['autor_nome']) ?></span>
+                            <span style="white-space: pre-wrap;"><?= e($linha['mensagem']) ?></span>
+                            <?= render_anexos_html($linha['anexos']) ?>
+                            <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($linha['criado_em'])) ?></span>
                         </div>
-                    <?php endforeach; ?>
                     </div>
-                <?php endif; ?>
+                <?php endforeach; ?>
+                </div>
 
-                <form method="post" class="mt-3">
+                <form method="post" enctype="multipart/form-data" class="mt-3">
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="responder_chamado">
                     <input type="hidden" name="aba_retorno" value="chamados">
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
-                    <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
+                    <div class="d-flex justify-content-between align-items-center gap-2">
+                        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" style="max-width: 320px;">
+                        <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
+                    </div>
+                    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem ou PDF).</p>
                 </form>
             </div>
         </div>
