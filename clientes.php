@@ -76,16 +76,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-// Pendência real do cliente = CHAMADOS em aberto (não demandas -- a lista
-// antes só contava "demandas", que praticamente nenhum cliente usa, então
-// aparecia tudo zerado mesmo com chamado pendente de verdade; Kleber
-// apontou isso com print. "Urgentes" agora conta chamados de prioridade
-// alta/urgente ainda não fechados, que é o que realmente precisa de atenção.
+// Pendência real do cliente = CHAMADOS que dependem de uma ação NOSSA agora
+// (aberto = ninguém da equipe respondeu ainda; aguardando_equipe = cliente
+// respondeu e a bola está com a gente) -- mesma definição usada no Dashboard
+// (dashboard.php, "Chamados aguardando nós"). Antes essa tela contava
+// QUALQUER chamado não fechado, incluindo "aguardando_cliente" (que já
+// respondemos e a bola está com o cliente) -- por isso o número aparecia
+// maior aqui do que no Dashboard pro mesmo cliente, o que o Kleber apontou
+// como inconsistente. "Urgentes" é o mesmo grupo, restrito a prioridade
+// alta/urgente.
 $sql = "
     SELECT
         c.*,
-        (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status != 'fechado') AS chamados_pendentes,
-        (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status != 'fechado' AND ch.prioridade IN ('alta','urgente')) AS urgentes,
+        (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe')) AS chamados_pendentes,
+        (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe') AND ch.prioridade IN ('alta','urgente')) AS urgentes,
         (SELECT COUNT(*) FROM demandas d WHERE d.cliente_id = c.id AND d.status IN ('aberta','em_andamento')) AS demandas_abertas,
         (SELECT COUNT(*) FROM demandas d WHERE d.cliente_id = c.id) AS total_demandas,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id) AS total_chamados,
@@ -126,12 +130,14 @@ require __DIR__ . '/templates/header.php';
              data-busca="<?= e(mb_strtolower($c['nome'] . ' ' . $c['contato_nome'] . ' ' . $c['contato_email'])) ?>"
              role="button" tabindex="0"
              data-cliente='<?= e(json_encode($c, JSON_UNESCAPED_UNICODE)) ?>'>
-            <div class="card-cliente-topo">
+            <div class="card-cliente-logo-wrap">
                 <?php if ($c['logo']): ?>
-                    <img src="<?= e(asset_url($c['logo'])) ?>" alt="" class="card-cliente-logo">
+                    <img src="<?= e(asset_url($c['logo'])) ?>" alt="Logo <?= e($c['nome']) ?>" class="card-cliente-logo">
                 <?php else: ?>
-                    <div class="card-cliente-logo card-cliente-logo-vazio"><i class="bi bi-building"></i></div>
+                    <div class="card-cliente-logo-vazio"><i class="bi bi-building"></i></div>
                 <?php endif; ?>
+            </div>
+            <div class="card-cliente-topo">
                 <div class="card-cliente-nome">
                     <div class="fw-semibold"><?= e($c['nome']) ?></div>
                     <span class="badge bg-<?= $cor ?>"><?= e(ucfirst($c['status'])) ?></span>

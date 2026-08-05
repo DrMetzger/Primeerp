@@ -829,27 +829,46 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     outline: none;
 }
 
-.card-cliente-topo {
-    display: flex;
-    align-items: center;
-    gap: .75rem;
+/* Nos cards de "clientes que precisam de atenção" (dashboard.php) o card
+   inteiro é um link (<a>) em vez de uma div com JS -- reseta o estilo padrão
+   de link pra não ficar sublinhado/azul por cima do visual de card. */
+a.card-cliente, a.card-cliente:hover {
+    text-decoration: none;
+    color: inherit;
 }
 
-.card-cliente-logo {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
-    object-fit: contain;
+.card-cliente-logo-wrap {
+    width: 100%;
+    height: 92px;
+    border-radius: var(--ph-radius-sm);
     background-color: var(--ph-neutral-bg);
-    flex-shrink: 0;
-}
-
-.card-cliente-logo-vazio {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.3rem;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.card-cliente-logo {
+    /* Retangular e grande de propósito -- muita empresa usa logo largo
+       (retângulo), não quadrado/redondo, então o box acima é sempre
+       retangular e a imagem entra inteira dentro dele sem cortar
+       (object-fit: contain), só "sobra" fundo cinza-claro nas laterais
+       quando o logo é mais quadrado do que o box. */
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.card-cliente-logo-vazio {
+    font-size: 1.8rem;
     color: var(--ph-text-muted);
+}
+
+.card-cliente-topo {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
 }
 
 .card-cliente-nome { min-width: 0; }

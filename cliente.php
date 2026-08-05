@@ -213,7 +213,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // --- Dados para exibição ---
-$chamados = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.cliente_id = ? ORDER BY (c.status = "fechado") ASC, (c.status = "aguardando_equipe") DESC, c.criado_em DESC');
+// Ordem pensada pra quem chega direto do Dashboard pra triagem: primeiro o
+// que é urgente/alta prioridade E pendência nossa (aberto/aguardando_equipe),
+// depois o resto do que é pendência nossa (mais antigo primeiro = mais
+// atrasado primeiro), depois o que já respondemos (aguardando_cliente), e só
+// por último o que já foi fechado.
+$chamados = $pdo->prepare('
+    SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto
+    FROM chamados c
+    LEFT JOIN usuarios u ON u.id = c.responsavel_id
+    WHERE c.cliente_id = ?
+    ORDER BY
+        CASE
+            WHEN c.status IN ("aberto", "aguardando_equipe") AND c.prioridade IN ("urgente", "alta") THEN 1
+            WHEN c.status IN ("aberto", "aguardando_equipe") THEN 2
+            WHEN c.status = "aguardando_cliente" THEN 3
+            ELSE 4
+        END ASC,
+        CASE WHEN c.status = "fechado" THEN -UNIX_TIMESTAMP(c.criado_em) ELSE UNIX_TIMESTAMP(c.criado_em) END ASC
+');
 $chamados->execute([$clienteId]);
 $chamados = $chamados->fetchAll();
 
@@ -972,7 +990,12 @@ document.addEventListener('DOMContentLoaded', function () {
         var algumVisivel = false;
         document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
             var status = card.getAttribute('data-status');
-            var mostra = filtro === 'todos' || (filtro === 'pendentes' ? status !== 'fechado' : status === filtro);
+            // "Pendentes" = pendência NOSSA (aberto ou aguardando_equipe) --
+            // mesma definição usada no Dashboard e nos cards de Clientes, pra
+            // não mostrar número diferente em cada tela pro mesmo cliente.
+            // "aguardando_cliente" (já respondemos) tem o próprio filtro à
+            // parte, não conta como pendência aqui.
+            var mostra = filtro === 'todos' || (filtro === 'pendentes' ? (status === 'aberto' || status === 'aguardando_equipe') : status === filtro);
             card.style.display = mostra ? '' : 'none';
             if (mostra) algumVisivel = true;
         });
