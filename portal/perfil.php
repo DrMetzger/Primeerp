@@ -91,10 +91,15 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <div class="card card-stat">
     <div class="card-body text-center py-4">
-        <div class="perfil-avatar d-inline-block"><?= avatar_html($cliente['nome'], $cliente['foto_perfil'] ?? null, 'cliente') ?></div>
+        <?php
+        // Mostra a PESSOA (contato/key user), não a empresa -- mesma regra
+        // de "Olá, GEOMAQ" ser impessoal, aplicada aqui também.
+        $nomeDaPessoa = $cliente['contato_nome'] ?: $cliente['nome'];
+        ?>
+        <div class="perfil-avatar d-inline-block"><?= avatar_html($nomeDaPessoa, $cliente['foto_perfil'] ?? null, 'cliente') ?></div>
         <div class="mt-3">
-            <h6 class="mb-0"><?= e($cliente['nome']) ?></h6>
-            <p class="text-muted small mb-0"><?= e($cliente['contato_email'] ?? '') ?></p>
+            <h6 class="mb-0"><?= e($nomeDaPessoa) ?></h6>
+            <p class="text-muted small mb-0"><?= e($cliente['nome']) ?> &middot; <?= e($cliente['contato_email'] ?? '') ?></p>
         </div>
 
         <form method="post" enctype="multipart/form-data" class="mt-4 mx-auto" style="max-width: 360px;">

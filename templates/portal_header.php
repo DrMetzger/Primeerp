@@ -25,9 +25,12 @@ use AdminPrime\ClienteAuth;
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
-        <li class="nav-item"><a class="nav-link" href="<?= url('portal/perfil.php') ?>"><i class="bi bi-person-circle"></i> Meu Perfil</a></li>
       </ul>
-      <a href="<?= url('portal/perfil.php') ?>" class="navbar-text text-light me-3 d-flex align-items-center gap-2">
+      <!-- "Meu Perfil" como item de menu separado foi removido -- o
+           avatar+nome aqui do lado já é um link pro perfil, ter os dois
+           levando pro mesmo lugar confundia (Kleber apontou como "2 botões
+           pro mesmo lugar"). -->
+      <a href="<?= url('portal/perfil.php') ?>" class="navbar-text text-light me-3 d-flex align-items-center gap-2" title="Meu perfil">
         <?= avatar_html(ClienteAuth::clienteNome(), ClienteAuth::clienteFoto(), 'cliente') ?> <?= e(ClienteAuth::clienteNome()) ?>
       </a>
       <a href="<?= url('portal/logout.php') ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-right"></i> Sair</a>

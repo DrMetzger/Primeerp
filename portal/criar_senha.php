@@ -7,7 +7,7 @@ use AdminPrime\Database;
 $pdo = Database::connection();
 $token = $_GET['token'] ?? $_POST['token'] ?? '';
 
-$stmt = $pdo->prepare('SELECT t.*, c.nome AS cliente_nome, c.contato_email FROM cliente_senha_tokens t JOIN clientes c ON c.id = t.cliente_id WHERE t.token = ? AND t.usado = 0 AND t.expira_em > NOW() LIMIT 1');
+$stmt = $pdo->prepare('SELECT t.*, c.nome AS cliente_nome, c.contato_nome, c.contato_email FROM cliente_senha_tokens t JOIN clientes c ON c.id = t.cliente_id WHERE t.token = ? AND t.usado = 0 AND t.expira_em > NOW() LIMIT 1');
 $stmt->execute([$token]);
 $tokenInfo = $stmt->fetch();
 
@@ -60,7 +60,14 @@ if (!$tokenInfo) {
                 <div class="alert alert-danger"><?= e($erro) ?></div>
             <?php endif; ?>
             <?php if ($tokenInfo): ?>
-                <p class="text-muted">Olá, <strong><?= e($tokenInfo['cliente_nome']) ?></strong>. Defina sua senha de acesso ao portal.</p>
+                <?php
+                // Saudação pelo nome da PESSOA (key user/contato master),
+                // não da empresa -- "Olá, GEOMAQ" confundia o Kleber apontou
+                // como impessoal. Cai pro nome da empresa só se não tiver
+                // nenhum contato cadastrado ainda.
+                $nomeSaudacao = $tokenInfo['contato_nome'] ?: $tokenInfo['cliente_nome'];
+                ?>
+                <p class="text-muted">Olá, <strong><?= e($nomeSaudacao) ?></strong>. Defina sua senha de acesso ao portal.</p>
                 <form method="post">
                     <?= csrf_field() ?>
                     <input type="hidden" name="token" value="<?= e($token) ?>">

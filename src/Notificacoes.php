@@ -63,9 +63,12 @@ class Notificacoes
         }
 
         $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
+        // Pela PESSOA (contato/key user), não pela empresa -- "Olá, GEOMAQ"
+        // é impessoal (mesmo ajuste feito na tela de criar senha e no portal).
+        $nomeSaudacao = $cliente['contato_nome'] ?: $cliente['nome'];
 
         $corpo = "
-            <p>Olá, " . e($cliente['nome']) . ".</p>
+            <p>Olá, " . e($nomeSaudacao) . ".</p>
             <p>Você recebeu uma nova resposta no chamado <strong>" . e($chamado['titulo']) . "</strong>.</p>
             <p><a href=\"$link\">Ver resposta no portal</a></p>
         ";
@@ -80,9 +83,10 @@ class Notificacoes
         }
 
         $link = self::baseUrlAbsoluta() . url('portal/criar_senha.php?token=' . $token);
+        $nomeSaudacao = $cliente['contato_nome'] ?: $cliente['nome'];
 
         $corpo = "
-            <p>Olá, " . e($cliente['nome']) . ".</p>
+            <p>Olá, " . e($nomeSaudacao) . ".</p>
             <p>Você agora pode acompanhar seus chamados diretamente pelo nosso portal.</p>
             <p><a href=\"$link\">Clique aqui para criar sua senha de acesso</a></p>
             <p>Este link expira em 24 horas.</p>

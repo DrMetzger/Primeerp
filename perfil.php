@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nome = trim($_POST['nome'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $telefone = apenas_digitos($_POST['telefone'] ?? '');
+        $documento = normalizar_documento($_POST['documento'] ?? '');
 
         if ($nome === '' || $email === '') {
             flash_set('erro', 'Nome e e-mail são obrigatórios.');
@@ -38,8 +39,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($existe->fetchColumn()) {
                 flash_set('erro', 'Já existe outro usuário com esse e-mail.');
             } else {
-                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ? WHERE id = ?')
-                    ->execute([$nome, $email, $telefone, $usuarioId]);
+                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, documento = ? WHERE id = ?')
+                    ->execute([$nome, $email, $telefone, $documento, $usuarioId]);
                 $_SESSION['usuario_nome'] = $nome;
                 flash_set('sucesso', 'Dados atualizados.');
             }
@@ -179,6 +180,10 @@ require __DIR__ . '/templates/header.php';
                         <div class="col-md-6">
                             <label class="form-label">Telefone</label>
                             <input type="text" name="telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($usuario['telefone'] ?? '')) ?>" placeholder="(00) 00000-0000">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">CPF</label>
+                            <input type="text" name="documento" class="form-control" value="<?= e($usuario['documento'] ?? '') ?>" placeholder="Só números">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar dados</button>

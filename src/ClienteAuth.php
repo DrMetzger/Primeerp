@@ -22,7 +22,13 @@ class ClienteAuth
 
         session_regenerate_id(true);
         $_SESSION['portal_cliente_id'] = $cliente['id'];
-        $_SESSION['portal_cliente_nome'] = $cliente['nome'];
+        // "Nome" aqui é da PESSOA (contato/key user), não da empresa -- o
+        // Kleber apontou que ser chamado pelo nome da empresa ("Olá, GEOMAQ")
+        // é impessoal. Cai pro nome da empresa só se não tiver contato
+        // cadastrado ainda. Nome da empresa fica guardado separado
+        // (clienteEmpresa()) pra quem realmente precisar dele.
+        $_SESSION['portal_cliente_nome'] = $cliente['contato_nome'] ?: $cliente['nome'];
+        $_SESSION['portal_cliente_empresa'] = $cliente['nome'];
         $_SESSION['portal_cliente_email'] = $cliente['contato_email'];
         $_SESSION['portal_cliente_foto'] = $cliente['foto_perfil'] ?? null;
 
@@ -31,7 +37,7 @@ class ClienteAuth
 
     public static function logout(): void
     {
-        unset($_SESSION['portal_cliente_id'], $_SESSION['portal_cliente_nome'], $_SESSION['portal_cliente_email']);
+        unset($_SESSION['portal_cliente_id'], $_SESSION['portal_cliente_nome'], $_SESSION['portal_cliente_empresa'], $_SESSION['portal_cliente_email']);
     }
 
     public static function check(): bool
@@ -44,9 +50,29 @@ class ClienteAuth
         return $_SESSION['portal_cliente_id'] ?? null;
     }
 
+    /**
+     * Nome da PESSOA (contato/key user) logada no portal -- não da empresa.
+     * Sessões abertas antes dessa mudança existir (só guardavam nome da
+     * empresa) se auto-curam buscando o contato certo no banco uma vez.
+     */
     public static function clienteNome(): string
     {
+        if (!array_key_exists('portal_cliente_empresa', $_SESSION) && self::check()) {
+            $stmt = Database::connection()->prepare('SELECT nome, contato_nome FROM clientes WHERE id = ?');
+            $stmt->execute([self::clienteId()]);
+            $dados = $stmt->fetch();
+            $_SESSION['portal_cliente_empresa'] = $dados['nome'] ?? '';
+            $_SESSION['portal_cliente_nome'] = ($dados['contato_nome'] ?? '') ?: ($dados['nome'] ?? '');
+        }
+
         return $_SESSION['portal_cliente_nome'] ?? '';
+    }
+
+    /** Nome da EMPRESA cliente (diferente da pessoa/contato, ver clienteNome()). */
+    public static function clienteEmpresa(): string
+    {
+        self::clienteNome(); // garante a auto-cura acima, se precisar
+        return $_SESSION['portal_cliente_empresa'] ?? '';
     }
 
     /**

@@ -157,10 +157,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_chamado_equipe') {
+        // Título padronizado em MAIÚSCULAS (mesma regra do chamado aberto
+        // pelo cliente no portal) -- pedido do Kleber pra não ter títulos
+        // com capitalização diferente misturados na listagem.
         $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
-            trim($_POST['titulo']),
+            mb_strtoupper(trim($_POST['titulo']), 'UTF-8'),
             trim($_POST['descricao']),
             trim($_POST['categoria'] ?? '') ?: null,
             $_POST['prioridade'] ?? 'media',
@@ -708,7 +711,7 @@ require __DIR__ . '/templates/header.php';
         <input type="hidden" name="aba_retorno" value="chamados">
         <div class="modal-header"><h5 class="modal-title">Registrar chamado</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
-            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" style="text-transform:uppercase" required></div>
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="3" required></textarea></div>
             <div class="row g-2">
                 <div class="col-6"><label class="form-label">Categoria</label>
@@ -721,10 +724,7 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <div class="col-6"><label class="form-label">Prioridade</label>
                     <select name="prioridade" class="form-select">
-                        <option value="baixa">Baixa</option>
-                        <option value="media" selected>Média</option>
-                        <option value="alta">Alta</option>
-                        <option value="urgente">Urgente</option>
+                        <?= opcoes_prioridade_html('media') ?>
                     </select>
                 </div>
                 <div class="col-12"><label class="form-label">Responsável</label>
@@ -802,10 +802,7 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <div class="col-6"><label class="form-label">Prioridade</label>
                     <select name="prioridade" class="form-select">
-                        <option value="baixa">Baixa</option>
-                        <option value="media" selected>Média</option>
-                        <option value="alta">Alta</option>
-                        <option value="urgente">Urgente</option>
+                        <?= opcoes_prioridade_html('media') ?>
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Responsável</label>
@@ -852,9 +849,7 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <div class="col-6"><label class="form-label">Prioridade</label>
                     <select name="prioridade" class="form-select">
-                        <?php foreach (['baixa' => 'Baixa', 'media' => 'Média', 'alta' => 'Alta', 'urgente' => 'Urgente'] as $val => $label): ?>
-                            <option value="<?= $val ?>" <?= $d['prioridade'] === $val ? 'selected' : '' ?>><?= $label ?></option>
-                        <?php endforeach; ?>
+                        <?= opcoes_prioridade_html($d['prioridade']) ?>
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Responsável</label>

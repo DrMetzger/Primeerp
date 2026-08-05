@@ -81,6 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'criar_usuario') {
         $nome = trim($_POST['nome'] ?? '');
         $email = trim($_POST['email'] ?? '');
+        $telefone = apenas_digitos($_POST['telefone'] ?? '');
+        $documento = normalizar_documento($_POST['documento'] ?? '');
         $senha = $_POST['senha'] ?? '';
         $perfil = array_key_exists($_POST['perfil'] ?? '', PERFIS_USUARIO) ? $_POST['perfil'] : 'colaborador';
 
@@ -88,8 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('erro', 'Preencha nome, e-mail e uma senha com pelo menos 6 caracteres.');
         } else {
             try {
-                $stmt = $pdo->prepare('INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (?, ?, ?, ?)');
-                $stmt->execute([$nome, $email, password_hash($senha, PASSWORD_DEFAULT), $perfil]);
+                $stmt = $pdo->prepare('INSERT INTO usuarios (nome, email, telefone, documento, senha_hash, perfil) VALUES (?, ?, ?, ?, ?, ?)');
+                $stmt->execute([$nome, $email, $telefone, $documento, password_hash($senha, PASSWORD_DEFAULT), $perfil]);
                 flash_set('sucesso', 'Usuário "' . $nome . '" criado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível criar o usuário (e-mail já cadastrado?).');
@@ -254,7 +256,9 @@ require __DIR__ . '/templates/header.php';
         <div class="modal-header"><h5 class="modal-title">Novo usuário</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">E-mail de contato *</label><input type="email" name="email" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" placeholder="(00) 00000-0000"></div>
+            <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" placeholder="Só números"></div>
             <div class="mb-3"><label class="form-label">Senha *</label><input type="password" name="senha" class="form-control" minlength="6" required></div>
             <div class="mb-3"><label class="form-label">Perfil</label>
                 <select name="perfil" class="form-select">

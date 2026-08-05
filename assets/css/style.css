@@ -185,6 +185,7 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: .4rem;
     border: 1px solid transparent;
     border-radius: var(--ph-radius-sm);
@@ -300,6 +301,17 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
 }
 
 .card-stat .stat-value { font-size: 2rem; font-weight: 700; }
+
+/* Cards de visão geral clicáveis (ex.: portal/chamados.php) -- reseta o
+   estilo padrão de link (sublinhado/azul) e dá um feedback visual de que
+   são clicáveis, igual ao .card-cliente. */
+a.filtro-card, a.filtro-card:hover {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    transition: box-shadow .15s ease, transform .15s ease;
+}
+a.filtro-card:hover { box-shadow: var(--ph-elev-2); transform: translateY(-2px); }
 
 .cliente-atencao { border-left: 4px solid var(--ph-danger); }
 
@@ -674,6 +686,13 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 .avatar-circle.cliente { background-color: var(--ph-success); }
 
 .avatar-circle.avatar-foto {
+    /* Fundo branco pra qualquer foto/PNG enviado com transparência (ex.:
+       logo/desenho num fundo transparente) -- antes ficava com o fundo
+       colorido de equipe/cliente (azul/verde) aparecendo atrás das partes
+       transparentes da imagem, o que o Kleber reportou como "fundo azul"
+       ao enviar um PNG como foto de perfil. Só vale pra foto de verdade;
+       quem não tem foto continua com o círculo colorido + inicial. */
+    background-color: #fff;
     object-fit: cover;
     border: 2px solid #fff;
     box-shadow: 0 0 0 1px rgba(0,0,0,.06);

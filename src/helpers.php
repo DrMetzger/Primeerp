@@ -341,3 +341,28 @@ function badge_prioridade(string $prioridade): string
     [$label, $classe, $icone] = $mapa[$prioridade] ?? [$prioridade, '', 'bi-circle'];
     return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
 }
+
+/**
+ * <option>s de prioridade coloridos (mesmas 4 cores do badge_prioridade(),
+ * como texto -- <option> nativo não aceita muito estilo de fundo entre
+ * navegadores, mas a cor do texto funciona bem e já resolve o problema
+ * reportado pelo Kleber: "as prioridades do chamado precisam ter cores,
+ * está tudo em branco". Reaproveitado em todo select de prioridade
+ * (chamado da equipe, chamado do portal, demanda) pra não repetir a lista
+ * de opções em cada tela.
+ */
+function opcoes_prioridade_html(string $selecionada = 'media'): string
+{
+    $mapa = [
+        'baixa' => ['Baixa', '#15803d'],
+        'media' => ['Média', '#b45309'],
+        'alta' => ['Alta', '#be123c'],
+        'urgente' => ['Urgente', '#b91c1c'],
+    ];
+    $html = '';
+    foreach ($mapa as $valor => [$label, $cor]) {
+        $sel = $valor === $selecionada ? ' selected' : '';
+        $html .= '<option value="' . e($valor) . '" style="color:' . $cor . ';font-weight:600;"' . $sel . '>' . e($label) . '</option>';
+    }
+    return $html;
+}

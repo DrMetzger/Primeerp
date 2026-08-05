@@ -37,6 +37,10 @@ class Migrations
         // cliente) -- usados na página "Meu perfil".
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefone VARCHAR(50) NULL AFTER email");
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS foto_perfil VARCHAR(255) NULL COMMENT 'Caminho da foto de perfil, relativo à raiz do projeto' AFTER telefone");
+        // CPF do agente da equipe -- mesmo motivo do documento do cliente
+        // (responsabilização/identificação de quem usa o sistema), agora
+        // pedido também pros dados cadastrais da própria equipe.
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS documento VARCHAR(20) NULL COMMENT 'CPF do usuário da equipe, só dígitos' AFTER telefone");
 
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS clientes (
