@@ -139,7 +139,7 @@ require __DIR__ . '/../templates/portal_header.php';
     <div class="card-header bg-white">
         <h5 class="mb-2"><?= e($chamado['titulo']) ?></h5>
         <div class="d-flex align-items-center flex-wrap gap-3">
-            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado($chamado['status']) ?></span>
+            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado_portal($chamado['status']) ?></span>
             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Prioridade</span> <?= badge_prioridade($chamado['prioridade']) ?></span>
             <?php if ($chamado['categoria']): ?>
                 <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Categoria</span> <span class="badge bg-light text-dark border"><?= e($chamado['categoria']) ?></span></span>

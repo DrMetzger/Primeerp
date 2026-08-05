@@ -135,7 +135,7 @@ require __DIR__ . '/../templates/portal_header.php';
             <?php foreach ($chamados as $c): ?>
                 <tr data-status="<?= e($c['status']) ?>">
                     <td class="fw-semibold"><?= e($c['titulo']) ?></td>
-                    <td><?= badge_status_chamado($c['status']) ?></td>
+                    <td><?= badge_status_chamado_portal($c['status']) ?></td>
                     <td><?= badge_prioridade($c['prioridade']) ?></td>
                     <td><?= formatar_data($c['criado_em']) ?></td>
                     <td class="text-end"><a href="<?= url('portal/chamado.php?id=' . $c['id']) ?>" class="btn btn-sm btn-outline-dark">Visualizar</a></td>

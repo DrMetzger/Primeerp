@@ -297,6 +297,26 @@ function badge_status_chamado(string $status): string
 }
 
 /**
+ * Mesmo badge de status, mas com o texto escrito do ponto de vista do
+ * CLIENTE (usado só no portal) -- "Aguardando nós" faz sentido pra equipe
+ * (nós = PrimeERP), mas pro cliente lendo a própria tela "nós" fica
+ * ambíguo/parece que é ele quem está devendo resposta, quando é o
+ * contrário (o status significa que a PrimeERP é quem precisa responder).
+ * Mesmas cores/classes de badge_status_chamado(), só troca o texto.
+ */
+function badge_status_chamado_portal(string $status): string
+{
+    $mapa = [
+        'aberto' => ['Aberto', 'badge-aberto', 'bi-envelope-open'],
+        'aguardando_equipe' => ['Aguardando PrimeERP', 'badge-aguardando-equipe', 'bi-exclamation-circle-fill'],
+        'aguardando_cliente' => ['Aguardando você', 'badge-aguardando-cliente', 'bi-hourglass-split'],
+        'fechado' => ['Encerrado', 'badge-fechado', 'bi-x-circle'],
+    ];
+    [$label, $classe, $icone] = $mapa[$status] ?? [$status, '', 'bi-circle'];
+    return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
+}
+
+/**
  * Recalcula o status de um chamado a partir de quem respondeu por último --
  * nunca deve ser setado à mão (exceto o fechamento manual). Chamar sempre
  * depois de inserir uma nova linha em chamado_respostas, e também ao
