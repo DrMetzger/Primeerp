@@ -61,8 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nomeAtual = $stmt->fetchColumn();
 
         // Confirmação por nome digitado -- exclusão é irreversível e
-        // carrega junto (ON DELETE CASCADE) todas as demandas, KPIs,
-        // documentos, treinamentos e chamados desse cliente.
+        // carrega junto (ON DELETE CASCADE) todos os KPIs, documentos,
+        // treinamentos e chamados desse cliente.
         if (!$nomeAtual) {
             flash_set('erro', 'Cliente não encontrado.');
         } elseif (trim($_POST['confirmar_nome'] ?? '') !== $nomeAtual) {
@@ -91,8 +91,6 @@ $sql = "
         c.*,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe')) AS chamados_pendentes,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe') AND ch.prioridade IN ('alta','urgente')) AS urgentes,
-        (SELECT COUNT(*) FROM demandas d WHERE d.cliente_id = c.id AND d.status IN ('aberta','em_andamento')) AS demandas_abertas,
-        (SELECT COUNT(*) FROM demandas d WHERE d.cliente_id = c.id) AS total_demandas,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id) AS total_chamados,
         (SELECT COUNT(*) FROM documentos doc WHERE doc.cliente_id = c.id) AS total_documentos,
         (SELECT COUNT(*) FROM kpis k WHERE k.cliente_id = c.id) AS total_kpis,
@@ -456,7 +454,6 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('excluirConfirmarNome').value = '';
         document.getElementById('btnConfirmarExclusao').disabled = true;
         var partes = [];
-        if (dados.total_demandas > 0) partes.push(dados.total_demandas + ' demanda(s)');
         if (dados.total_chamados > 0) partes.push(dados.total_chamados + ' chamado(s)');
         if (dados.total_documentos > 0) partes.push(dados.total_documentos + ' documento(s)');
         if (dados.total_kpis > 0) partes.push(dados.total_kpis + ' KPI(s)');

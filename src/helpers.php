@@ -406,18 +406,6 @@ function tile_delta_html(int $atual, int $anterior): string
     return '<div class="small text-muted mt-1"><i class="bi ' . $icone . '"></i> ' . e($texto) . ' vs mês passado (' . $anterior . ')</div>';
 }
 
-function badge_status_demanda(string $status): string
-{
-    $mapa = [
-        'aberta' => ['Aberta', 'badge-aberta', 'bi-circle'],
-        'em_andamento' => ['Em andamento', 'badge-andamento', 'bi-arrow-repeat'],
-        'concluida' => ['Concluída', 'badge-concluida', 'bi-check-circle-fill'],
-        'cancelada' => ['Cancelada', 'badge-cancelada', 'bi-x-circle'],
-    ];
-    [$label, $classe, $icone] = $mapa[$status] ?? [$status, '', 'bi-circle'];
-    return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
-}
-
 function badge_status_chamado(string $status): string
 {
     $mapa = [
@@ -629,7 +617,7 @@ function badge_prioridade(string $prioridade): string
  * navegadores, mas a cor do texto funciona bem e já resolve o problema
  * reportado pelo Kleber: "as prioridades do chamado precisam ter cores,
  * está tudo em branco". Reaproveitado em todo select de prioridade
- * (chamado da equipe, chamado do portal, demanda) pra não repetir a lista
+ * (chamado da equipe, chamado do portal) pra não repetir a lista
  * de opções em cada tela.
  */
 function opcoes_prioridade_html(string $selecionada = 'media'): string

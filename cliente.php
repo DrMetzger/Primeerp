@@ -48,35 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Dados do cliente atualizados.');
     }
 
-    if ($acao === 'criar_demanda') {
-        $stmt = $pdo->prepare('INSERT INTO demandas (cliente_id, titulo, descricao, status, prioridade, responsavel_id, prazo) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $stmt->execute([
-            $clienteId,
-            trim($_POST['titulo']),
-            trim($_POST['descricao']) ?: null,
-            $_POST['status'] ?: 'aberta',
-            $_POST['prioridade'] ?: 'media',
-            $_POST['responsavel_id'] ?: null,
-            $_POST['prazo'] ?: null,
-        ]);
-        flash_set('sucesso', 'Demanda criada.');
-    }
-
-    if ($acao === 'atualizar_demanda') {
-        $stmt = $pdo->prepare('UPDATE demandas SET titulo=?, descricao=?, status=?, prioridade=?, responsavel_id=?, prazo=? WHERE id=? AND cliente_id=?');
-        $stmt->execute([
-            trim($_POST['titulo']),
-            trim($_POST['descricao']) ?: null,
-            $_POST['status'],
-            $_POST['prioridade'],
-            $_POST['responsavel_id'] ?: null,
-            $_POST['prazo'] ?: null,
-            (int) $_POST['demanda_id'],
-            $clienteId,
-        ]);
-        flash_set('sucesso', 'Demanda atualizada.');
-    }
-
     if ($acao === 'criar_kpi') {
         $stmt = $pdo->prepare('INSERT INTO kpis (cliente_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
@@ -363,10 +334,6 @@ if ($chamados) {
     }
 }
 
-$demandas = $pdo->prepare('SELECT d.*, u.nome AS responsavel_nome FROM demandas d LEFT JOIN usuarios u ON u.id = d.responsavel_id WHERE d.cliente_id = ? ORDER BY (d.status IN ("aberta","em_andamento")) DESC, d.prazo IS NULL, d.prazo ASC, d.criado_em DESC');
-$demandas->execute([$clienteId]);
-$demandas = $demandas->fetchAll();
-
 $kpis = $pdo->prepare('SELECT * FROM kpis WHERE cliente_id = ? ORDER BY periodo DESC, nome_kpi ASC');
 $kpis->execute([$clienteId]);
 $kpis = $kpis->fetchAll();
@@ -395,7 +362,6 @@ require __DIR__ . '/templates/header.php';
 <ul class="nav nav-tabs mb-3" id="clienteTabs">
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral">Visão geral</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados">Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#demandas">Demandas <span class="badge bg-secondary"><?= count($demandas) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis">KPIs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#documentos">Documentos <span class="badge bg-secondary"><?= count($documentos) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#treinamentos">Treinamentos <span class="badge bg-secondary"><?= count($treinamentos) ?></span></a></li>
@@ -613,42 +579,6 @@ require __DIR__ . '/templates/header.php';
         <p class="text-muted text-center py-3 d-none" id="avisoFiltroVazio">Nenhum chamado com esse status.</p>
     </div>
 
-    <!-- DEMANDAS -->
-    <div class="tab-pane" id="demandas">
-        <p class="text-muted small mb-2"><i class="bi bi-kanban"></i> Projetos e entregas -- desenvolvimentos, implementações e melhorias planejadas, com responsável e prazo definidos.</p>
-        <div class="toolbar">
-            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovaDemanda"><i class="bi bi-plus-lg"></i> Nova demanda</button>
-        </div>
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                    <tr><th>Título</th><th>Status</th><th>Prioridade</th><th>Responsável</th><th>Prazo</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($demandas as $d): ?>
-                        <tr>
-                            <td class="fw-semibold"><?= e($d['titulo']) ?></td>
-                            <td><?= badge_status_demanda($d['status']) ?></td>
-                            <td><?= badge_prioridade($d['prioridade']) ?></td>
-                            <td><?= e($d['responsavel_nome'] ?: '-') ?></td>
-                            <td><?= formatar_data($d['prazo']) ?></td>
-                            <td class="text-end">
-                                <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalEditarDemanda<?= $d['id'] ?>">Editar</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($demandas)): ?>
-                        <tr><td colspan="6" class="text-muted text-center py-3">Nenhuma demanda cadastrada ainda.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
         <div class="toolbar">
@@ -846,100 +776,6 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<!-- Modal Nova Demanda -->
-<div class="modal fade" id="modalNovaDemanda" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <form method="post">
-        <?= csrf_field() ?>
-        <input type="hidden" name="acao" value="criar_demanda">
-        <input type="hidden" name="aba_retorno" value="demandas">
-        <div class="modal-header"><h5 class="modal-title">Nova demanda</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">Descrição</label><textarea name="descricao" class="form-control" rows="3"></textarea></div>
-            <div class="row g-2">
-                <div class="col-6"><label class="form-label">Status</label>
-                    <select name="status" class="form-select">
-                        <option value="aberta">Aberta</option>
-                        <option value="em_andamento">Em andamento</option>
-                        <option value="concluida">Concluída</option>
-                        <option value="cancelada">Cancelada</option>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Prioridade</label>
-                    <select name="prioridade" class="form-select">
-                        <?= opcoes_prioridade_html('media') ?>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Responsável</label>
-                    <select name="responsavel_id" class="form-select">
-                        <option value="">-</option>
-                        <?php foreach ($usuarios as $u): ?>
-                            <option value="<?= $u['id'] ?>"><?= e($u['nome']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Prazo</label><input type="date" name="prazo" class="form-control"></div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-dark">Criar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<?php foreach ($demandas as $d): ?>
-<!-- Modal Editar Demanda -->
-<div class="modal fade" id="modalEditarDemanda<?= $d['id'] ?>" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <form method="post">
-        <?= csrf_field() ?>
-        <input type="hidden" name="acao" value="atualizar_demanda">
-        <input type="hidden" name="aba_retorno" value="demandas">
-        <input type="hidden" name="demanda_id" value="<?= $d['id'] ?>">
-        <div class="modal-header"><h5 class="modal-title">Editar demanda</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" required value="<?= e($d['titulo']) ?>"></div>
-            <div class="mb-3"><label class="form-label">Descrição</label><textarea name="descricao" class="form-control" rows="3"><?= e($d['descricao']) ?></textarea></div>
-            <div class="row g-2">
-                <div class="col-6"><label class="form-label">Status</label>
-                    <select name="status" class="form-select">
-                        <?php foreach (['aberta' => 'Aberta', 'em_andamento' => 'Em andamento', 'concluida' => 'Concluída', 'cancelada' => 'Cancelada'] as $val => $label): ?>
-                            <option value="<?= $val ?>" <?= $d['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Prioridade</label>
-                    <select name="prioridade" class="form-select">
-                        <?= opcoes_prioridade_html($d['prioridade']) ?>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Responsável</label>
-                    <select name="responsavel_id" class="form-select">
-                        <option value="">-</option>
-                        <?php foreach ($usuarios as $u): ?>
-                            <option value="<?= $u['id'] ?>" <?= (int)$d['responsavel_id'] === (int)$u['id'] ? 'selected' : '' ?>><?= e($u['nome']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-6"><label class="form-label">Prazo</label><input type="date" name="prazo" class="form-control" value="<?= e($d['prazo']) ?>"></div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-dark">Salvar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-<?php endforeach; ?>
-
 <!-- Modal Novo KPI -->
 <div class="modal fade" id="modalNovoKpi" tabindex="-1">
   <div class="modal-dialog">
@@ -1027,7 +863,7 @@ require __DIR__ . '/templates/header.php';
 </div>
 
 <script>
-// Ativa a aba certa com base no hash da URL (ex: #demandas) ou abre "Visão geral" por padrão.
+// Ativa a aba certa com base no hash da URL (ex: #chamados) ou abre "Visão geral" por padrão.
 document.addEventListener('DOMContentLoaded', function () {
     var hash = window.location.hash || '#visao-geral';
     var tabLink = document.querySelector('.nav-tabs a[href="' + hash + '"]');
