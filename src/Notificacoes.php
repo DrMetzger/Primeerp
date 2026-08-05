@@ -76,6 +76,28 @@ class Notificacoes
         Mailer::enviar($cliente['contato_email'], "Nova resposta no seu chamado: {$chamado['titulo']}", $corpo);
     }
 
+    /**
+     * Avisa por e-mail o usuário da equipe que acabou de ser atribuído (ou
+     * reatribuído) como responsável por um chamado -- pedido do Kleber ao
+     * pedir a possibilidade de reatribuir um chamado pra outro colega.
+     */
+    public static function chamadoAtribuido(array $chamado, array $usuario): void
+    {
+        if (!$usuario['email']) {
+            return;
+        }
+
+        $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . ($chamado['cliente_id'] ?? '') . '#chamados');
+
+        $corpo = "
+            <p>Olá, " . e($usuario['nome']) . ".</p>
+            <p>Você foi atribuído como responsável pelo chamado <strong>" . e($chamado['titulo']) . "</strong>.</p>
+            <p><a href=\"$link\">Ver chamado no Prime Hub</a></p>
+        ";
+
+        Mailer::enviar($usuario['email'], "Você foi atribuído ao chamado: {$chamado['titulo']}", $corpo);
+    }
+
     public static function conviteAcessoPortal(array $cliente, string $token): void
     {
         if (!$cliente['contato_email']) {

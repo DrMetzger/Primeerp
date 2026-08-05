@@ -247,6 +247,8 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .chamado-acoes { display: flex; gap: .5rem; flex-wrap: wrap; }
 .chamado-acoes .btn { min-width: 112px; }
 
+.select-responsavel-chamado { width: auto; min-width: 150px; display: inline-block; }
+
 .btn-close {
     background: transparent;
     border: none;
@@ -791,10 +793,23 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     color: inherit;
     text-decoration: none;
 }
-.chat-direita .chat-anexos .anexo-link { background-color: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); color: #fff; }
+/* Segue quem ESCREVEU (bolha-equipe = fundo escuro, precisa de texto claro),
+   não o LADO onde a bolha aparece -- antes usava .chat-direita, que é a
+   posição, e no portal do cliente a própria mensagem do cliente (bolha
+   clara/verde) também cai à direita, ficando com texto branco ilegível
+   em cima do verde claro. */
+.bolha-equipe .chat-anexos .anexo-link { background-color: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); color: #fff; }
 .chat-anexos .anexo-link:hover { text-decoration: underline; }
 
 .anexos-upload-preview { font-size: .78rem; color: #64748b; margin-top: .25rem; }
+
+/* Resumo com todos os anexos do chamado, no topo (fora de qualquer bolha de
+   chat -- fundo neutro claro, então o link não pode herdar a cor branca
+   usada dentro da bolha escura da equipe). */
+.resumo-anexos-chamado { background-color: var(--ph-neutral-bg); border-radius: var(--ph-radius-sm); padding: .65rem .85rem; }
+.resumo-anexos-titulo { font-size: .78rem; font-weight: 700; color: var(--ph-text-muted); margin-bottom: .4rem; text-transform: uppercase; letter-spacing: .02em; }
+.chat-anexos .anexo-link.anexo-link-resumo { background-color: #fff; border-color: var(--ph-border); color: var(--ph-text); }
+.chat-anexos .anexo-link.anexo-link-resumo:hover { background-color: var(--ph-primary-light); }
 
 @media (max-width: 576px) { .chat-bolha { max-width: 85%; } }
 

@@ -151,6 +151,8 @@ require __DIR__ . '/../templates/portal_header.php';
     </div>
 </div>
 
+<?= render_resumo_anexos_chamado($anexosPorLinha) ?>
+
 <h6 class="mt-4 mb-2">Conversa</h6>
 <!-- Suas próprias mensagens ficam à direita (convenção normal de chat), a
      equipe PrimeERP à esquerda -- mas a cor da bolha segue quem escreveu

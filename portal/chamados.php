@@ -121,8 +121,8 @@ require __DIR__ . '/../templates/portal_header.php';
             <button type="button" class="btn btn-sm filtro-pill filtro-fechado" data-filtro="fechado"><i class="bi bi-x-circle"></i> Encerrados</button>
         </div>
     </div>
-    <a href="<?= url('portal/exportar_chamados.php') ?>" class="btn btn-sm btn-exportar" target="_blank">
-        <i class="bi bi-file-earmark-excel"></i> Exportar
+    <a href="<?= url('portal/exportar_chamados.php') ?>" id="linkExportarChamados" class="btn btn-sm btn-exportar" target="_blank" title="Exporta só os chamados do filtro selecionado acima">
+        <i class="bi bi-file-earmark-excel"></i> Exportar <span id="linkExportarFiltroLabel"></span>
     </a>
 </div>
 
@@ -191,6 +191,12 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    var baseUrlExportar = <?= json_encode(url('portal/exportar_chamados.php')) ?>;
+    var rotulosFiltro = {
+        todos: '', aberto: '(Abertos)', aguardando_equipe: '(Pendentes)',
+        aguardando_cliente: '(Atrasados)', fechado: '(Encerrados)'
+    };
+
     function aplicarFiltro(filtro) {
         var algumVisivel = false;
         document.querySelectorAll('#tabelaMeusChamados tbody tr[data-status]').forEach(function (linha) {
@@ -202,6 +208,12 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('#filtroStatusPortal .filtro-pill').forEach(function (pill) {
             pill.classList.toggle('active', pill.getAttribute('data-filtro') === filtro);
         });
+
+        // O botão Exportar sempre exporta só o que está filtrado na tela
+        // agora -- antes exportava tudo, ignorando o filtro selecionado.
+        var linkExportar = document.getElementById('linkExportarChamados');
+        linkExportar.href = filtro === 'todos' ? baseUrlExportar : (baseUrlExportar + '?status=' + encodeURIComponent(filtro));
+        document.getElementById('linkExportarFiltroLabel').textContent = rotulosFiltro[filtro] || '';
     }
 
     document.querySelectorAll('#filtroStatusPortal .filtro-pill').forEach(function (pill) {

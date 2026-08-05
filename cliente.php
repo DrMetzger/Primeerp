@@ -211,6 +211,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Trocar o responsável de um chamado já existente -- antes só dava pra
+    // escolher o responsável na hora de CRIAR o chamado, não tinha como
+    // reatribuir depois pra outro colega da equipe.
+    if ($acao === 'atribuir_responsavel_chamado') {
+        $chamadoId = (int) $_POST['chamado_id'];
+        $novoResponsavelId = $_POST['responsavel_id'] !== '' ? (int) $_POST['responsavel_id'] : null;
+
+        $confere = $pdo->prepare('SELECT id, titulo, responsavel_id FROM chamados WHERE id = ? AND cliente_id = ?');
+        $confere->execute([$chamadoId, $clienteId]);
+        $chamadoAlvo = $confere->fetch();
+
+        if ($chamadoAlvo) {
+            $pdo->prepare('UPDATE chamados SET responsavel_id = ? WHERE id = ?')->execute([$novoResponsavelId, $chamadoId]);
+
+            // Só avisa por e-mail se realmente MUDOU pra alguém (não dispara
+            // de novo se salvar o mesmo responsável, nem quando desatribui).
+            if ($novoResponsavelId && $novoResponsavelId !== (int) $chamadoAlvo['responsavel_id']) {
+                $stmtNovoResp = $pdo->prepare('SELECT * FROM usuarios WHERE id = ?');
+                $stmtNovoResp->execute([$novoResponsavelId]);
+                $novoResponsavel = $stmtNovoResp->fetch();
+                if ($novoResponsavel) {
+                    Notificacoes::chamadoAtribuido(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo'], 'cliente_id' => $clienteId], $novoResponsavel);
+                }
+            }
+
+            flash_set('sucesso', 'Responsável do chamado atualizado.');
+        }
+    }
+
     header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
     exit;
 }
@@ -482,6 +511,21 @@ require __DIR__ . '/templates/header.php';
                             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Origem</span> <?= $c['aberto_por'] === 'cliente'
                                 ? '<span class="badge badge-origem-cliente"><i class="bi bi-person-fill"></i> Cliente</span>'
                                 : '<span class="badge badge-origem-equipe"><i class="bi bi-headset"></i> Equipe</span>' ?></span>
+                            <span class="d-flex align-items-center gap-1">
+                                <span class="badge-rotulo">Responsável</span>
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="atribuir_responsavel_chamado">
+                                    <input type="hidden" name="aba_retorno" value="chamados">
+                                    <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                                    <select name="responsavel_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o responsável avisa a pessoa por e-mail">
+                                        <option value="">Sem responsável</option>
+                                        <?php foreach ($usuarios as $u): ?>
+                                            <option value="<?= $u['id'] ?>" <?= (int) $c['responsavel_id'] === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['nome']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </form>
+                            </span>
                         </div>
                     </div>
                     <!-- O status "no meio" (aguardando nós / aguardando cliente) é sempre
@@ -505,6 +549,8 @@ require __DIR__ . '/templates/header.php';
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-1"><i class="bi bi-clock"></i> Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
+
+                <?= render_resumo_anexos_chamado($anexosPorChamado[$c['id']] ?? []) ?>
 
                 <!-- Toda a conversa (mensagem de abertura + respostas) já vem normalizada
                      em $linhasChatPorChamado -- cliente sempre à esquerda e em verde,

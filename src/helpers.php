@@ -419,6 +419,39 @@ function render_anexos_html(array $anexos): string
     return $html;
 }
 
+/**
+ * Resumo com TODOS os anexos de um chamado (abertura + todas as respostas)
+ * num único lugar, no topo do chamado -- pedido do Kleber pra não precisar
+ * "garimpar" indo mensagem por mensagem procurando um documento específico
+ * (comparou com o WhatsApp, que tem exatamente esse problema). Recebe o
+ * mesmo array $anexosPorLinha já usado pra desenhar dentro de cada bolha do
+ * chat (chave 'abertura' ou id da resposta), só reorganiza pra uma lista
+ * plana ordenada por data. Não substitui os anexos dentro de cada bolha
+ * (que dão o contexto de quando/quem enviou) -- é um atalho adicional.
+ */
+function render_resumo_anexos_chamado(array $anexosPorLinha): string
+{
+    $todos = array_merge(...array_values($anexosPorLinha ?: [[]]));
+    if (!$todos) {
+        return '';
+    }
+
+    usort($todos, fn ($a, $b) => strtotime($a['criado_em']) <=> strtotime($b['criado_em']));
+
+    $html = '<div class="resumo-anexos-chamado mb-3">';
+    $html .= '<div class="resumo-anexos-titulo"><i class="bi bi-paperclip"></i> Documentos deste chamado (' . count($todos) . ')</div>';
+    $html .= '<div class="chat-anexos">';
+    foreach ($todos as $a) {
+        $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
+        $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
+        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link anexo-link-resumo" target="_blank" rel="noopener">'
+            . '<i class="bi ' . $icone . '"></i> ' . e($a['arquivo_nome_original']) . '</a>';
+    }
+    $html .= '</div></div>';
+
+    return $html;
+}
+
 function badge_prioridade(string $prioridade): string
 {
     $mapa = [

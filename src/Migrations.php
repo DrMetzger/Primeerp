@@ -315,6 +315,24 @@ class Migrations
         self::limparReferenciasQuebradas($pdo);
         self::atribuirAvatarPadrao($pdo);
         self::vincularAutorRespostasAntigas($pdo);
+        self::atribuirResponsavelPadrao($pdo);
+    }
+
+    /**
+     * Pedido do Kleber: todo chamado sem responsável definido (a maioria dos
+     * importados do HESK, e qualquer chamado aberto pelo cliente que ainda
+     * não foi triado por alguém da equipe) cai pra ele por padrão, em vez de
+     * ficar com "Responsável: -" pra sempre. Dali alguém pode reatribuir pra
+     * outro colega (ver "atribuir_responsavel_chamado" em cliente.php) sem
+     * problema -- essa migração só preenche quem está NULL, nunca sobrescreve
+     * uma atribuição já feita.
+     */
+    private static function atribuirResponsavelPadrao(PDO $pdo): void
+    {
+        $adminPadrao = $pdo->query("SELECT id FROM usuarios ORDER BY id ASC LIMIT 1")->fetchColumn();
+        if ($adminPadrao) {
+            $pdo->prepare('UPDATE chamados SET responsavel_id = ? WHERE responsavel_id IS NULL')->execute([$adminPadrao]);
+        }
     }
 
     /**
