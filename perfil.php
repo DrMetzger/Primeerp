@@ -52,10 +52,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $novaSenha = $_POST['nova_senha'] ?? '';
         $confirmarSenha = $_POST['confirmar_senha'] ?? '';
 
+        $erroSenha = validar_senha_forte($novaSenha);
+
         if (!password_verify($senhaAtual, $usuario['senha_hash'])) {
             flash_set('erro', 'Senha atual incorreta.');
-        } elseif (strlen($novaSenha) < 6) {
-            flash_set('erro', 'A nova senha precisa ter pelo menos 6 caracteres.');
+        } elseif ($erroSenha) {
+            flash_set('erro', $erroSenha);
         } elseif ($novaSenha !== $confirmarSenha) {
             flash_set('erro', 'As senhas não coincidem.');
         } else {
@@ -66,55 +68,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'atualizar_foto') {
-        if (!isset($_FILES['foto']) || $_FILES['foto']['error'] === UPLOAD_ERR_NO_FILE) {
-            flash_set('erro', 'Selecione uma imagem.');
-        } else {
-            $arquivo = $_FILES['foto'];
-            $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-
-            if ($arquivo['error'] !== UPLOAD_ERR_OK) {
-                flash_set('erro', 'Falha no upload da imagem.');
-            } elseif ($arquivo['size'] > 5 * 1024 * 1024) {
-                flash_set('erro', 'Imagem maior que o limite permitido (5MB).');
-            } else {
-                $mime = mime_content_type($arquivo['tmp_name']);
-                if (!isset($tiposPermitidos[$mime])) {
-                    flash_set('erro', 'Formato não suportado. Envie uma imagem JPG, PNG ou WEBP.');
-                } else {
-                    $dirAvatares = __DIR__ . '/assets/avatars';
-                    if (!is_dir($dirAvatares)) {
-                        mkdir($dirAvatares, 0755, true);
-                    }
-                    foreach (glob($dirAvatares . '/usuario_' . $usuarioId . '.*') as $antigo) {
-                        @unlink($antigo);
-                    }
-                    $nomeArquivo = 'usuario_' . $usuarioId . '.' . $tiposPermitidos[$mime];
-                    $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
-                    if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
-                        redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
-                        $novoCaminho = 'assets/avatars/' . $nomeArquivo;
-                        // Backup dos bytes no banco -- ver Migrations::restaurarUploadsPerdidos().
-                        $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
-                            ->execute([$novoCaminho, file_get_contents($caminhoDestino), $usuarioId]);
-                        $_SESSION['usuario_foto'] = $novoCaminho;
-                        flash_set('sucesso', 'Foto de perfil atualizada.');
-                    } else {
-                        flash_set('erro', 'Não foi possível salvar a imagem no servidor.');
-                    }
-                }
-            }
-        }
+        $erroFoto = processar_upload_foto_usuario($pdo, $usuarioId);
+        flash_set($erroFoto ? 'erro' : 'sucesso', $erroFoto ?? 'Foto de perfil atualizada.');
     }
 
     if ($acao === 'escolher_avatar_predefinido') {
         $indice = (int) ($_POST['avatar'] ?? 0);
-        if ($indice >= 1 && $indice <= QUANTIDADE_AVATARES_PREDEFINIDOS) {
-            $novoCaminho = 'assets/img/avatares/avatar-' . $indice . '.svg';
-            // Avatar pré-definido é arquivo versionado no código -- zera o backup
-            // de bytes de uma foto enviada antes, que não serve mais pra nada.
-            $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
-                ->execute([$novoCaminho, $usuarioId]);
-            $_SESSION['usuario_foto'] = $novoCaminho;
+        if (definir_avatar_predefinido_usuario($pdo, $usuarioId, $indice)) {
             flash_set('sucesso', 'Avatar atualizado.');
         }
     }
@@ -209,13 +169,17 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Nova senha *</label>
-                            <input type="password" name="nova_senha" class="form-control" minlength="6" required>
+                            <input type="password" name="nova_senha" class="form-control" minlength="8"
+                                   pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
+                                   title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Confirmar nova senha *</label>
-                            <input type="password" name="confirmar_senha" class="form-control" minlength="6" required>
+                            <input type="password" name="confirmar_senha" class="form-control" minlength="8" required>
                         </div>
                     </div>
+                    <small class="text-muted">Pelo menos 8 caracteres, com 1 número, 1 maiúscula e 1 caractere especial.</small>
+                    <br>
                     <button type="submit" class="btn btn-outline-dark mt-3"><i class="bi bi-shield-lock"></i> Trocar senha</button>
                 </form>
             </div>

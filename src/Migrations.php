@@ -197,6 +197,16 @@ class Migrations
         // (usada para não importar o mesmo chamado do HESK duas vezes).
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS hesk_ticket_id MEDIUMINT NULL COMMENT 'Origem: id do chamado no HESK, quando migrado'");
 
+        // Data/hora exata do encerramento -- usada pra calcular tempo de
+        // atendimento nas métricas de usuário (ver usuarios.php). Setada só
+        // no fechamento manual explícito (fechar_chamado/encerrar_chamado) e
+        // zerada de novo ao reabrir (recalcular_status_chamado() cobre a
+        // reabertura implícita quando o cliente responde um chamado
+        // fechado). Chamados fechados ANTES dessa coluna existir ficam com
+        // fechado_em NULL pra sempre -- não tem como recalcular retroativo
+        // com precisão, as métricas só passam a valer pros próximos.
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS fechado_em DATETIME NULL COMMENT 'Quando o chamado foi encerrado -- usado pra métricas de tempo de atendimento' AFTER atualizado_em");
+
         // Formulário público de abertura de chamado (abrir_chamado.php, sem
         // login): quem preenche pode não ter batido com nenhum cliente
         // cadastrado (nome da empresa digitado errado, cliente novo, etc.),

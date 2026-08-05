@@ -15,6 +15,31 @@ function url(string $path = ''): string
 }
 
 /**
+ * Política de senha forte, exigida da EQUIPE interna (usuarios) -- pedido
+ * do Kleber depois do Petronilho esquecer a senha repetidas vezes com uma
+ * senha fraca fácil de esquecer. NÃO se aplica à senha do cliente no portal
+ * (portal/criar_senha.php) -- pedido foi específico pra equipe, e cliente
+ * já erra bastante com regra mais simples. Retorna null se a senha atende
+ * a política, ou uma mensagem de erro explicando o que falta.
+ */
+function validar_senha_forte(string $senha): ?string
+{
+    if (strlen($senha) < 8) {
+        return 'A senha precisa ter pelo menos 8 caracteres.';
+    }
+    if (!preg_match('/[0-9]/', $senha)) {
+        return 'A senha precisa ter pelo menos 1 número.';
+    }
+    if (!preg_match('/[A-Z]/', $senha)) {
+        return 'A senha precisa ter pelo menos 1 letra maiúscula.';
+    }
+    if (!preg_match('/[^A-Za-z0-9]/', $senha)) {
+        return 'A senha precisa ter pelo menos 1 caractere especial.';
+    }
+    return null;
+}
+
+/**
  * Igual a url(), mas acrescenta ?v=<data de modificação do arquivo> para
  * "quebrar" o cache do navegador sempre que o arquivo mudar (evita a tela
  * ficar com CSS/imagem antiga presa em cache depois de um deploy).
@@ -186,6 +211,72 @@ function redimensionar_imagem_se_necessario(string $caminhoArquivo, string $mime
 }
 
 /**
+ * Processa o upload de foto de perfil de um usuário da EQUIPE. Extraído de
+ * perfil.php (troca da própria foto) pra também ser usado em usuarios.php
+ * (admin trocando a foto de outro colega, ex.: Petronilho que vive
+ * esquecendo de mexer no próprio perfil). Retorna null se deu tudo certo,
+ * ou uma mensagem de erro pra mostrar via flash_set().
+ */
+function processar_upload_foto_usuario(\PDO $pdo, int $usuarioId): ?string
+{
+    if (empty($_FILES['foto']) || $_FILES['foto']['error'] === UPLOAD_ERR_NO_FILE) {
+        return 'Selecione uma imagem.';
+    }
+
+    $arquivo = $_FILES['foto'];
+    $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        return 'Falha no upload da imagem.';
+    }
+    if ($arquivo['size'] > 5 * 1024 * 1024) {
+        return 'Imagem maior que o limite permitido (5MB).';
+    }
+
+    $mime = mime_content_type($arquivo['tmp_name']);
+    if (!isset($tiposPermitidos[$mime])) {
+        return 'Formato não suportado. Envie uma imagem JPG, PNG ou WEBP.';
+    }
+
+    $dirAvatares = __DIR__ . '/../assets/avatars';
+    if (!is_dir($dirAvatares)) {
+        mkdir($dirAvatares, 0755, true);
+    }
+    foreach (glob($dirAvatares . '/usuario_' . $usuarioId . '.*') as $antigo) {
+        @unlink($antigo);
+    }
+    $nomeArquivo = 'usuario_' . $usuarioId . '.' . $tiposPermitidos[$mime];
+    $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
+    if (!move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+        return 'Não foi possível salvar a imagem no servidor.';
+    }
+
+    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
+    // Backup dos bytes no banco -- ver Migrations::restaurarUploadsPerdidos().
+    $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
+        ->execute(['assets/avatars/' . $nomeArquivo, file_get_contents($caminhoDestino), $usuarioId]);
+
+    return null;
+}
+
+/**
+ * Troca a foto de um usuário da equipe por um dos avatares pré-definidos
+ * (galeria de SVGs), zerando o backup de uma foto enviada antes (não serve
+ * mais pra nada -- ver processar_upload_foto_usuario()). Mesmo motivo de
+ * extração da função acima.
+ */
+function definir_avatar_predefinido_usuario(\PDO $pdo, int $usuarioId, int $indice): bool
+{
+    if ($indice < 1 || $indice > QUANTIDADE_AVATARES_PREDEFINIDOS) {
+        return false;
+    }
+    $pdo->prepare('UPDATE usuarios SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
+        ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $usuarioId]);
+
+    return true;
+}
+
+/**
  * Processa o upload do LOGO DA EMPRESA de um cliente (campo separado da foto
  * do contato/avatar) -- usado tanto no cadastro rápido (clientes.php) quanto
  * na página completa do cliente (cliente.php), pra não duplicar a mesma regra
@@ -273,6 +364,31 @@ function formatar_data(?string $data): string
     return $timestamp ? date('d/m/Y', $timestamp) : '-';
 }
 
+/**
+ * Formata minutos (de TIMESTAMPDIFF) num texto curto e legível, tipo "2 dias
+ * e 3h" ou "45 min" -- usado nas métricas de tempo de atendimento de cada
+ * usuário (ver usuarios.php). Null = ainda não há chamados fechados o
+ * suficiente pra calcular a média.
+ */
+function formatar_duracao_minutos(?float $minutos): string
+{
+    if ($minutos === null) {
+        return '--';
+    }
+    $minutos = (int) round($minutos);
+    if ($minutos < 60) {
+        return $minutos . ' min';
+    }
+    $horas = intdiv($minutos, 60);
+    if ($horas < 24) {
+        $restoMin = $minutos % 60;
+        return $horas . 'h' . ($restoMin > 0 ? ' ' . $restoMin . 'min' : '');
+    }
+    $dias = intdiv($horas, 24);
+    $restoHoras = $horas % 24;
+    return $dias . ' dia' . ($dias > 1 ? 's' : '') . ($restoHoras > 0 ? ' e ' . $restoHoras . 'h' : '');
+}
+
 function badge_status_demanda(string $status): string
 {
     $mapa = [
@@ -341,7 +457,12 @@ function recalcular_status_chamado(\PDO $pdo, int $chamadoId): void
         }
     }
 
-    $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ?')->execute([$novoStatus, $chamadoId]);
+    // Essa função nunca escolhe 'fechado' (só o fechamento manual explícito
+    // faz isso) -- ou seja, sempre que ela roda é porque o chamado está ou
+    // continua aberto, então fechado_em sempre pode ser zerado aqui. Cobre
+    // a reabertura IMPLÍCITA (cliente responde um chamado que estava
+    // fechado -- ver comentário mais abaixo de quem chama essa função).
+    $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$novoStatus, $chamadoId]);
 }
 
 /**

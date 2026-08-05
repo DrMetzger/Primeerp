@@ -31,7 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['acao'] ?? '', ['en
     // trava, um cliente poderia encerrar/reabrir chamado de outra empresa
     // só trocando o id na URL.
     $novoStatus = $_POST['acao'] === 'encerrar_chamado' ? 'fechado' : 'aguardando_equipe';
-    $pdo->prepare('UPDATE chamados SET status = ? WHERE id = ? AND cliente_id = ?')
+    $fechandoAgora = $_POST['acao'] === 'encerrar_chamado';
+    $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = ' . ($fechandoAgora ? 'NOW()' : 'NULL') . ' WHERE id = ? AND cliente_id = ?')
         ->execute([$novoStatus, $chamadoId, $clienteId]);
     flash_set('sucesso', $_POST['acao'] === 'encerrar_chamado' ? 'Chamado encerrado.' : 'Chamado reaberto.');
     header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));

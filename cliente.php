@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'fechar_chamado') {
-        $pdo->prepare("UPDATE chamados SET status = 'fechado' WHERE id = ? AND cliente_id = ?")
+        $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ? AND cliente_id = ?")
             ->execute([(int) $_POST['chamado_id'], $clienteId]);
         flash_set('sucesso', 'Chamado encerrado.');
     }
