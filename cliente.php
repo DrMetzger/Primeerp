@@ -338,9 +338,15 @@ if ($chamados) {
             $linhas[] = [
                 'autor_tipo' => $r['autor_tipo'],
                 'autor_nome' => $r['autor_nome'],
+                // Resposta da equipe sem autor_usuario_id vinculado (antiga/importada
+                // do HESK, cujo autor_nome não bate com nenhum usuário atual) cai pra
+                // foto de quem é o responsável atual do chamado, em vez de ficar sem
+                // foto nenhuma -- melhor um retrato plausível do que nunca mostrar
+                // nada, já que na prática quase toda resposta é de quem está/ficou
+                // responsável pelo chamado.
                 'foto' => $r['autor_tipo'] === 'cliente'
                     ? ($cliente['foto_perfil'] ?? null)
-                    : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? null),
+                    : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $c['responsavel_foto'] ?? null),
                 'mensagem' => $r['mensagem'],
                 'criado_em' => $r['criado_em'],
                 'anexos' => $anexosPorChamado[$c['id']][$r['id']] ?? [],

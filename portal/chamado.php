@@ -106,9 +106,12 @@ foreach ($respostas as $r) {
     $linhasChat[] = [
         'autor_tipo' => $r['autor_tipo'],
         'autor_nome' => $r['autor_nome'],
+        // Mesma ideia de cliente.php: resposta antiga/importada sem
+        // autor_usuario_id vinculado cai pra foto do responsável atual do
+        // chamado, em vez de ficar sem foto nenhuma.
         'foto' => $r['autor_tipo'] === 'cliente'
             ? $fotoPerfilCliente
-            : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? null),
+            : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $chamado['responsavel_foto'] ?? null),
         'mensagem' => $r['mensagem'],
         'criado_em' => $r['criado_em'],
         'anexos' => $anexosPorLinha[$r['id']] ?? [],

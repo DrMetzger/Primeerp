@@ -780,7 +780,7 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 .chat-bolha.bolha-equipe .chat-autor { color: #e0e7ff; }
 .chat-bolha .chat-hora { font-size: .68rem; opacity: .65; display: block; margin-top: .25rem; text-align: right; }
 
-.chat-anexos { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.chat-anexos { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; max-width: 100%; }
 .chat-anexos .anexo-link {
     display: inline-flex;
     align-items: center;
@@ -792,6 +792,19 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     border: 1px solid rgba(0,0,0,.08);
     color: inherit;
     text-decoration: none;
+    max-width: 100%;
+    min-width: 0;
+}
+/* Nome do arquivo trunca com "..." em vez de estourar a bolha -- antes um
+   nome de arquivo longo e sem espaços (ex.: hash gerado por scanner/app de
+   fotos) não tinha onde quebrar linha e ficava pra fora da bolha inteira,
+   por cima do resto da conversa. Nome completo continua acessível via
+   title="" (tooltip ao passar o mouse). */
+.chat-anexos .anexo-link .anexo-nome {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 /* Segue quem ESCREVEU (bolha-equipe = fundo escuro, precisa de texto claro),
    não o LADO onde a bolha aparece -- antes usava .chat-direita, que é a

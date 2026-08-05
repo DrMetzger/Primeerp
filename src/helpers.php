@@ -431,8 +431,8 @@ function render_anexos_html(array $anexos): string
     foreach ($anexos as $a) {
         $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
         $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
-        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link" target="_blank" rel="noopener">'
-            . '<i class="bi ' . $icone . '"></i> ' . e($a['arquivo_nome_original']) . '</a>';
+        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
+            . '<i class="bi ' . $icone . '"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
     }
     $html .= '</div>';
 
@@ -464,8 +464,8 @@ function render_resumo_anexos_chamado(array $anexosPorLinha): string
     foreach ($todos as $a) {
         $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
         $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
-        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link anexo-link-resumo" target="_blank" rel="noopener">'
-            . '<i class="bi ' . $icone . '"></i> ' . e($a['arquivo_nome_original']) . '</a>';
+        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link anexo-link-resumo" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
+            . '<i class="bi ' . $icone . '"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
     }
     $html .= '</div></div>';
 
