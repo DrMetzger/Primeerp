@@ -64,12 +64,17 @@ $idadeMediaDias = $idadeMediaDias !== null ? (float) $idadeMediaDias : null;
 
 // --- Volume mensal (últimos 6 meses), abertos vs fechados -----------------
 
+// DateTime::format('M') do PHP sempre devolve em inglês (Jan, Feb, Mar...),
+// não segue nenhuma configuração de locale/idioma do servidor -- por isso o
+// mês precisa ser traduzido manualmente aqui.
+$mesesAbreviados = [1 => 'Jan', 2 => 'Fev', 3 => 'Mar', 4 => 'Abr', 5 => 'Mai', 6 => 'Jun', 7 => 'Jul', 8 => 'Ago', 9 => 'Set', 10 => 'Out', 11 => 'Nov', 12 => 'Dez'];
+
 $mesesLabels = [];
 $mesesChave = [];
 for ($i = 5; $i >= 0; $i--) {
     $ref = new DateTime("first day of -$i month");
     $mesesChave[] = $ref->format('Y-m');
-    $mesesLabels[] = ucfirst($ref->format('M/y'));
+    $mesesLabels[] = $mesesAbreviados[(int) $ref->format('n')] . '/' . $ref->format('y');
 }
 
 $abertosPorMes = array_fill_keys($mesesChave, 0);
