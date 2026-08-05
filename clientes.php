@@ -129,7 +129,7 @@ require __DIR__ . '/templates/header.php';
         <div class="card-cliente <?= $temUrgente ? 'cliente-atencao' : '' ?>"
              data-busca="<?= e(mb_strtolower($c['nome'] . ' ' . $c['contato_nome'] . ' ' . $c['contato_email'])) ?>"
              role="button" tabindex="0"
-             data-cliente='<?= e(json_encode($c, JSON_UNESCAPED_UNICODE)) ?>'>
+             data-cliente='<?= e(json_encode(array_diff_key($c, ['foto_perfil_dados' => 1, 'logo_dados' => 1]), JSON_UNESCAPED_UNICODE)) ?>'>
             <div class="card-cliente-logo-wrap">
                 <?php if (arquivo_publico_existe($c['logo'])): ?>
                     <img src="<?= e(asset_url($c['logo'])) ?>" alt="Logo <?= e($c['nome']) ?>" class="card-cliente-logo">
