@@ -60,14 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'escolhe
 if ($ehMaster) {
     $nomeDaPessoa = $cliente['contato_nome'] ?: $cliente['nome'];
     $emailDaPessoa = $cliente['contato_email'] ?? '';
-    $fotoDaPessoa = $cliente['foto_perfil'] ?? null;
+    $fotoDaPessoa = resolver_avatar_por_email($pdo, $emailDaPessoa, $cliente['foto_perfil'] ?? null);
 } else {
     $stmtSetor = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setor_responsaveis sr JOIN setores s ON s.id = sr.setor_id WHERE sr.id = ?');
     $stmtSetor->execute([$idAlvoFoto]);
     $setorResponsavel = $stmtSetor->fetch();
     $nomeDaPessoa = $setorResponsavel['nome'];
     $emailDaPessoa = $setorResponsavel['email'] ?? '';
-    $fotoDaPessoa = $setorResponsavel['foto_perfil'] ?? null;
+    $fotoDaPessoa = resolver_avatar_por_email($pdo, $emailDaPessoa, $setorResponsavel['foto_perfil'] ?? null);
 }
 
 $tituloPagina = 'Meu perfil';

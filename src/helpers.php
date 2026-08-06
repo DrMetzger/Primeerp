@@ -125,6 +125,43 @@ function avatar_html(string $nome, ?string $caminhoFoto, string $classeTipo): st
 }
 
 /**
+ * Resolve o avatar "efetivo" de uma pessoa pelo E-MAIL -- pedido do Kleber
+ * depois de cadastrar um responsável de setor com o mesmo e-mail do contato
+ * master do cliente (a mesma pessoa, usando dois logins diferentes) e ver
+ * duas fotos diferentes (uma real, outra a inicial genérica) pra quem é,
+ * na prática, uma pessoa só. Se o registro já tem foto própria, usa ela
+ * (nunca sobrescreve escolha explícita); só cai na busca por e-mail quando
+ * está vazio. Procura em clientes (contato master) primeiro, depois em
+ * outros responsáveis de setor, depois na equipe -- primeiro que achar com
+ * foto ganha.
+ */
+function resolver_avatar_por_email(\PDO $pdo, ?string $email, ?string $fotoPropria): ?string
+{
+    if ($fotoPropria) {
+        return $fotoPropria;
+    }
+    if (!$email) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare('SELECT foto_perfil FROM clientes WHERE contato_email = ? AND foto_perfil IS NOT NULL LIMIT 1');
+    $stmt->execute([$email]);
+    if ($foto = $stmt->fetchColumn()) {
+        return $foto;
+    }
+
+    $stmt = $pdo->prepare('SELECT foto_perfil FROM setor_responsaveis WHERE email = ? AND foto_perfil IS NOT NULL LIMIT 1');
+    $stmt->execute([$email]);
+    if ($foto = $stmt->fetchColumn()) {
+        return $foto;
+    }
+
+    $stmt = $pdo->prepare('SELECT foto_perfil FROM usuarios WHERE email = ? AND foto_perfil IS NOT NULL LIMIT 1');
+    $stmt->execute([$email]);
+    return $stmt->fetchColumn() ?: null;
+}
+
+/**
  * Guarda telefone só com os dígitos no banco (sem máscara) -- importante
  * pra integração futura com WhatsApp Cloud API, que precisa do número
  * "cru". A máscara é só visual, aplicada na hora de exibir/preencher campo

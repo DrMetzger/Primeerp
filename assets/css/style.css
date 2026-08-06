@@ -241,11 +241,35 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .btn-group { display: inline-flex; }
 .btn-group .btn { border-radius: var(--ph-radius-sm); }
 
-/* Botões de ação de um chamado (Imprimir / Encerrar / Reabrir) -- largura
-   mínima igual pros dois lados não ficarem "desbalanceados" só porque um
-   ícone+texto é mais largo que o outro (ex.: "Imprimir" x "Encerrar"). */
-.chamado-acoes { display: flex; gap: .5rem; flex-wrap: wrap; }
-.chamado-acoes .btn { min-width: 112px; }
+/* Botões de ação de um chamado (Imprimir / Encerrar / Reabrir) -- Imprimir é
+   uma ação secundária/neutra (cinza, menor), Encerrar/Reabrir são a ação
+   principal da tela e cada uma tem cor própria (verde = concluir, âmbar =
+   reabrir/atenção) pra não ficar tudo com a mesma cara de botão outline
+   branco -- pedido do Kleber de nunca deixar botão com fundo branco. */
+.chamado-acoes { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+.btn-imprimir {
+    background-color: var(--ph-neutral-bg);
+    border-color: var(--ph-neutral-bg);
+    color: var(--ph-neutral);
+}
+.btn-imprimir:hover { background-color: #e4e4e7; border-color: #e4e4e7; color: var(--ph-text); }
+
+.btn-encerrar {
+    background-color: var(--ph-success);
+    border-color: var(--ph-success);
+    color: #fff;
+    font-weight: 600;
+}
+.btn-encerrar:hover { background-color: #14532d; border-color: #14532d; color: #fff; }
+
+.btn-reabrir {
+    background-color: var(--ph-warning);
+    border-color: var(--ph-warning);
+    color: #fff;
+    font-weight: 600;
+}
+.btn-reabrir:hover { background-color: #7c3510; border-color: #7c3510; color: #fff; }
 
 .select-responsavel-chamado { width: auto; min-width: 150px; display: inline-block; }
 

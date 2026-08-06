@@ -218,7 +218,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $pdo->prepare('INSERT INTO setor_responsaveis (setor_id, nome, email, telefone, documento) VALUES (?, ?, ?, ?, ?)')
                         ->execute([$setorId, $nomeResp, $emailResp, $telefoneResp, $documentoResp]);
+                    $responsavelId = (int) $pdo->lastInsertId();
                 }
+
+                // Mesma pessoa que já é o contato master desse cliente,
+                // cadastrada também como responsável de um setor (mesmo
+                // e-mail) -- sincroniza o avatar com o do master direto no
+                // banco, em vez de confiar só no fallback de exibição
+                // (resolver_avatar_por_email), pra já nascer certo mesmo se
+                // esse responsável já tinha uma foto própria diferente.
+                if ($cliente['contato_email'] && $cliente['foto_perfil'] && strcasecmp(trim($cliente['contato_email']), $emailResp) === 0) {
+                    $pdo->prepare('UPDATE setor_responsaveis SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
+                        ->execute([$cliente['foto_perfil'], $cliente['foto_perfil_dados'], $responsavelId]);
+                }
+
                 flash_set('sucesso', 'Responsável do setor salvo.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro responsável de setor?).');
@@ -462,8 +475,28 @@ if ($chamados) {
         }
     }
 
+    // Responsável ATUAL de cada setor desse cliente -- usado pra mostrar o
+    // avatar de quem respondeu/abriu pelo login de um SETOR (não master).
+    // Foto do master também passa pelo resolver (mesma pessoa pode estar
+    // cadastrada com o mesmo e-mail em mais de um lugar, ver helpers.php).
+    $responsavelPorSetorId = [];
+    $stmtRespSetores = $pdo->prepare('SELECT s.id AS setor_id, sr.nome, sr.email, sr.foto_perfil FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.cliente_id = ?');
+    $stmtRespSetores->execute([$clienteId]);
+    foreach ($stmtRespSetores->fetchAll() as $rs) {
+        $responsavelPorSetorId[$rs['setor_id']] = $rs;
+    }
+    $fotoMaster = resolver_avatar_por_email($pdo, $cliente['contato_email'] ?? null, $cliente['foto_perfil'] ?? null);
+
     foreach ($chamados as $c) {
         $linhas = [];
+
+        // Ver comentário equivalente em portal/chamado.php: usar o
+        // responsável ATUAL do setor (não um "congelado" por mensagem) é uma
+        // simplificação aceitável, mesmo que o chamado tenha trocado de setor
+        // no meio da conversa.
+        $respSetor = $c['setor_id'] ? ($responsavelPorSetorId[$c['setor_id']] ?? null) : null;
+        $fotoSetor = $respSetor ? resolver_avatar_por_email($pdo, $respSetor['email'], $respSetor['foto_perfil']) : null;
+        $abertoPorSetor = $c['aberto_por_tipo'] === 'setor' && $respSetor;
 
         if ($c['aberto_por'] === 'equipe') {
             $autorTipo = 'equipe';
@@ -475,8 +508,8 @@ if ($chamados) {
             $foto = null;
         } else {
             $autorTipo = 'cliente';
-            $nomeAutor = $cliente['contato_nome'] ?: $cliente['nome'];
-            $foto = $cliente['foto_perfil'] ?? null;
+            $nomeAutor = $abertoPorSetor ? $respSetor['nome'] : ($cliente['contato_nome'] ?: $cliente['nome']);
+            $foto = $abertoPorSetor ? $fotoSetor : $fotoMaster;
         }
 
         $linhas[] = [
@@ -489,6 +522,7 @@ if ($chamados) {
         ];
 
         foreach ($respostasPorChamado[$c['id']] ?? [] as $r) {
+            $respondeuPorSetor = $r['autor_cliente_tipo'] === 'setor' && $respSetor;
             $linhas[] = [
                 'autor_tipo' => $r['autor_tipo'],
                 'autor_nome' => $r['autor_nome'],
@@ -499,7 +533,7 @@ if ($chamados) {
                 // nada, já que na prática quase toda resposta é de quem está/ficou
                 // responsável pelo chamado.
                 'foto' => $r['autor_tipo'] === 'cliente'
-                    ? ($cliente['foto_perfil'] ?? null)
+                    ? ($respondeuPorSetor ? $fotoSetor : $fotoMaster)
                     : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $c['responsavel_foto'] ?? null),
                 'mensagem' => $r['mensagem'],
                 'criado_em' => $r['criado_em'],
@@ -695,7 +729,7 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="card-setor-responsavel">
                             <?php if ($s['responsavel_id']): ?>
-                                <?= avatar_html($s['responsavel_nome'], $s['responsavel_foto'], 'cliente') ?>
+                                <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
                                 <span><?= e($s['responsavel_nome']) ?></span>
                                 <?php if (!$s['responsavel_portal_ativo']): ?><span class="text-muted small">(sem acesso ainda)</span><?php endif; ?>
                             <?php else: ?>
@@ -797,16 +831,16 @@ require __DIR__ . '/templates/header.php';
                          automático, calculado por quem respondeu por último -- a única
                          ação manual que sobra é encerrar ou reabrir o chamado. -->
                     <div class="chamado-acoes">
-                        <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-printer"></i> Imprimir</a>
+                        <a href="<?= url('imprimir_chamado.php?id=' . $c['id']) ?>" target="_blank" class="btn btn-sm btn-imprimir"><i class="bi bi-printer"></i> Imprimir</a>
                         <form method="post" class="d-inline">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">
                             <input type="hidden" name="aba_retorno" value="chamados">
                             <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                             <?php if ($c['status'] === 'fechado'): ?>
-                                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
+                                <button type="submit" class="btn btn-reabrir"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
                             <?php else: ?>
-                                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
+                                <button type="submit" class="btn btn-encerrar"><i class="bi bi-check2-circle"></i> Encerrar</button>
                             <?php endif; ?>
                         </form>
                     </div>
@@ -1094,7 +1128,7 @@ require __DIR__ . '/templates/header.php';
 
                 <?php if ($s['responsavel_id']): ?>
                 <div class="d-flex align-items-center gap-3 mb-3">
-                    <?= avatar_html($s['responsavel_nome'], $s['responsavel_foto'], 'cliente') ?>
+                    <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
                     <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
                         <?= csrf_field() ?>
                         <input type="hidden" name="acao" value="atualizar_avatar_setor_responsavel">

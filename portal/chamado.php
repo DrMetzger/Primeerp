@@ -26,9 +26,10 @@ if (ClienteAuth::isMaster()) {
 }
 $chamado = $stmt->fetch();
 
-$stmtCliente = $pdo->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+$stmtCliente = $pdo->prepare('SELECT foto_perfil, contato_email FROM clientes WHERE id = ?');
 $stmtCliente->execute([$clienteId]);
-$fotoPerfilCliente = $stmtCliente->fetchColumn() ?: null;
+$clienteInfo = $stmtCliente->fetch();
+$fotoPerfilCliente = resolver_avatar_por_email($pdo, $clienteInfo['contato_email'] ?? null, $clienteInfo['foto_perfil'] ?? null);
 
 if (!$chamado) {
     http_response_code(404);
@@ -91,8 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
     $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
 
     if ($mensagem !== '' || $temAnexo) {
-        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, mensagem) VALUES (?, ?, ?, ?)')
-            ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_cliente_tipo, mensagem) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), ClienteAuth::isMaster() ? 'master' : 'setor', $mensagem !== '' ? $mensagem : '(anexo enviado)']);
         $respostaId = (int) $pdo->lastInsertId();
         // (Cliente não tem usuario_id de equipe -- autor_usuario_id fica NULL aqui, o que é correto.)
 
@@ -137,19 +138,43 @@ if ($idsAutoresEquipe) {
     }
 }
 
+// Responsável ATUAL do setor do chamado (se tiver) -- usado como autor das
+// mensagens de quem respondeu pelo login de SETOR (não master). É uma
+// aproximação: se o chamado trocou de setor no meio da conversa (ver
+// atribuir_setor_chamado), uma resposta antiga de um setor respondida antes
+// da troca passa a mostrar o responsável do setor ATUAL, não do de então --
+// caso raro, aceitável pelo ganho de simplicidade (não precisa guardar o
+// setor "congelado" em cada resposta).
+$responsavelSetorAtual = null;
+$fotoSetorAtual = null;
+if ($chamado['setor_id']) {
+    $stmtRespSetor = $pdo->prepare('SELECT nome, email, foto_perfil FROM setor_responsaveis WHERE setor_id = ?');
+    $stmtRespSetor->execute([$chamado['setor_id']]);
+    $responsavelSetorAtual = $stmtRespSetor->fetch() ?: null;
+    if ($responsavelSetorAtual) {
+        $fotoSetorAtual = resolver_avatar_por_email($pdo, $responsavelSetorAtual['email'], $responsavelSetorAtual['foto_perfil']);
+    }
+}
+
 // Normaliza a mensagem de abertura + as respostas num único formato, igual
 // ao que já é feito em cliente.php -- antes a mensagem de abertura ficava
 // fora do chat, sem bolha, cor ou nome de contato.
+$abertoPorSetor = $chamado['aberto_por_tipo'] === 'setor' && $responsavelSetorAtual;
 $linhasChat = [];
 $linhasChat[] = [
     'autor_tipo' => $chamado['aberto_por'] === 'equipe' ? 'equipe' : 'cliente',
-    'autor_nome' => $chamado['aberto_por'] === 'equipe' ? ($chamado['responsavel_nome'] ?: 'Equipe PrimeERP') : ClienteAuth::clienteNome(),
-    'foto' => $chamado['aberto_por'] === 'equipe' ? ($chamado['responsavel_foto'] ?? null) : $fotoPerfilCliente,
+    'autor_nome' => $chamado['aberto_por'] === 'equipe'
+        ? ($chamado['responsavel_nome'] ?: 'Equipe PrimeERP')
+        : ($abertoPorSetor ? $responsavelSetorAtual['nome'] : ClienteAuth::clienteNome()),
+    'foto' => $chamado['aberto_por'] === 'equipe'
+        ? ($chamado['responsavel_foto'] ?? null)
+        : ($abertoPorSetor ? $fotoSetorAtual : $fotoPerfilCliente),
     'mensagem' => $chamado['descricao'],
     'criado_em' => $chamado['criado_em'],
     'anexos' => $anexosPorLinha['abertura'] ?? [],
 ];
 foreach ($respostas as $r) {
+    $respondeuPorSetor = $r['autor_cliente_tipo'] === 'setor' && $responsavelSetorAtual;
     $linhasChat[] = [
         'autor_tipo' => $r['autor_tipo'],
         'autor_nome' => $r['autor_nome'],
@@ -157,7 +182,7 @@ foreach ($respostas as $r) {
         // autor_usuario_id vinculado cai pra foto do responsável atual do
         // chamado, em vez de ficar sem foto nenhuma.
         'foto' => $r['autor_tipo'] === 'cliente'
-            ? $fotoPerfilCliente
+            ? ($respondeuPorSetor ? $fotoSetorAtual : $fotoPerfilCliente)
             : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $chamado['responsavel_foto'] ?? null),
         'mensagem' => $r['mensagem'],
         'criado_em' => $r['criado_em'],
@@ -182,14 +207,14 @@ require __DIR__ . '/../templates/portal_header.php';
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <a href="<?= url('portal/chamados.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para meus chamados</a>
     <div class="chamado-acoes">
-        <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-printer"></i> Imprimir</a>
+        <a href="<?= url('imprimir_chamado.php?id=' . $chamadoId) ?>" target="_blank" class="btn btn-sm btn-imprimir"><i class="bi bi-printer"></i> Imprimir</a>
         <form method="post" class="d-inline">
             <?= csrf_field() ?>
             <input type="hidden" name="acao" value="<?= $chamado['status'] === 'fechado' ? 'reabrir_chamado' : 'encerrar_chamado' ?>">
             <?php if ($chamado['status'] === 'fechado'): ?>
-                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
+                <button type="submit" class="btn btn-reabrir"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
             <?php else: ?>
-                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-check2-circle"></i> Encerrar</button>
+                <button type="submit" class="btn btn-encerrar"><i class="bi bi-check2-circle"></i> Encerrar</button>
             <?php endif; ?>
         </form>
     </div>

@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
         // Título padronizado em MAIÚSCULAS -- pedido do Kleber pra não ter
         // cada chamado com uma capitalização diferente ("Erro no sistema",
         // "ERRO NO SISTEMA", "erro no sistema" tudo misturado na listagem).
-        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
             mb_strtoupper($titulo, 'UTF-8'),
@@ -47,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
             $categoria,
             $_POST['prioridade'] ?? 'media',
             'cliente',
+            ClienteAuth::isMaster() ? 'master' : 'setor',
             $setorIdNovoChamado,
         ]);
         $chamadoId = (int) $pdo->lastInsertId();
@@ -90,7 +91,7 @@ if (ClienteAuth::isMaster()) {
     $setoresPortal = $pdo->prepare('
         SELECT
             s.*,
-            sr.nome AS responsavel_nome, sr.foto_perfil AS responsavel_foto,
+            sr.nome AS responsavel_nome, sr.email AS responsavel_email, sr.foto_perfil AS responsavel_foto,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id) AS chamados_total,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe")) AS chamados_pendentes,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe") AND ch.prioridade IN ("alta","urgente")) AS chamados_urgentes,
@@ -136,7 +137,7 @@ require __DIR__ . '/../templates/portal_header.php';
                 <div class="card-setor-topo"><span class="fw-semibold"><?= e($s['nome']) ?></span></div>
                 <div class="card-setor-responsavel">
                     <?php if ($s['responsavel_nome']): ?>
-                        <?= avatar_html($s['responsavel_nome'], $s['responsavel_foto'], 'cliente') ?>
+                        <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
                         <span><?= e($s['responsavel_nome']) ?></span>
                     <?php else: ?>
                         <span class="text-muted small"><i class="bi bi-person-x"></i> Sem responsável cadastrado</span>
@@ -169,7 +170,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <a href="#" class="card card-stat h-100 d-block filtro-card" data-filtro="aberto">
             <div class="card-body">
                 <div class="text-muted small">Abertos</div>
-                <div class="stat-value text-primary"><?= $totalAbertos ?></div>
+                <div class="stat-value text-primary" id="kpiAbertos"><?= $totalAbertos ?></div>
             </div>
         </a>
     </div>
@@ -177,7 +178,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <a href="#" class="card card-stat h-100 d-block filtro-card" data-filtro="aguardando_equipe">
             <div class="card-body">
                 <div class="text-muted small">Pendentes (com a PrimeERP)</div>
-                <div class="stat-value text-danger"><?= $totalPendentes ?></div>
+                <div class="stat-value text-danger" id="kpiPendentes"><?= $totalPendentes ?></div>
             </div>
         </a>
     </div>
@@ -185,7 +186,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <a href="#" class="card card-stat h-100 d-block filtro-card" data-filtro="aguardando_cliente">
             <div class="card-body">
                 <div class="text-muted small">Atrasados (com você)</div>
-                <div class="stat-value text-warning"><?= $totalAtrasados ?></div>
+                <div class="stat-value text-warning" id="kpiAtrasados"><?= $totalAtrasados ?></div>
             </div>
         </a>
     </div>
@@ -193,7 +194,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <a href="#" class="card card-stat h-100 d-block filtro-card" data-filtro="fechado">
             <div class="card-body">
                 <div class="text-muted small">Encerrados</div>
-                <div class="stat-value text-dark"><?= $totalEncerrados ?></div>
+                <div class="stat-value text-dark" id="kpiEncerrados"><?= $totalEncerrados ?></div>
             </div>
         </a>
     </div>
@@ -328,6 +329,26 @@ document.addEventListener('DOMContentLoaded', function () {
     var filtroAtual = 'todos';
     var filtroSetorAtual = 'todos';
 
+    // Os 4 números de cima (Abertos/Pendentes/Atrasados/Encerrados) sempre
+    // mostram as 4 categorias ao mesmo tempo (não seguem o pill de status
+    // selecionado), mas PRECISAM seguir o setor selecionado -- clicar num
+    // card de setor tem que atualizar esses números pra refletir só aquele
+    // setor, senão o card mostra "Pendentes: 1" mas o número de cima continua
+    // com o total de todos os setores, o que não faz sentido pro usuário.
+    function atualizarKpis() {
+        var contagem = {aberto: 0, aguardando_equipe: 0, aguardando_cliente: 0, fechado: 0};
+        document.querySelectorAll('#tabelaMeusChamados tbody tr[data-status]').forEach(function (linha) {
+            var mostraSetor = filtroSetorAtual === 'todos' || linha.getAttribute('data-setor') === filtroSetorAtual;
+            if (mostraSetor && contagem.hasOwnProperty(linha.getAttribute('data-status'))) {
+                contagem[linha.getAttribute('data-status')]++;
+            }
+        });
+        document.getElementById('kpiAbertos').textContent = contagem.aberto;
+        document.getElementById('kpiPendentes').textContent = contagem.aguardando_equipe;
+        document.getElementById('kpiAtrasados').textContent = contagem.aguardando_cliente;
+        document.getElementById('kpiEncerrados').textContent = contagem.fechado;
+    }
+
     function aplicarFiltro(filtro) {
         filtroAtual = filtro;
         var algumVisivel = false;
@@ -342,6 +363,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('#filtroStatusPortal .filtro-pill').forEach(function (pill) {
             pill.classList.toggle('active', pill.getAttribute('data-filtro') === filtro);
         });
+        atualizarKpis();
     }
 
     // Ao abrir a tela de exportar, já vem pré-selecionado o mesmo filtro que

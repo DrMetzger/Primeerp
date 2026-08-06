@@ -187,14 +187,23 @@ class ClienteAuth
         if (!self::check()) {
             return null;
         }
+        $pdo = Database::connection();
         if (self::isMaster()) {
-            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+            $stmt = $pdo->prepare('SELECT foto_perfil, contato_email FROM clientes WHERE id = ?');
             $stmt->execute([self::clienteId()]);
         } else {
-            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM setor_responsaveis WHERE id = ?');
+            $stmt = $pdo->prepare('SELECT foto_perfil, email FROM setor_responsaveis WHERE id = ?');
             $stmt->execute([self::setorResponsavelId()]);
         }
-        return $stmt->fetchColumn() ?: null;
+        $linha = $stmt->fetch();
+        if (!$linha) {
+            return null;
+        }
+        // Padroniza pelo e-mail (ver helpers.php) -- assim o mesmo e-mail
+        // cadastrado como master E como responsável de setor mostra sempre o
+        // mesmo avatar, em vez de um ter foto real e o outro cair na inicial
+        // genérica só porque nunca subiu foto NESSE registro específico.
+        return resolver_avatar_por_email($pdo, $linha['contato_email'] ?? $linha['email'] ?? null, $linha['foto_perfil']);
     }
 
     public static function requireLogin(): void

@@ -59,6 +59,14 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $chamados = $stmt->fetchAll();
 
+// Nenhum chamado bate com o filtro -- não faz sentido baixar uma planilha
+// vazia (só confunde: parece que deu erro, e não "não tinha nada nesse
+// período"). Avisa em vez de gerar o arquivo.
+if (!$chamados) {
+    http_response_code(404);
+    die('Nenhum chamado encontrado nesse período/filtro. Ajuste e tente exportar novamente.');
+}
+
 $nomeArquivo = 'chamados_' . preg_replace('/[^A-Za-z0-9_-]/', '_', $cliente['nome']) . '_' . date('Ymd') . '.csv';
 
 header('Content-Type: text/csv; charset=UTF-8');

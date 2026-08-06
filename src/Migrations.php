@@ -293,6 +293,16 @@ class Migrations
         // excluir um setor (ver ação 'excluir_setor' em cliente.php).
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor/departamento do cliente que abriu -- ver tabela setores' AFTER cliente_id");
 
+        // Qual TIPO de login do cliente abriu o chamado (master ou um setor
+        // específico) -- não dá pra inferir isso só olhando setor_id, porque
+        // o master também pode escolher um setor no formulário, e o setor_id
+        // pode mudar depois (reatribuição). Sem isso, o avatar mostrado na
+        // mensagem de abertura ficava sempre o do master, mesmo quando quem
+        // abriu foi o responsável de um setor. NULL = aberto pela equipe,
+        // formulário público, ou chamado antigo de antes dessa coluna (nesses
+        // casos cai pro comportamento de sempre, mostrando o master).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS aberto_por_tipo VARCHAR(10) NULL COMMENT \"'master' ou 'setor', só quando aberto_por='cliente'\" AFTER aberto_por");
+
         // Formulário público de abertura de chamado (abrir_chamado.php, sem
         // login): quem preenche pode não ter batido com nenhum cliente
         // cadastrado (nome da empresa digitado errado, cliente novo, etc.),
@@ -329,6 +339,13 @@ class Migrations
         // a foto/avatar de quem respondeu pra mostrar no chat. Respostas
         // antigas (e as importadas do HESK) ficam com NULL, cai pra inicial.
         $pdo->exec("ALTER TABLE chamado_respostas ADD COLUMN IF NOT EXISTS autor_usuario_id INT NULL AFTER autor_nome");
+
+        // Mesma ideia de chamados.aberto_por_tipo, mas por RESPOSTA -- uma
+        // conversa pode ter réplicas do master e de um setor intercaladas
+        // (master responde qualquer chamado; login de setor só responde os
+        // do próprio setor). NULL = resposta da equipe, ou de antes dessa
+        // coluna existir (nesse caso cai pro master, comportamento de sempre).
+        $pdo->exec("ALTER TABLE chamado_respostas ADD COLUMN IF NOT EXISTS autor_cliente_tipo VARCHAR(10) NULL COMMENT \"'master' ou 'setor', só quando autor_tipo='cliente'\" AFTER autor_usuario_id");
 
         // Anexos de chamado -- podem vir da mensagem de abertura (resposta_id
         // NULL) ou de qualquer resposta, tanto do cliente (portal) quanto da

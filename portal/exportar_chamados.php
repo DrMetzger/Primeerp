@@ -61,6 +61,13 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $chamados = $stmt->fetchAll();
 
+// Nenhum chamado bate com o filtro (ex.: exportar um setor que ainda não
+// teve nenhum chamado) -- não faz sentido baixar uma planilha vazia.
+if (!$chamados) {
+    http_response_code(404);
+    die('Nenhum chamado encontrado nesse período/filtro. Ajuste e tente exportar novamente.');
+}
+
 $nomeArquivo = 'meus_chamados_' . date('Ymd') . '.csv';
 
 header('Content-Type: text/csv; charset=UTF-8');
