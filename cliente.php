@@ -355,6 +355,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Trocar o setor de um chamado depois de aberto -- exige que o setor de
+    // destino já tenha um responsável cadastrado (é ele que recebe o e-mail
+    // avisando que o chamado caiu pro setor dele; sem responsável não tem
+    // pra quem avisar, então a troca é bloqueada). Tirar o setor ("Sem
+    // setor") não passa por essa trava, já que não precisa avisar ninguém.
+    if ($acao === 'atribuir_setor_chamado') {
+        $chamadoId = (int) $_POST['chamado_id'];
+        $novoSetorId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+
+        $confere = $pdo->prepare('SELECT id, titulo, setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
+        $confere->execute([$chamadoId, $clienteId]);
+        $chamadoAlvo = $confere->fetch();
+
+        if (!$chamadoAlvo) {
+            flash_set('erro', 'Chamado não encontrado.');
+        } elseif ($novoSetorId === null) {
+            $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ?')->execute([$chamadoId]);
+            flash_set('sucesso', 'Chamado sem setor vinculado.');
+        } else {
+            $stmtSetorResp = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.id = ? AND s.cliente_id = ?');
+            $stmtSetorResp->execute([$novoSetorId, $clienteId]);
+            $responsavelSetor = $stmtSetorResp->fetch();
+
+            if (!$responsavelSetor) {
+                flash_set('erro', 'Esse setor ainda não tem um responsável cadastrado -- cadastre em "Gerenciar setores" antes de atribuir chamados a ele.');
+            } else {
+                $pdo->prepare('UPDATE chamados SET setor_id = ? WHERE id = ?')->execute([$novoSetorId, $chamadoId]);
+
+                // Só avisa por e-mail se realmente MUDOU de setor (não
+                // dispara de novo se salvar o mesmo setor).
+                if ($novoSetorId !== (int) $chamadoAlvo['setor_id']) {
+                    Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $responsavelSetor, $responsavelSetor['setor_nome']);
+                }
+
+                flash_set('sucesso', 'Chamado vinculado ao setor ' . $responsavelSetor['setor_nome'] . '.');
+            }
+        }
+    }
+
     header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
     exit;
 }
@@ -716,7 +755,21 @@ require __DIR__ . '/templates/header.php';
                         <strong class="d-block mb-1"><?= e($c['titulo']) ?></strong>
                         <div class="d-flex align-items-center flex-wrap gap-3">
                             <?php if ($setores): ?>
-                            <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Setor</span> <span class="badge modulo-neutro modulo-pill"><i class="bi bi-diagram-3"></i> <?= e($nomesSetoresPorId[$c['setor_id']] ?? 'Sem setor') ?></span></span>
+                            <span class="d-flex align-items-center gap-1">
+                                <span class="badge-rotulo">Setor</span>
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="atribuir_setor_chamado">
+                                    <input type="hidden" name="aba_retorno" value="chamados">
+                                    <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                                    <select name="setor_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
+                                        <option value="" <?= !$c['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
+                                        <?php foreach ($setores as $s): ?>
+                                            <option value="<?= $s['id'] ?>" <?= (int) $c['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$s['responsavel_id'] ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$s['responsavel_id'] ? ' (sem responsável)' : '' ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </form>
+                            </span>
                             <?php endif; ?>
                             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado($c['status']) ?></span>
                             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Prioridade</span> <?= badge_prioridade($c['prioridade']) ?></span>

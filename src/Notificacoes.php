@@ -98,6 +98,29 @@ class Notificacoes
         Mailer::enviar($usuario['email'], "Você foi atribuído ao chamado: {$chamado['titulo']}", $corpo);
     }
 
+    /**
+     * Mesma ideia de chamadoAtribuido(), mas pro RESPONSÁVEL DE SETOR do
+     * cliente (não um usuário da equipe) -- disparado quando um chamado é
+     * movido pra (ou aberto direto em) um setor que já tem responsável
+     * cadastrado. Link vai pro portal do cliente, não pro Prime Hub interno.
+     */
+    public static function chamadoAtribuidoSetor(array $chamado, array $setorResponsavel, string $setorNome): void
+    {
+        if (!$setorResponsavel['email']) {
+            return;
+        }
+
+        $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
+
+        $corpo = "
+            <p>Olá, " . e($setorResponsavel['nome']) . ".</p>
+            <p>O chamado <strong>" . e($chamado['titulo']) . "</strong> foi atribuído ao setor <strong>" . e($setorNome) . "</strong>, do qual você é responsável.</p>
+            <p><a href=\"$link\">Ver chamado no portal</a></p>
+        ";
+
+        Mailer::enviar($setorResponsavel['email'], "Novo chamado atribuído ao setor {$setorNome}: {$chamado['titulo']}", $corpo);
+    }
+
     public static function conviteAcessoPortal(array $cliente, string $token): void
     {
         if (!$cliente['contato_email']) {

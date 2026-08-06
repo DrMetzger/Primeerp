@@ -4,6 +4,7 @@ require_once __DIR__ . '/../bootstrap.php';
 
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
+use AdminPrime\Notificacoes;
 
 ClienteAuth::requireLogin();
 
@@ -32,6 +33,41 @@ $fotoPerfilCliente = $stmtCliente->fetchColumn() ?: null;
 if (!$chamado) {
     http_response_code(404);
     die('Chamado não encontrado.');
+}
+
+// Trocar o setor de um chamado -- só o login MASTER pode (é quem vê/gerencia
+// todos os setores; login de setor não deveria conseguir mandar o próprio
+// chamado pra outro setor, senão perderia acesso a ele na mesma hora). Exige
+// que o setor de destino já tenha responsável cadastrado, senão bloqueia
+// (mesma trava e mesmo aviso por e-mail de cliente.php, do lado da equipe).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribuir_setor_chamado' && ClienteAuth::isMaster()) {
+    csrf_verify();
+    $novoSetorId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+
+    if ($novoSetorId === null) {
+        $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ? AND cliente_id = ?')->execute([$chamadoId, $clienteId]);
+        flash_set('sucesso', 'Chamado sem setor vinculado.');
+    } else {
+        $stmtSetorResp = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.id = ? AND s.cliente_id = ?');
+        $stmtSetorResp->execute([$novoSetorId, $clienteId]);
+        $responsavelSetor = $stmtSetorResp->fetch();
+
+        if (!$responsavelSetor) {
+            flash_set('erro', 'Esse setor ainda não tem um responsável cadastrado -- cadastre um antes de atribuir chamados a ele.');
+        } else {
+            $setorAntigoId = (int) $chamado['setor_id'];
+            $pdo->prepare('UPDATE chamados SET setor_id = ? WHERE id = ? AND cliente_id = ?')->execute([$novoSetorId, $chamadoId, $clienteId]);
+
+            if ($novoSetorId !== $setorAntigoId) {
+                Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $responsavelSetor, $responsavelSetor['setor_nome']);
+            }
+
+            flash_set('sucesso', 'Chamado vinculado ao setor ' . $responsavelSetor['setor_nome'] . '.');
+        }
+    }
+
+    header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['acao'] ?? '', ['encerrar_chamado', 'reabrir_chamado'], true)) {
@@ -129,6 +165,16 @@ foreach ($respostas as $r) {
     ];
 }
 
+// Setores pra montar o select de reatribuição -- só usado pelo master (ver
+// header abaixo), mas fica fora do "if" pra não duplicar a query nos dois
+// lugares se um dia precisar dela em mais de um ponto da página.
+$setoresPortal = [];
+if (ClienteAuth::isMaster()) {
+    $stmtSetoresPortal = $pdo->prepare('SELECT s.id, s.nome, sr.id AS responsavel_id FROM setores s LEFT JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.cliente_id = ? ORDER BY s.nome ASC');
+    $stmtSetoresPortal->execute([$clienteId]);
+    $setoresPortal = $stmtSetoresPortal->fetchAll();
+}
+
 $tituloPagina = $chamado['titulo'];
 require __DIR__ . '/../templates/portal_header.php';
 ?>
@@ -153,6 +199,21 @@ require __DIR__ . '/../templates/portal_header.php';
     <div class="card-header bg-white">
         <h5 class="mb-2"><?= e($chamado['titulo']) ?></h5>
         <div class="d-flex align-items-center flex-wrap gap-3">
+            <?php if ($setoresPortal): ?>
+            <span class="d-flex align-items-center gap-1">
+                <span class="badge-rotulo">Setor</span>
+                <form method="post" class="d-inline">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="atribuir_setor_chamado">
+                    <select name="setor_id" class="form-select form-select-sm" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
+                        <option value="" <?= !$chamado['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
+                        <?php foreach ($setoresPortal as $s): ?>
+                            <option value="<?= $s['id'] ?>" <?= (int) $chamado['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$s['responsavel_id'] ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$s['responsavel_id'] ? ' (sem responsável)' : '' ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+            </span>
+            <?php endif; ?>
             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Status</span> <?= badge_status_chamado_portal($chamado['status']) ?></span>
             <span class="d-flex align-items-center gap-1"><span class="badge-rotulo">Prioridade</span> <?= badge_prioridade($chamado['prioridade']) ?></span>
             <?php if ($chamado['categoria']): ?>
