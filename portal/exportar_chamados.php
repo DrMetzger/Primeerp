@@ -48,6 +48,13 @@ if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
     $sql .= ' AND c.status = ?';
     $params[] = $statusFiltro;
 }
+// Login de setor só exporta os PRÓPRIOS chamados -- mesma independência
+// entre setores aplicada aqui. Login master exporta de todos os setores de
+// uma vez, sem esse filtro (é o pedido original do master).
+if (!ClienteAuth::isMaster()) {
+    $sql .= ' AND c.setor_id = ?';
+    $params[] = ClienteAuth::setorId();
+}
 $sql .= ' ORDER BY c.criado_em DESC';
 
 $stmt = $pdo->prepare($sql);

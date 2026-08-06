@@ -17,6 +17,11 @@ ClienteAuth::requireLogin();
 
 $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
+$ehMaster = ClienteAuth::isMaster();
+// Login master edita clientes.foto_perfil (dele mesmo); login de setor edita
+// setor_responsaveis.foto_perfil (só o próprio, nunca o de outro setor) --
+// mesma tela pros dois, só troca qual linha/tabela é alterada por baixo.
+$idAlvoFoto = $ehMaster ? $clienteId : ClienteAuth::setorResponsavelId();
 
 $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
 $stmt->execute([$clienteId]);
@@ -24,46 +29,10 @@ $cliente = $stmt->fetch();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atualizar_foto') {
     csrf_verify();
-
-    if (!isset($_FILES['foto']) || $_FILES['foto']['error'] === UPLOAD_ERR_NO_FILE) {
-        flash_set('erro', 'Selecione uma imagem.');
-    } else {
-        $arquivo = $_FILES['foto'];
-        $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-
-        if ($arquivo['error'] !== UPLOAD_ERR_OK) {
-            flash_set('erro', 'Falha no upload da imagem.');
-        } elseif ($arquivo['size'] > 5 * 1024 * 1024) {
-            flash_set('erro', 'Imagem maior que o limite permitido (5MB).');
-        } else {
-            $mime = mime_content_type($arquivo['tmp_name']);
-            if (!isset($tiposPermitidos[$mime])) {
-                flash_set('erro', 'Formato não suportado. Envie uma imagem JPG, PNG ou WEBP.');
-            } else {
-                $dirAvatares = __DIR__ . '/../assets/avatars';
-                if (!is_dir($dirAvatares)) {
-                    mkdir($dirAvatares, 0755, true);
-                }
-                // Remove foto antiga desse cliente (pode ter extensão diferente da nova).
-                foreach (glob($dirAvatares . '/cliente_' . $clienteId . '.*') as $antigo) {
-                    @unlink($antigo);
-                }
-                $nomeArquivo = 'cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
-                $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
-                if (move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
-                    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
-                    $novoCaminho = 'assets/avatars/' . $nomeArquivo;
-                    // Backup dos bytes no banco -- ver Migrations::restaurarUploadsPerdidos().
-                    $pdo->prepare('UPDATE clientes SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
-                        ->execute([$novoCaminho, file_get_contents($caminhoDestino), $clienteId]);
-                    $_SESSION['portal_cliente_foto'] = $novoCaminho;
-                    flash_set('sucesso', 'Foto de perfil atualizada.');
-                } else {
-                    flash_set('erro', 'Não foi possível salvar a imagem no servidor.');
-                }
-            }
-        }
-    }
+    $erroFoto = $ehMaster
+        ? processar_upload_foto_cliente($pdo, $idAlvoFoto)
+        : processar_upload_foto_setor_responsavel($pdo, $idAlvoFoto);
+    flash_set($erroFoto ? 'erro' : 'sucesso', $erroFoto ?? 'Foto de perfil atualizada.');
 
     header('Location: ' . url('portal/perfil.php'));
     exit;
@@ -75,17 +44,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atualiz
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'escolher_avatar_predefinido') {
     csrf_verify();
     $indice = (int) ($_POST['avatar'] ?? 0);
-    if ($indice >= 1 && $indice <= QUANTIDADE_AVATARES_PREDEFINIDOS) {
-        $novoCaminho = 'assets/img/avatares/avatar-' . $indice . '.svg';
-        // Avatar pré-definido é arquivo versionado no código -- zera o backup
-        // de bytes de uma foto enviada antes, que não serve mais pra nada.
-        $pdo->prepare('UPDATE clientes SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
-            ->execute([$novoCaminho, $clienteId]);
-        $_SESSION['portal_cliente_foto'] = $novoCaminho;
+    $definiu = $ehMaster
+        ? definir_avatar_predefinido_cliente($pdo, $idAlvoFoto, $indice)
+        : definir_avatar_predefinido_setor_responsavel($pdo, $idAlvoFoto, $indice);
+    if ($definiu) {
         flash_set('sucesso', 'Avatar atualizado.');
     }
     header('Location: ' . url('portal/perfil.php'));
     exit;
+}
+
+// Nome/foto/e-mail exibidos: PESSOA logada (contato/key user do master, ou
+// responsável do setor), não a empresa -- mesma regra de "Olá, GEOMAQ" ser
+// impessoal, aplicada aqui também.
+if ($ehMaster) {
+    $nomeDaPessoa = $cliente['contato_nome'] ?: $cliente['nome'];
+    $emailDaPessoa = $cliente['contato_email'] ?? '';
+    $fotoDaPessoa = $cliente['foto_perfil'] ?? null;
+} else {
+    $stmtSetor = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setor_responsaveis sr JOIN setores s ON s.id = sr.setor_id WHERE sr.id = ?');
+    $stmtSetor->execute([$idAlvoFoto]);
+    $setorResponsavel = $stmtSetor->fetch();
+    $nomeDaPessoa = $setorResponsavel['nome'];
+    $emailDaPessoa = $setorResponsavel['email'] ?? '';
+    $fotoDaPessoa = $setorResponsavel['foto_perfil'] ?? null;
 }
 
 $tituloPagina = 'Meu perfil';
@@ -96,15 +78,10 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <div class="card card-stat">
     <div class="card-body text-center py-4">
-        <?php
-        // Mostra a PESSOA (contato/key user), não a empresa -- mesma regra
-        // de "Olá, GEOMAQ" ser impessoal, aplicada aqui também.
-        $nomeDaPessoa = $cliente['contato_nome'] ?: $cliente['nome'];
-        ?>
-        <div class="perfil-avatar d-inline-block"><?= avatar_html($nomeDaPessoa, $cliente['foto_perfil'] ?? null, 'cliente') ?></div>
+        <div class="perfil-avatar d-inline-block"><?= avatar_html($nomeDaPessoa, $fotoDaPessoa, 'cliente') ?></div>
         <div class="mt-3">
             <h6 class="mb-0"><?= e($nomeDaPessoa) ?></h6>
-            <p class="text-muted small mb-0"><?= e($cliente['nome']) ?> &middot; <?= e($cliente['contato_email'] ?? '') ?></p>
+            <p class="text-muted small mb-0"><?= $ehMaster ? e($cliente['nome']) : e($setorResponsavel['setor_nome']) . ' · ' . e($cliente['nome']) ?> &middot; <?= e($emailDaPessoa) ?></p>
         </div>
 
         <form method="post" enctype="multipart/form-data" class="mt-4 mx-auto" style="max-width: 360px;">

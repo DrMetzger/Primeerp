@@ -11,8 +11,18 @@ $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
 $chamadoId = (int) ($_GET['id'] ?? 0);
 
-$stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ?');
-$stmt->execute([$chamadoId, $clienteId]);
+// Login de setor só pode ver/responder chamado do PRÓPRIO setor -- sem essa
+// trava, um responsável de setor poderia ver chamado de outro setor da
+// mesma empresa só trocando o id na URL (o que quebraria a independência
+// entre setores que é o pedido original). Login master continua vendo
+// qualquer chamado da empresa, de qualquer setor.
+if (ClienteAuth::isMaster()) {
+    $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ?');
+    $stmt->execute([$chamadoId, $clienteId]);
+} else {
+    $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ? AND c.setor_id = ?');
+    $stmt->execute([$chamadoId, $clienteId, ClienteAuth::setorId()]);
+}
 $chamado = $stmt->fetch();
 
 $stmtCliente = $pdo->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');

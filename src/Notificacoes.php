@@ -118,6 +118,28 @@ class Notificacoes
     }
 
     /**
+     * Mesma ideia de conviteAcessoPortal(), pro responsável de um SETOR
+     * específico (não o master) -- ver ClienteAuth pra entender a diferença.
+     */
+    public static function conviteAcessoSetor(array $setorResponsavel, string $setorNome, string $token): void
+    {
+        if (!$setorResponsavel['email']) {
+            return;
+        }
+
+        $link = self::baseUrlAbsoluta() . url('portal/criar_senha.php?token=' . $token);
+
+        $corpo = "
+            <p>Olá, " . e($setorResponsavel['nome']) . ".</p>
+            <p>Você agora pode acompanhar e abrir chamados do setor <strong>" . e($setorNome) . "</strong> diretamente pelo nosso portal.</p>
+            <p><a href=\"$link\">Clique aqui para criar sua senha de acesso</a></p>
+            <p>Este link expira em 24 horas.</p>
+        ";
+
+        Mailer::enviar($setorResponsavel['email'], 'Acesso ao portal de chamados PrimeERP', $corpo);
+    }
+
+    /**
      * Preparado para a API do WhatsApp (Meta Cloud API). Enquanto as chaves
      * não estiverem configuradas, apenas registra em log e não faz nada.
      */

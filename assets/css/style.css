@@ -948,6 +948,54 @@ a.card-cliente, a.card-cliente:hover {
 .modulo-ok { background-color: var(--ph-success-bg); color: var(--ph-success); }
 .modulo-neutro { background-color: var(--ph-neutral-bg); color: var(--ph-neutral); }
 
+/* Painel de setores independentes (cliente.php, aba Chamados, e portal do
+   cliente pro usuário master) -- mesmo espírito visual do grid de clientes
+   (.card-cliente acima), só que carrega insights de chamados em vez de
+   dados cadastrais. */
+.grid-setores {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: .75rem;
+}
+
+.card-setor {
+    background-color: var(--ph-surface);
+    border-radius: var(--ph-radius);
+    box-shadow: var(--ph-elev-1);
+    padding: 1rem;
+    cursor: pointer;
+    transition: box-shadow .15s ease, transform .15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    border: 2px solid transparent;
+}
+
+.card-setor:hover, .card-setor:focus { box-shadow: var(--ph-elev-2); transform: translateY(-2px); outline: none; }
+.card-setor.active { border-color: var(--ph-primary); }
+.card-setor.setor-atencao { border-left: 4px solid var(--ph-danger); }
+
+.card-setor-topo { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.card-setor-responsavel { display: flex; align-items: center; gap: .5rem; font-size: .85rem; color: var(--ph-text-muted); }
+.card-setor-insights { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: auto; }
+
+.card-setor-todos { align-items: center; justify-content: center; text-align: center; background-color: var(--ph-primary-light); }
+.card-setor-todos .card-setor-topo { justify-content: center; }
+
+/* Lista de setores dentro do modal "Gerenciar setores" (cliente.php) */
+.setor-detalhe {
+    border: 1px solid var(--ph-border);
+    border-radius: var(--ph-radius);
+    padding: .75rem 1rem;
+}
+
+.setor-detalhe + .setor-detalhe { margin-top: .5rem; }
+.setor-detalhe summary { cursor: pointer; display: flex; align-items: center; gap: .5rem; list-style: none; }
+.setor-detalhe summary::-webkit-details-marker { display: none; }
+.setor-detalhe summary::before { content: "\25B8"; color: var(--ph-text-muted); transition: transform .15s ease; }
+.setor-detalhe[open] summary::before { transform: rotate(90deg); }
+.setor-detalhe-corpo { padding-top: .75rem; margin-top: .5rem; border-top: 1px solid var(--ph-border); }
+
 /* Preview do logo dentro do modal de cliente (aba Visualizar/Alterar) */
 .logo-preview-alterar {
     width: 56px;

@@ -7,9 +7,28 @@ use AdminPrime\Database;
 $pdo = Database::connection();
 $token = $_GET['token'] ?? $_POST['token'] ?? '';
 
+// O mesmo link/tela serve pra dois tipos de convite: o master (contato
+// principal do cliente, cliente_senha_tokens) e o responsável de um setor
+// (setor_senha_tokens) -- ver ClienteAuth pra entender a diferença entre os
+// dois tipos de login. Tenta os dois; achou num, para.
 $stmt = $pdo->prepare('SELECT t.*, c.nome AS cliente_nome, c.contato_nome, c.contato_email FROM cliente_senha_tokens t JOIN clientes c ON c.id = t.cliente_id WHERE t.token = ? AND t.usado = 0 AND t.expira_em > NOW() LIMIT 1');
 $stmt->execute([$token]);
 $tokenInfo = $stmt->fetch();
+$tipoToken = 'master';
+
+if (!$tokenInfo) {
+    $stmt = $pdo->prepare("
+        SELECT t.*, sr.nome AS contato_nome, sr.email AS contato_email, s.nome AS setor_nome, c.nome AS cliente_nome
+        FROM setor_senha_tokens t
+        JOIN setor_responsaveis sr ON sr.id = t.setor_responsavel_id
+        JOIN setores s ON s.id = sr.setor_id
+        JOIN clientes c ON c.id = s.cliente_id
+        WHERE t.token = ? AND t.usado = 0 AND t.expira_em > NOW() LIMIT 1
+    ");
+    $stmt->execute([$token]);
+    $tokenInfo = $stmt->fetch();
+    $tipoToken = 'setor';
+}
 
 $erro = null;
 
@@ -26,10 +45,17 @@ if (!$tokenInfo) {
     } elseif ($senha !== $confirmar) {
         $erro = 'As senhas não coincidem.';
     } else {
-        $pdo->prepare('UPDATE clientes SET senha_hash = ?, portal_ativo = 1 WHERE id = ?')
-            ->execute([password_hash($senha, PASSWORD_DEFAULT), $tokenInfo['cliente_id']]);
-        $pdo->prepare('UPDATE cliente_senha_tokens SET usado = 1 WHERE id = ?')
-            ->execute([$tokenInfo['id']]);
+        if ($tipoToken === 'master') {
+            $pdo->prepare('UPDATE clientes SET senha_hash = ?, portal_ativo = 1 WHERE id = ?')
+                ->execute([password_hash($senha, PASSWORD_DEFAULT), $tokenInfo['cliente_id']]);
+            $pdo->prepare('UPDATE cliente_senha_tokens SET usado = 1 WHERE id = ?')
+                ->execute([$tokenInfo['id']]);
+        } else {
+            $pdo->prepare('UPDATE setor_responsaveis SET senha_hash = ?, portal_ativo = 1 WHERE id = ?')
+                ->execute([password_hash($senha, PASSWORD_DEFAULT), $tokenInfo['setor_responsavel_id']]);
+            $pdo->prepare('UPDATE setor_senha_tokens SET usado = 1 WHERE id = ?')
+                ->execute([$tokenInfo['id']]);
+        }
 
         flash_set('sucesso', 'Senha criada com sucesso! Faça login para acessar seus chamados.');
         header('Location: ' . url('portal/login.php'));
@@ -67,7 +93,7 @@ if (!$tokenInfo) {
                 // nenhum contato cadastrado ainda.
                 $nomeSaudacao = $tokenInfo['contato_nome'] ?: $tokenInfo['cliente_nome'];
                 ?>
-                <p class="text-muted">Olá, <strong><?= e($nomeSaudacao) ?></strong>. Defina sua senha de acesso ao portal.</p>
+                <p class="text-muted">Olá, <strong><?= e($nomeSaudacao) ?></strong>. Defina sua senha de acesso ao portal<?= $tipoToken === 'setor' ? ' do setor ' . e($tokenInfo['setor_nome']) : '' ?>.</p>
                 <form method="post">
                     <?= csrf_field() ?>
                     <input type="hidden" name="token" value="<?= e($token) ?>">

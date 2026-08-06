@@ -193,6 +193,65 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Setores (departamentos) de um cliente -- pedido do Kleber depois
+        // de um cliente perguntar se os setores da empresa dele (Compras,
+        // Financeiro, RH...) podem ser "independentes", cada um com seu
+        // próprio responsável abrindo chamado só pro assunto do próprio
+        // setor. Fica de fora por padrão (lista vazia) -- só existe pra quem
+        // a equipe cadastrar explicitamente, porque tem cliente pequeno que
+        // só usa 1 ou 2 setores (ou nenhum, e continua no modelo antigo,
+        // um contato só pra empresa toda).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                nome VARCHAR(100) NOT NULL,
+                ativo TINYINT(1) NOT NULL DEFAULT 1,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_setores_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Login de cada setor -- SEPARADO do login "master" (que continua
+        // sendo clientes.contato_email/senha_hash, sem nenhuma mudança).
+        // Cada setor tem seu próprio responsável/conta, só vê e abre chamado
+        // do próprio setor; o master (contato principal do cliente) vê todos
+        // os setores. Mesmos campos de sempre (foto, backup de bytes,
+        // documento) pra reaproveitar avatar_html() e o resto do padrão já
+        // usado em usuarios/clientes.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setor_responsaveis (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setor_id INT NOT NULL,
+                nome VARCHAR(150) NOT NULL,
+                email VARCHAR(150) NOT NULL,
+                telefone VARCHAR(50) NULL,
+                documento VARCHAR(20) NULL COMMENT 'CPF ou RG, só dígitos',
+                senha_hash VARCHAR(255) NULL,
+                portal_ativo TINYINT(1) NOT NULL DEFAULT 0,
+                foto_perfil VARCHAR(255) NULL,
+                foto_perfil_dados LONGBLOB NULL COMMENT 'Backup dos bytes de foto_perfil, mesmo motivo de usuarios.foto_perfil_dados',
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_setor_responsaveis_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE CASCADE,
+                UNIQUE KEY uq_setor_responsaveis_email (email)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Convite/reset de senha do responsável de setor -- mesmo esquema de
+        // cliente_senha_tokens (token por e-mail, expira em 24h), só que
+        // separado pra não precisar tornar cliente_id opcional lá.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setor_senha_tokens (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setor_responsavel_id INT NOT NULL,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                usado TINYINT(1) NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expira_em DATETIME NOT NULL,
+                CONSTRAINT fk_setor_senha_tokens_responsavel FOREIGN KEY (setor_responsavel_id) REFERENCES setor_responsaveis(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamados (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -224,6 +283,15 @@ class Migrations
         // fechado_em NULL pra sempre -- não tem como recalcular retroativo
         // com precisão, as métricas só passam a valer pros próximos.
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS fechado_em DATETIME NULL COMMENT 'Quando o chamado foi encerrado -- usado pra métricas de tempo de atendimento' AFTER atualizado_em");
+
+        // Setor (departamento) de origem do chamado -- ver tabela setores
+        // acima. NULL pra todo chamado antigo (de antes dessa coluna
+        // existir) e pra cliente que não usa setor nenhum (continua no
+        // modelo de contato único, sem nenhuma mudança de comportamento).
+        // Sem FK de banco de propósito (mesmo padrão das outras colunas
+        // adicionadas via ALTER nesse arquivo) -- zera manualmente ao
+        // excluir um setor (ver ação 'excluir_setor' em cliente.php).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor/departamento do cliente que abriu -- ver tabela setores' AFTER cliente_id");
 
         // Formulário público de abertura de chamado (abrir_chamado.php, sem
         // login): quem preenche pode não ter batido com nenhum cliente
@@ -424,6 +492,7 @@ class Migrations
             ['usuarios', 'foto_perfil', 'foto_perfil_dados'],
             ['clientes', 'foto_perfil', 'foto_perfil_dados'],
             ['clientes', 'logo', 'logo_dados'],
+            ['setor_responsaveis', 'foto_perfil', 'foto_perfil_dados'],
         ] as [$tabela, $colunaCaminho, $colunaDados]) {
             $linhas = $pdo->query("SELECT id, $colunaCaminho AS caminho FROM $tabela WHERE $colunaCaminho IS NOT NULL AND $colunaDados IS NOT NULL")->fetchAll();
             foreach ($linhas as $linha) {

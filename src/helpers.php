@@ -277,6 +277,121 @@ function definir_avatar_predefinido_usuario(\PDO $pdo, int $usuarioId, int $indi
 }
 
 /**
+ * Mesma ideia de processar_upload_foto_usuario(), pro responsável de um
+ * SETOR (setor_responsaveis) -- login próprio, separado do master do
+ * cliente. Retorna null se deu tudo certo, ou uma mensagem de erro.
+ */
+function processar_upload_foto_setor_responsavel(\PDO $pdo, int $responsavelId): ?string
+{
+    if (empty($_FILES['foto']) || $_FILES['foto']['error'] === UPLOAD_ERR_NO_FILE) {
+        return 'Selecione uma imagem.';
+    }
+
+    $arquivo = $_FILES['foto'];
+    $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        return 'Falha no upload da imagem.';
+    }
+    if ($arquivo['size'] > 5 * 1024 * 1024) {
+        return 'Imagem maior que o limite permitido (5MB).';
+    }
+
+    $mime = mime_content_type($arquivo['tmp_name']);
+    if (!isset($tiposPermitidos[$mime])) {
+        return 'Formato não suportado. Envie uma imagem JPG, PNG ou WEBP.';
+    }
+
+    $dirAvatares = __DIR__ . '/../assets/avatars';
+    if (!is_dir($dirAvatares)) {
+        mkdir($dirAvatares, 0755, true);
+    }
+    foreach (glob($dirAvatares . '/setor_responsavel_' . $responsavelId . '.*') as $antigo) {
+        @unlink($antigo);
+    }
+    $nomeArquivo = 'setor_responsavel_' . $responsavelId . '.' . $tiposPermitidos[$mime];
+    $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
+    if (!move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+        return 'Não foi possível salvar a imagem no servidor.';
+    }
+
+    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
+    $pdo->prepare('UPDATE setor_responsaveis SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
+        ->execute(['assets/avatars/' . $nomeArquivo, file_get_contents($caminhoDestino), $responsavelId]);
+
+    return null;
+}
+
+function definir_avatar_predefinido_setor_responsavel(\PDO $pdo, int $responsavelId, int $indice): bool
+{
+    if ($indice < 1 || $indice > QUANTIDADE_AVATARES_PREDEFINIDOS) {
+        return false;
+    }
+    $pdo->prepare('UPDATE setor_responsaveis SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
+        ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $responsavelId]);
+
+    return true;
+}
+
+/**
+ * Mesma ideia de processar_upload_foto_usuario(), pro CONTATO/key user
+ * (login master) de um cliente -- usada em portal/perfil.php. Não confundir
+ * com processar_upload_logo_cliente(), que é o logo da EMPRESA, campo
+ * separado.
+ */
+function processar_upload_foto_cliente(\PDO $pdo, int $clienteId): ?string
+{
+    if (empty($_FILES['foto']) || $_FILES['foto']['error'] === UPLOAD_ERR_NO_FILE) {
+        return 'Selecione uma imagem.';
+    }
+
+    $arquivo = $_FILES['foto'];
+    $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        return 'Falha no upload da imagem.';
+    }
+    if ($arquivo['size'] > 5 * 1024 * 1024) {
+        return 'Imagem maior que o limite permitido (5MB).';
+    }
+
+    $mime = mime_content_type($arquivo['tmp_name']);
+    if (!isset($tiposPermitidos[$mime])) {
+        return 'Formato não suportado. Envie uma imagem JPG, PNG ou WEBP.';
+    }
+
+    $dirAvatares = __DIR__ . '/../assets/avatars';
+    if (!is_dir($dirAvatares)) {
+        mkdir($dirAvatares, 0755, true);
+    }
+    foreach (glob($dirAvatares . '/cliente_' . $clienteId . '.*') as $antigo) {
+        @unlink($antigo);
+    }
+    $nomeArquivo = 'cliente_' . $clienteId . '.' . $tiposPermitidos[$mime];
+    $caminhoDestino = $dirAvatares . '/' . $nomeArquivo;
+    if (!move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+        return 'Não foi possível salvar a imagem no servidor.';
+    }
+
+    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 400, 400);
+    $pdo->prepare('UPDATE clientes SET foto_perfil = ?, foto_perfil_dados = ? WHERE id = ?')
+        ->execute(['assets/avatars/' . $nomeArquivo, file_get_contents($caminhoDestino), $clienteId]);
+
+    return null;
+}
+
+function definir_avatar_predefinido_cliente(\PDO $pdo, int $clienteId, int $indice): bool
+{
+    if ($indice < 1 || $indice > QUANTIDADE_AVATARES_PREDEFINIDOS) {
+        return false;
+    }
+    $pdo->prepare('UPDATE clientes SET foto_perfil = ?, foto_perfil_dados = NULL WHERE id = ?')
+        ->execute(['assets/img/avatares/avatar-' . $indice . '.svg', $clienteId]);
+
+    return true;
+}
+
+/**
  * Processa o upload do LOGO DA EMPRESA de um cliente (campo separado da foto
  * do contato/avatar) -- usado tanto no cadastro rápido (clientes.php) quanto
  * na página completa do cliente (cliente.php), pra não duplicar a mesma regra

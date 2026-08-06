@@ -18,13 +18,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
     $descricao = trim($_POST['descricao'] ?? '');
     $categoria = trim($_POST['categoria'] ?? '');
 
+    // Quem abre é o login de um setor -- o chamado já nasce vinculado a esse
+    // setor, sem depender do que vier do POST (não dá pra confiar em input
+    // escondido pra isso). Quem abre é o master, pode escolher um setor
+    // (opcional) entre os cadastrados desse cliente, senão fica sem setor.
+    if (!ClienteAuth::isMaster()) {
+        $setorIdNovoChamado = ClienteAuth::setorId();
+    } else {
+        $setorIdNovoChamado = null;
+        if (!empty($_POST['setor_id'])) {
+            $confereSetor = $pdo->prepare('SELECT id FROM setores WHERE id = ? AND cliente_id = ?');
+            $confereSetor->execute([(int) $_POST['setor_id'], $clienteId]);
+            $setorIdNovoChamado = $confereSetor->fetchColumn() ?: null;
+        }
+    }
+
     if ($titulo === '' || $descricao === '' || $categoria === '') {
         flash_set('erro', 'Preencha o título, a categoria e a descrição do chamado.');
     } else {
         // Título padronizado em MAIÚSCULAS -- pedido do Kleber pra não ter
         // cada chamado com uma capitalização diferente ("Erro no sistema",
         // "ERRO NO SISTEMA", "erro no sistema" tudo misturado na listagem).
-        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
             mb_strtoupper($titulo, 'UTF-8'),
@@ -32,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
             $categoria,
             $_POST['prioridade'] ?? 'media',
             'cliente',
+            $setorIdNovoChamado,
         ]);
         $chamadoId = (int) $pdo->lastInsertId();
 
@@ -54,9 +70,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
     exit;
 }
 
-$stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC');
-$stmt->execute([$clienteId]);
+// Login de setor só vê os chamados do PRÓPRIO setor (independência entre
+// setores é o pedido original) -- login master continua vendo tudo, de
+// todos os setores, igual sempre foi.
+if (ClienteAuth::isMaster()) {
+    $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC');
+    $stmt->execute([$clienteId]);
+} else {
+    $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? AND setor_id = ? ORDER BY criado_em DESC');
+    $stmt->execute([$clienteId, ClienteAuth::setorId()]);
+}
 $chamados = $stmt->fetchAll();
+
+// Painel de cards por setor -- só existe pro login MASTER (quem já vê tudo)
+// e só aparece se esse cliente tiver algum setor cadastrado. Mesma ideia
+// (e mesmas subconsultas de insight) do painel espelho em cliente.php.
+$setoresPortal = [];
+if (ClienteAuth::isMaster()) {
+    $setoresPortal = $pdo->prepare('
+        SELECT
+            s.*,
+            sr.nome AS responsavel_nome, sr.foto_perfil AS responsavel_foto,
+            (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id) AS chamados_total,
+            (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe")) AS chamados_pendentes,
+            (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe") AND ch.prioridade IN ("alta","urgente")) AS chamados_urgentes,
+            (SELECT AVG(TIMESTAMPDIFF(MINUTE, ch.criado_em, ch.fechado_em)) FROM chamados ch WHERE ch.setor_id = s.id AND ch.fechado_em IS NOT NULL) AS tempo_medio_min
+        FROM setores s
+        LEFT JOIN setor_responsaveis sr ON sr.setor_id = s.id
+        WHERE s.cliente_id = ? AND s.ativo = 1
+        ORDER BY s.nome ASC
+    ');
+    $setoresPortal->execute([$clienteId]);
+    $setoresPortal = $setoresPortal->fetchAll();
+}
+$chamadosSemSetorPortal = ClienteAuth::isMaster() ? count(array_filter($chamados, fn ($c) => $c['setor_id'] === null)) : 0;
 
 // Visão geral em 4 cards -- mapeado 1:1 nos 4 status reais que já existem
 // (nenhum "atrasado" novo inventado): Abertos = ninguém respondeu ainda,
@@ -76,6 +123,46 @@ require __DIR__ . '/../templates/portal_header.php';
     <h4 class="mb-0">Meus chamados</h4>
     <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Abrir chamado</button>
 </div>
+
+<?php if ($setoresPortal): ?>
+<div class="painel-setores mb-4">
+    <p class="text-muted small mb-2"><i class="bi bi-diagram-3"></i> Sua empresa tem setores independentes -- clique num card pra ver só os chamados e o responsável daquele setor.</p>
+    <div class="grid-setores">
+        <div class="card-setor card-setor-todos active" data-setor-filtro="todos" role="button" tabindex="0">
+            <div class="card-setor-topo"><i class="bi bi-collection"></i> <span class="fw-semibold">Todos os setores</span></div>
+        </div>
+        <?php foreach ($setoresPortal as $s): ?>
+            <div class="card-setor <?= (int) $s['chamados_urgentes'] > 0 ? 'setor-atencao' : '' ?>" data-setor-filtro="<?= $s['id'] ?>" role="button" tabindex="0">
+                <div class="card-setor-topo"><span class="fw-semibold"><?= e($s['nome']) ?></span></div>
+                <div class="card-setor-responsavel">
+                    <?php if ($s['responsavel_nome']): ?>
+                        <?= avatar_html($s['responsavel_nome'], $s['responsavel_foto'], 'cliente') ?>
+                        <span><?= e($s['responsavel_nome']) ?></span>
+                    <?php else: ?>
+                        <span class="text-muted small"><i class="bi bi-person-x"></i> Sem responsável cadastrado</span>
+                    <?php endif; ?>
+                </div>
+                <div class="card-setor-insights">
+                    <span class="badge modulo-pill <?= (int) $s['chamados_pendentes'] > 0 ? 'badge-aguardando-equipe' : 'modulo-ok' ?>">
+                        <?= (int) $s['chamados_pendentes'] ?> pendente<?= (int) $s['chamados_pendentes'] !== 1 ? 's' : '' ?>
+                    </span>
+                    <?php if ((int) $s['chamados_urgentes'] > 0): ?>
+                        <span class="badge prio-urgente modulo-pill"><?= (int) $s['chamados_urgentes'] ?> urgente<?= (int) $s['chamados_urgentes'] !== 1 ? 's' : '' ?></span>
+                    <?php endif; ?>
+                    <span class="badge modulo-pill modulo-neutro"><?= (int) $s['chamados_total'] ?> no total</span>
+                    <span class="badge modulo-pill modulo-neutro" title="Tempo médio de atendimento"><i class="bi bi-clock-history"></i> <?= e(formatar_duracao_minutos($s['tempo_medio_min'] !== null ? (float) $s['tempo_medio_min'] : null)) ?></span>
+                </div>
+            </div>
+        <?php endforeach; ?>
+        <?php if ($chamadosSemSetorPortal > 0): ?>
+            <div class="card-setor" data-setor-filtro="sem-setor" role="button" tabindex="0">
+                <div class="card-setor-topo"><span class="fw-semibold text-muted">Sem setor</span></div>
+                <div class="card-setor-insights"><span class="badge modulo-pill modulo-neutro"><?= $chamadosSemSetorPortal ?> chamado<?= $chamadosSemSetorPortal !== 1 ? 's' : '' ?></span></div>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="row g-3 mb-4">
     <div class="col-sm-6 col-lg-3">
@@ -134,7 +221,7 @@ require __DIR__ . '/../templates/portal_header.php';
             <thead><tr><th>Título</th><th>Status</th><th>Prioridade</th><th>Aberto em</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($chamados as $c): ?>
-                <tr data-status="<?= e($c['status']) ?>">
+                <tr data-status="<?= e($c['status']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>">
                     <td class="fw-semibold"><?= e($c['titulo']) ?></td>
                     <td><?= badge_status_chamado_portal($c['status']) ?></td>
                     <td><?= badge_prioridade($c['prioridade']) ?></td>
@@ -174,6 +261,16 @@ require __DIR__ . '/../templates/portal_header.php';
                     <?= opcoes_prioridade_html('media') ?>
                 </select>
             </div>
+            <?php if ($setoresPortal): ?>
+            <div class="mb-3"><label class="form-label">Setor</label>
+                <select name="setor_id" class="form-select">
+                    <option value="">Sem setor</option>
+                    <?php foreach ($setoresPortal as $s): ?>
+                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="4" required></textarea></div>
             <div class="mb-3">
                 <label class="form-label">Anexos (opcional)</label>
@@ -229,12 +326,15 @@ require __DIR__ . '/../templates/portal_header.php';
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var filtroAtual = 'todos';
+    var filtroSetorAtual = 'todos';
 
     function aplicarFiltro(filtro) {
         filtroAtual = filtro;
         var algumVisivel = false;
         document.querySelectorAll('#tabelaMeusChamados tbody tr[data-status]').forEach(function (linha) {
-            var mostra = filtro === 'todos' || linha.getAttribute('data-status') === filtro;
+            var mostraStatus = filtro === 'todos' || linha.getAttribute('data-status') === filtro;
+            var mostraSetor = filtroSetorAtual === 'todos' || linha.getAttribute('data-setor') === filtroSetorAtual;
+            var mostra = mostraStatus && mostraSetor;
             linha.style.display = mostra ? '' : 'none';
             if (mostra) algumVisivel = true;
         });
@@ -277,6 +377,21 @@ document.addEventListener('DOMContentLoaded', function () {
     if (filtroUrl) {
         aplicarFiltro(filtroUrl);
     }
+
+    // Cards de setor (só existem pro login master) filtram a tabela igual
+    // aos pills de status -- os dois filtros combinam entre si.
+    document.querySelectorAll('.card-setor').forEach(function (card) {
+        card.addEventListener('click', function () {
+            document.querySelectorAll('.card-setor').forEach(function (c) { c.classList.remove('active'); });
+            card.classList.add('active');
+            filtroSetorAtual = card.getAttribute('data-setor-filtro');
+            aplicarFiltro(filtroAtual);
+            document.getElementById('tabelaMeusChamados').scrollIntoView({behavior: 'smooth', block: 'start'});
+        });
+        card.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') card.click();
+        });
+    });
 });
 </script>
 

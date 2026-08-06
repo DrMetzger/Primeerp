@@ -7,6 +7,14 @@ use PDO;
 /**
  * Autenticação do PORTAL DO CLIENTE — separada do login da equipe (Auth).
  * Usa chaves de sessão diferentes para não conflitar com o login interno.
+ *
+ * Dois tipos de login, mesma sessão/telas:
+ * - MASTER: o contato principal do cliente (clientes.contato_email/senha_hash,
+ *   sem nenhuma mudança em relação a como já era) -- vê e exporta os chamados
+ *   de TODOS os setores da empresa.
+ * - SETOR: login próprio de um responsável de setor (setor_responsaveis),
+ *   só vê e abre chamado do próprio setor. Cliente que não cadastra nenhum
+ *   setor continua 100% no modelo antigo, só com o master.
  */
 class ClienteAuth
 {
@@ -16,21 +24,47 @@ class ClienteAuth
         $stmt->execute([$email]);
         $cliente = $stmt->fetch();
 
-        if (!$cliente || !password_verify($senha, $cliente['senha_hash'])) {
-            return false;
+        if ($cliente && password_verify($senha, $cliente['senha_hash'])) {
+            // Fora do horário comercial, só entra quem tem a liberação
+            // especial (clientes.acesso_fora_horario) -- credenciais certas
+            // mas sem liberação caem na mesma mensagem genérica de "e-mail
+            // ou senha inválidos" em login.php, sem detalhar o motivo.
+            if (!self::dentroHorarioComercial() && !$cliente['acesso_fora_horario']) {
+                return false;
+            }
+            self::iniciarSessaoMaster($cliente);
+            return true;
         }
 
-        // Fora do horário comercial, só entra quem tem a liberação especial
-        // (clientes.acesso_fora_horario) -- credenciais certas mas sem
-        // liberação caem na mesma mensagem genérica de "e-mail ou senha
-        // inválidos" em login.php, sem entrar em detalhe do motivo (não é
-        // informação sensível o suficiente pra abrir uma exceção de UX aqui).
-        if (!self::dentroHorarioComercial() && !$cliente['acesso_fora_horario']) {
-            return false;
+        $stmt = $pdo->prepare("
+            SELECT sr.*, s.cliente_id, s.nome AS setor_nome, c.nome AS empresa_nome, c.acesso_fora_horario
+            FROM setor_responsaveis sr
+            JOIN setores s ON s.id = sr.setor_id
+            JOIN clientes c ON c.id = s.cliente_id
+            WHERE sr.email = ? AND sr.portal_ativo = 1 AND sr.senha_hash IS NOT NULL AND s.ativo = 1
+            LIMIT 1
+        ");
+        $stmt->execute([$email]);
+        $setorResp = $stmt->fetch();
+
+        if ($setorResp && password_verify($senha, $setorResp['senha_hash'])) {
+            if (!self::dentroHorarioComercial() && !$setorResp['acesso_fora_horario']) {
+                return false;
+            }
+            self::iniciarSessaoSetor($setorResp);
+            return true;
         }
 
+        return false;
+    }
+
+    private static function iniciarSessaoMaster(array $cliente): void
+    {
         session_regenerate_id(true);
         $_SESSION['portal_cliente_id'] = $cliente['id'];
+        $_SESSION['portal_tipo'] = 'master';
+        $_SESSION['portal_setor_id'] = null;
+        $_SESSION['portal_setor_responsavel_id'] = null;
         // "Nome" aqui é da PESSOA (contato/key user), não da empresa -- o
         // Kleber apontou que ser chamado pelo nome da empresa ("Olá, GEOMAQ")
         // é impessoal. Cai pro nome da empresa só se não tiver contato
@@ -39,14 +73,31 @@ class ClienteAuth
         $_SESSION['portal_cliente_nome'] = $cliente['contato_nome'] ?: $cliente['nome'];
         $_SESSION['portal_cliente_empresa'] = $cliente['nome'];
         $_SESSION['portal_cliente_email'] = $cliente['contato_email'];
-        $_SESSION['portal_cliente_foto'] = $cliente['foto_perfil'] ?? null;
+    }
 
-        return true;
+    private static function iniciarSessaoSetor(array $setorResp): void
+    {
+        session_regenerate_id(true);
+        $_SESSION['portal_cliente_id'] = $setorResp['cliente_id'];
+        $_SESSION['portal_tipo'] = 'setor';
+        $_SESSION['portal_setor_id'] = $setorResp['setor_id'];
+        $_SESSION['portal_setor_responsavel_id'] = $setorResp['id'];
+        $_SESSION['portal_cliente_nome'] = $setorResp['nome'];
+        $_SESSION['portal_cliente_empresa'] = $setorResp['empresa_nome'];
+        $_SESSION['portal_cliente_email'] = $setorResp['email'];
     }
 
     public static function logout(): void
     {
-        unset($_SESSION['portal_cliente_id'], $_SESSION['portal_cliente_nome'], $_SESSION['portal_cliente_empresa'], $_SESSION['portal_cliente_email']);
+        unset(
+            $_SESSION['portal_cliente_id'],
+            $_SESSION['portal_tipo'],
+            $_SESSION['portal_setor_id'],
+            $_SESSION['portal_setor_responsavel_id'],
+            $_SESSION['portal_cliente_nome'],
+            $_SESSION['portal_cliente_empresa'],
+            $_SESSION['portal_cliente_email']
+        );
     }
 
     public static function check(): bool
@@ -54,19 +105,57 @@ class ClienteAuth
         return isset($_SESSION['portal_cliente_id']);
     }
 
+    /** Id do CLIENTE (empresa) -- igual pra master e pra qualquer setor dele. */
     public static function clienteId(): ?int
     {
         return $_SESSION['portal_cliente_id'] ?? null;
     }
 
     /**
-     * Nome da PESSOA (contato/key user) logada no portal -- não da empresa.
-     * Sessões abertas antes dessa mudança existir (só guardavam nome da
-     * empresa) se auto-curam buscando o contato certo no banco uma vez.
+     * true = login master (contato principal, vê todos os setores).
+     * false = login de um responsável de setor específico.
+     * Sessão sem a chave (não deveria acontecer, mas por segurança) cai
+     * pro comportamento antigo (master), já que só existia esse tipo antes.
+     */
+    public static function isMaster(): bool
+    {
+        return ($_SESSION['portal_tipo'] ?? 'master') === 'master';
+    }
+
+    /** Id do setor logado, ou null se for o master. */
+    public static function setorId(): ?int
+    {
+        return $_SESSION['portal_setor_id'] ?? null;
+    }
+
+    /** Id da linha em setor_responsaveis do login atual, ou null se for o master. */
+    public static function setorResponsavelId(): ?int
+    {
+        return $_SESSION['portal_setor_responsavel_id'] ?? null;
+    }
+
+    /** Nome do setor logado (busca fresca -- pode ter sido renomeado), ou null se for o master. */
+    public static function setorNome(): ?string
+    {
+        $setorId = self::setorId();
+        if ($setorId === null) {
+            return null;
+        }
+        $stmt = Database::connection()->prepare('SELECT nome FROM setores WHERE id = ?');
+        $stmt->execute([$setorId]);
+        return $stmt->fetchColumn() ?: null;
+    }
+
+    /**
+     * Nome da PESSOA (contato/key user, ou responsável de setor) logada no
+     * portal -- não da empresa. Sessões abertas antes dessa mudança existir
+     * (só guardavam nome da empresa) se auto-curam buscando o contato certo
+     * no banco uma vez -- só se aplica a sessão de master antiga, já que
+     * login de setor é recém-criado (nunca teve sessão desse jeito).
      */
     public static function clienteNome(): string
     {
-        if (!array_key_exists('portal_cliente_empresa', $_SESSION) && self::check()) {
+        if (!array_key_exists('portal_cliente_empresa', $_SESSION) && self::check() && self::isMaster()) {
             $stmt = Database::connection()->prepare('SELECT nome, contato_nome FROM clientes WHERE id = ?');
             $stmt->execute([self::clienteId()]);
             $dados = $stmt->fetch();
@@ -85,20 +174,26 @@ class ClienteAuth
     }
 
     /**
-     * Caminho da foto/avatar do cliente logado no portal (ou null = cai
-     * pro círculo com a inicial do nome). SEMPRE busca no banco (não guarda
-     * em sessão) -- mesmo motivo do Auth::userFoto(): cachear na sessão
-     * deixava a tela "descompassada" quando a foto mudava por outro motivo
-     * que não fosse o próprio cliente trocando em portal/perfil.php (ex.:
-     * migração de auto-cura). Consulta simples por chave primária.
+     * Caminho da foto/avatar de quem está logado (ou null = cai pro círculo
+     * com a inicial do nome) -- da linha certa (clientes ou
+     * setor_responsaveis) dependendo do tipo de login. SEMPRE busca no
+     * banco (não guarda em sessão): mesmo motivo do Auth::userFoto() --
+     * cachear na sessão deixava a tela "descompassada" quando a foto mudava
+     * por outro motivo que não fosse a própria pessoa trocando em
+     * portal/perfil.php.
      */
     public static function clienteFoto(): ?string
     {
         if (!self::check()) {
             return null;
         }
-        $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
-        $stmt->execute([self::clienteId()]);
+        if (self::isMaster()) {
+            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM clientes WHERE id = ?');
+            $stmt->execute([self::clienteId()]);
+        } else {
+            $stmt = Database::connection()->prepare('SELECT foto_perfil FROM setor_responsaveis WHERE id = ?');
+            $stmt->execute([self::setorResponsavelId()]);
+        }
         return $stmt->fetchColumn() ?: null;
     }
 
@@ -127,10 +222,12 @@ class ClienteAuth
     /**
      * Cliente com liberação especial (marcada em cliente.php/clientes.php,
      * ver acao=atualizar_cliente) pode usar o portal fora do horário
-     * comercial normal -- pedido pontual do Kleber pra alguns clientes.
-     * SEMPRE busca no banco (mesmo motivo de clienteFoto()/userFoto(): não
+     * comercial normal -- pedido pontual do Kleber pra alguns clientes. A
+     * liberação é do CLIENTE (clientes.acesso_fora_horario), vale pro master
+     * e pra todos os setores dele igual -- não tem liberação por setor
+     * separada. SEMPRE busca no banco (mesmo motivo de clienteFoto()): não
      * cachear em sessão, senão uma liberação dada/tirada só valeria a partir
-     * do próximo login).
+     * do próximo login.
      */
     public static function podeAcessarForaDoHorario(): bool
     {

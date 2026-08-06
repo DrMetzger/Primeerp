@@ -121,6 +121,21 @@ define('CATEGORIAS_CHAMADO', [
     'Desenvolvimento',
 ]);
 
+// Sugestões de nome pra cadastro rápido de setor (cliente.php, modal
+// Gerenciar setores) -- modelo inicial passado pelo Kleber. Setor é
+// totalmente flexível/cadastrável por cliente, isso aqui é só atalho.
+define('SETORES_SUGERIDOS', [
+    'Ativo Fixo',
+    'Compras',
+    'Estoque/Custos',
+    'Faturamento',
+    'Financeiro',
+    'PCP',
+    'RH',
+    'Ponto Eletrônico',
+    'Contabilidade',
+]);
+
 // Horário comercial em que o PORTAL DO CLIENTE fica acessível (login E
 // qualquer página, mesmo já logado) -- pedido do Kleber depois de um
 // cliente ter aberto 37 chamados de madrugada (1h às 7h) de forma abusiva.
