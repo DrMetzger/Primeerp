@@ -98,7 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $destino = $dirCliente . '/' . $nomeArmazenado;
 
             if (move_uploaded_file($arquivo['tmp_name'], $destino)) {
-                $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+                // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
+                $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $stmt->execute([
                     $clienteId,
                     trim($_POST['titulo']) ?: $arquivo['name'],
@@ -108,6 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'clientes/' . $clienteId . '/' . $nomeArmazenado,
                     $arquivo['size'],
                     Auth::userId(),
+                    file_get_contents($destino),
                 ]);
                 flash_set('sucesso', 'Documento enviado.');
             } else {

@@ -4,6 +4,7 @@ require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\Auth;
 use AdminPrime\Database;
+use AdminPrime\Migrations;
 
 Auth::requireLogin();
 
@@ -18,6 +19,10 @@ if (!$documento) {
     http_response_code(404);
     die('Documento não encontrado.');
 }
+
+// Restaura do backup no banco se o arquivo tiver desaparecido do disco
+// (deploy do Hostinger recria uploads/ do zero -- ver Migrations).
+Migrations::restaurarArquivoSeNecessario($pdo, 'documentos', $docId, 'arquivo_caminho', 'dados', UPLOADS_DIR);
 
 $caminhoCompleto = realpath(UPLOADS_DIR . '/' . $documento['arquivo_caminho']);
 $uploadsBase = realpath(UPLOADS_DIR);

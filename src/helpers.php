@@ -525,7 +525,12 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
         $destino = $dirChamado . '/' . $nomeArmazenado;
 
         if (move_uploaded_file($arquivos['tmp_name'][$i], $destino)) {
-            $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho) VALUES (?, ?, ?, ?, ?, ?)')
+            // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
+            // uploads/chamados/ some do disco no mesmo tipo de deploy que já
+            // apagou foto/logo antes (Hostinger recria a pasta do zero, não
+            // é protegido por .gitignore); sem esse backup o anexo se perde
+            // pra sempre no próximo deploy.
+            $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
                 ->execute([
                     $chamadoId,
                     $respostaId,
@@ -533,6 +538,7 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
                     $arquivos['name'][$i],
                     'chamados/' . $chamadoId . '/' . $nomeArmazenado,
                     $arquivos['size'][$i],
+                    file_get_contents($destino),
                 ]);
         } else {
             $erros[] = 'Não foi possível salvar "' . $arquivos['name'][$i] . '" no servidor.';

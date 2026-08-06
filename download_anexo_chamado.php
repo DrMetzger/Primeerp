@@ -5,6 +5,7 @@ require_once __DIR__ . '/bootstrap.php';
 use AdminPrime\Auth;
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
+use AdminPrime\Migrations;
 
 // Anexo de chamado pode ser baixado por dois públicos diferentes: a equipe
 // (login normal, vê qualquer anexo) ou o próprio cliente dono do chamado
@@ -34,6 +35,10 @@ if ($clienteLogado && !$staffLogado && $anexo['cliente_id'] !== ClienteAuth::cli
     http_response_code(403);
     die('Acesso não autorizado.');
 }
+
+// Restaura do backup no banco se o arquivo tiver desaparecido do disco
+// (deploy do Hostinger recria uploads/ do zero -- ver Migrations).
+Migrations::restaurarArquivoSeNecessario($pdo, 'chamado_anexos', $anexoId, 'arquivo_caminho', 'dados', UPLOADS_DIR);
 
 $caminhoCompleto = realpath(UPLOADS_DIR . '/' . $anexo['arquivo_caminho']);
 $uploadsBase = realpath(UPLOADS_DIR);

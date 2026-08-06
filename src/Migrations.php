@@ -105,6 +105,18 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Backup dos bytes do arquivo, mesmo esquema já usado pra foto/logo
+        // (ver usuarios.foto_perfil_dados) -- o deploy do Hostinger apaga
+        // uploads/ do zero (não respeita .gitignore), então o arquivo em
+        // disco pode desaparecer mesmo com o registro no banco intacto. Como
+        // documento/anexo é baixado sempre através de um script PHP
+        // (download.php/download_anexo_chamado.php), a restauração aqui é
+        // MAIS SIMPLES que a de foto/logo: não precisa varrer a tabela toda
+        // a cada requisição -- o próprio script de download restaura o
+        // arquivo específico na hora, só quando (e se) alguém for baixar um
+        // que sumiu (ver Migrations::restaurarArquivoSeNecessario()).
+        $pdo->exec("ALTER TABLE documentos ADD COLUMN IF NOT EXISTS dados LONGBLOB NULL COMMENT 'Cópia dos bytes do arquivo, pra restaurar se o deploy apagar uploads/' AFTER arquivo_tamanho");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS treinamentos (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -269,6 +281,13 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Mesmo backup de bytes de documentos (ver comentário lá em cima) --
+        // esse foi o que o Kleber reportou como "removeu todos os anexos dos
+        // chamados" depois de um deploy: uploads/chamados/ tem exatamente o
+        // mesmo problema de assets/avatars/ antes de ganhar o backup no
+        // banco, só que ainda não tinha sido corrigido aqui.
+        $pdo->exec("ALTER TABLE chamado_anexos ADD COLUMN IF NOT EXISTS dados LONGBLOB NULL COMMENT 'Cópia dos bytes do arquivo, pra restaurar se o deploy apagar uploads/' AFTER arquivo_tamanho");
+
         // Modelo de status dos chamados simplificado (04/08/2026). Antes eram
         // 5 valores confusos e setados à mão em pontos diferentes do código
         // de um jeito até invertido (ex.: "em_andamento" era ligado quando o
@@ -362,6 +381,42 @@ class Migrations
      * Avatar pré-definido (assets/img/avatares/*.svg) não passa por aqui --
      * é arquivo versionado no próprio código, nunca depende de upload.
      */
+    /**
+     * Versão "sob demanda" de restaurarUploadsPerdidos(), pra arquivos que
+     * (diferente de foto/avatar, servidos direto como <img src>) sempre
+     * passam por um script PHP de download antes de chegar no navegador
+     * (download.php, download_anexo_chamado.php). Como tem esse ponto único
+     * de passagem, não precisa varrer a tabela toda em toda requisição --
+     * só restaura o arquivo ESPECÍFICO que está sendo baixado, e só se ele
+     * de fato tiver desaparecido do disco. Retorna o caminho físico (já
+     * restaurado, se precisou) ou null se não tem nem arquivo nem backup.
+     */
+    public static function restaurarArquivoSeNecessario(PDO $pdo, string $tabela, int $id, string $colunaCaminho, string $colunaDados, string $raizUploads): ?string
+    {
+        $stmt = $pdo->prepare("SELECT $colunaCaminho AS caminho, $colunaDados AS dados FROM $tabela WHERE id = ?");
+        $stmt->execute([$id]);
+        $linha = $stmt->fetch();
+        if (!$linha || !$linha['caminho']) {
+            return null;
+        }
+
+        $caminhoFisico = rtrim($raizUploads, '/') . '/' . $linha['caminho'];
+        if (is_file($caminhoFisico)) {
+            return $caminhoFisico;
+        }
+        if ($linha['dados'] === null) {
+            return null;
+        }
+
+        $dir = dirname($caminhoFisico);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        file_put_contents($caminhoFisico, $linha['dados']);
+
+        return $caminhoFisico;
+    }
+
     private static function restaurarUploadsPerdidos(PDO $pdo): void
     {
         $raiz = __DIR__ . '/..';
