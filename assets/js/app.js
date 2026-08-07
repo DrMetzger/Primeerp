@@ -148,6 +148,32 @@
         }
     });
 
+    // --------------------------------------------------------- Máscara de CNPJ
+    // Formata XX.XXX.XXX/XXXX-XX enquanto a pessoa digita (mesma ideia da
+    // máscara de telefone acima).
+    function formatarCnpj(valor) {
+        var digitos = (valor || '').replace(/\D/g, '').slice(0, 14);
+        if (digitos.length > 12) {
+            return digitos.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2})/, '$1.$2.$3/$4-$5').replace(/-$/, '');
+        }
+        if (digitos.length > 8) {
+            return digitos.replace(/(\d{2})(\d{3})(\d{3})(\d{0,4})/, '$1.$2.$3/$4').replace(/\/$/, '');
+        }
+        if (digitos.length > 5) {
+            return digitos.replace(/(\d{2})(\d{3})(\d{0,3})/, '$1.$2.$3').replace(/\.$/, '');
+        }
+        if (digitos.length > 2) {
+            return digitos.replace(/(\d{2})(\d{0,3})/, '$1.$2').replace(/\.$/, '');
+        }
+        return digitos;
+    }
+
+    document.addEventListener('input', function (e) {
+        if (e.target.classList && e.target.classList.contains('input-cnpj')) {
+            e.target.value = formatarCnpj(e.target.value);
+        }
+    });
+
     // ----------------------------------------------- Cor no select de prioridade
     // opcoes_prioridade_html() (helpers.php) já colore cada <option> -- mas
     // isso só aparece com a lista ABERTA. A caixa fechada (valor

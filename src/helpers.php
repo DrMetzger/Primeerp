@@ -572,6 +572,16 @@ function salvar_documento_upload(\PDO $pdo, int $clienteId, ?int $setorId, strin
  * -- essa função aqui é só pra quando o valor já vem do banco sem máscara,
  * ex. registros antigos digitados como "17981368201").
  */
+function formatar_cnpj(?string $cnpj): string
+{
+    $digitos = preg_replace('/\D/', '', $cnpj ?? '');
+    if (strlen($digitos) !== 14) {
+        return $cnpj ?? '';
+    }
+
+    return preg_replace('/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/', '$1.$2.$3/$4-$5', $digitos);
+}
+
 function formatar_telefone(?string $telefone): string
 {
     $digitos = preg_replace('/\D/', '', $telefone ?? '');

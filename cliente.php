@@ -28,9 +28,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
+            apenas_digitos($_POST['cnpj'] ?? ''),
             $_POST['status'],
             trim($_POST['contato_nome']) ?: null,
             trim($_POST['contato_email']) ?: null,
@@ -1021,7 +1022,7 @@ require __DIR__ . '/templates/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
-        <h4 class="mb-0"><?= e($cliente['nome']) ?></h4>
+        <h4 class="mb-0"><?= e($cliente['nome']) ?><?= $cliente['cnpj'] ? ' <small class="text-muted fw-normal fs-6">' . e(formatar_cnpj($cliente['cnpj'])) . '</small>' : '' ?></h4>
         <a href="<?= url('clientes.php') ?>" class="text-muted small"><i class="bi bi-arrow-left"></i> Voltar para clientes</a>
     </div>
 </div>
@@ -1073,6 +1074,10 @@ require __DIR__ . '/templates/header.php';
                         <div class="col-md-3">
                             <label class="form-label">Cliente desde</label>
                             <input type="text" class="form-control" value="<?= formatar_data($cliente['criado_em']) ?>" disabled>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">CNPJ</label>
+                            <input type="text" name="cnpj" class="form-control input-cnpj" value="<?= e(formatar_cnpj($cliente['cnpj'])) ?>" placeholder="00.000.000/0000-00">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Contato - nome</label>
@@ -1447,7 +1452,7 @@ require __DIR__ . '/templates/header.php';
     <div class="tab-pane" id="kpis">
         <p class="text-muted small mb-2"><i class="bi bi-graph-up"></i> Métricas gerais do cliente. Métricas de um setor específico ficam na aba Setores, dentro do próprio setor.</p>
         <div class="toolbar">
-            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoKpi"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
+            <button type="button" class="btn btn-dark btn-sm botao-novo-kpi-geral"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
         </div>
         <div class="card card-stat">
             <div class="card-body p-0">
@@ -2491,6 +2496,21 @@ document.addEventListener('DOMContentLoaded', function () {
             PrimeUI.openModal(document.getElementById('modalNovoTreinamento'));
         });
     });
+
+    // "Registrar KPI" da aba KPIs geral -- precisa ZERAR setor/retorno do
+    // modal (mesmo <select>/hidden são reaproveitados pelo botão de dentro
+    // de um setor, ver abaixo), senão fica com o setor/aba do último uso
+    // "presos" e o KPI "desaparece" (vai pro setor errado, sem avisar).
+    var botaoNovoKpiGeral = document.querySelector('.botao-novo-kpi-geral');
+    if (botaoNovoKpiGeral) {
+        botaoNovoKpiGeral.addEventListener('click', function () {
+            var campoSetor = document.getElementById('novoKpiSetor');
+            var campoRetorno = document.getElementById('novoKpiAbaRetorno');
+            if (campoSetor) campoSetor.value = '';
+            if (campoRetorno) campoRetorno.value = 'kpis';
+            PrimeUI.openModal(document.getElementById('modalNovoKpi'));
+        });
+    }
 
     // "Registrar métrica" de dentro de um setor específico (aba Setores >
     // Métricas) -- mesma ideia, pré-seleciona o setor e ajusta o retorno

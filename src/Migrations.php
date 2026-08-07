@@ -189,6 +189,12 @@ class Migrations
         // forçar retroativamente sem parar o sistema pra todo mundo.
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contato_documento VARCHAR(20) NULL COMMENT 'CPF ou RG do contato, só dígitos' AFTER contato_telefone");
 
+        // CNPJ da EMPRESA cliente (diferente de contato_documento, que é o
+        // CPF/RG da pessoa de contato) -- pedido do Kleber, guardado só
+        // dígitos (a máscara XX.XXX.XXX/XXXX-XX é aplicada na tela via
+        // formatar_cnpj()).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20) NULL COMMENT 'CNPJ da empresa, só dígitos' AFTER nome");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS cliente_senha_tokens (
                 id INT AUTO_INCREMENT PRIMARY KEY,
