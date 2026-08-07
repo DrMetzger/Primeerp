@@ -28,6 +28,32 @@ class Notificacoes
     }
 
     /**
+     * Avisa a equipe (NOTIFICACAO_EMAILS_EQUIPE, hoje Kleber e Petronilho)
+     * quando um treinamento ou reunião é agendado pra um cliente -- só por
+     * e-mail por enquanto (o WhatsApp ainda não está liberado pela Meta,
+     * pedido explícito do Kleber pra não tentar mandar por lá até isso sair).
+     */
+    public static function novoTreinamento(array $treinamento, string $nomeCliente, ?string $nomeSetor): void
+    {
+        $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $treinamento['cliente_id'] . '#setores');
+        $ehReuniao = $treinamento['tipo'] === 'reuniao';
+        $quando = formatar_data($treinamento['data_inicio']) . ($treinamento['hora_inicio'] ? ' às ' . substr($treinamento['hora_inicio'], 0, 5) : '');
+
+        $corpo = "
+            <p>Nov" . ($ehReuniao ? 'a reunião' : 'o treinamento') . " agendad" . ($ehReuniao ? 'a' : 'o') . " para <strong>" . e($nomeCliente) . "</strong>" . ($nomeSetor ? ' (setor ' . e($nomeSetor) . ')' : '') . ".</p>
+            <p><strong>Título:</strong> " . e($treinamento['titulo']) . "</p>
+            <p><strong>Quando:</strong> " . e($quando) . "</p>
+            " . ($treinamento['link_reuniao'] ? '<p><strong>Link:</strong> <a href="' . e($treinamento['link_reuniao']) . '">' . e($treinamento['link_reuniao']) . '</a></p>' : '') . "
+            <p><a href=\"$link\">Ver no Prime Hub</a></p>
+        ";
+
+        $assunto = ($ehReuniao ? 'Nova reunião' : 'Novo treinamento') . ": {$treinamento['titulo']} ({$nomeCliente})";
+        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+            Mailer::enviar($emailEquipe, $assunto, $corpo);
+        }
+    }
+
+    /**
      * Chamado aberto pelo formulário público (abrir_chamado.php, sem login).
      * $clienteId é null quando não foi possível casar automaticamente com
      * nenhum cliente cadastrado -- nesse caso o chamado precisa de triagem

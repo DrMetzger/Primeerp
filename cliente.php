@@ -65,12 +65,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_treinamento') {
+        $setorIdTreinamentoNovo = $_POST['setor_id'] ?: null;
+        $tipoTreinamentoNovo = $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento';
+        $tituloTreinamentoNovo = trim($_POST['titulo']);
+
         $stmt = $pdo->prepare('INSERT INTO treinamentos (cliente_id, setor_id, titulo, tipo, descricao, status, data_inicio, hora_inicio, data_fim, hora_fim, link_reuniao, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
-            $_POST['setor_id'] ?: null,
-            trim($_POST['titulo']),
-            $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento',
+            $setorIdTreinamentoNovo,
+            $tituloTreinamentoNovo,
+            $tipoTreinamentoNovo,
             trim($_POST['descricao']) ?: null,
             $_POST['status'] ?: 'planejado',
             $_POST['data_inicio'] ?: null,
@@ -80,7 +84,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             trim($_POST['link_reuniao'] ?? '') ?: null,
             $_POST['responsavel_id'] ?: null,
         ]);
-        flash_set('sucesso', $_POST['tipo'] === 'reuniao' ? 'Reunião registrada.' : 'Treinamento registrado.');
+
+        // Avisa a equipe (Kleber/Petronilho) por e-mail -- WhatsApp ainda não
+        // está liberado pela Meta, ver Notificacoes::novoTreinamento().
+        $nomeSetorTreinamentoNovo = null;
+        if ($setorIdTreinamentoNovo) {
+            $stmtNomeSetor = $pdo->prepare('SELECT nome FROM setores WHERE id = ? AND cliente_id = ?');
+            $stmtNomeSetor->execute([$setorIdTreinamentoNovo, $clienteId]);
+            $nomeSetorTreinamentoNovo = $stmtNomeSetor->fetchColumn() ?: null;
+        }
+        Notificacoes::novoTreinamento([
+            'cliente_id' => $clienteId,
+            'titulo' => $tituloTreinamentoNovo,
+            'tipo' => $tipoTreinamentoNovo,
+            'data_inicio' => $_POST['data_inicio'] ?: null,
+            'hora_inicio' => $_POST['hora_inicio'] ?: null,
+            'link_reuniao' => trim($_POST['link_reuniao'] ?? '') ?: null,
+        ], $cliente['nome'], $nomeSetorTreinamentoNovo);
+
+        flash_set('sucesso', $tipoTreinamentoNovo === 'reuniao' ? 'Reunião registrada.' : 'Treinamento registrado.');
     }
 
     if ($acao === 'atualizar_treinamento_status') {
@@ -824,6 +846,20 @@ foreach ($treinamentos as $t) {
     }
 }
 
+// Formato leve pro calendário visual (JS lê isso de um data-attribute) --
+// só os campos que a tela do calendário realmente usa.
+$mapearEventosCalendario = fn (array $lista) => array_map(fn ($t) => [
+    'id' => $t['id'],
+    'titulo' => $t['titulo'],
+    'tipo' => $t['tipo'],
+    'data_inicio' => $t['data_inicio'],
+    'hora_inicio' => $t['hora_inicio'],
+    'data_fim' => $t['data_fim'],
+    'hora_fim' => $t['hora_fim'],
+    'link_reuniao' => $t['link_reuniao'],
+    'status' => $t['status'],
+], $lista);
+
 $usuarios = $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll();
 
 // Todas as pessoas cadastradas pra ESSE cliente (aba Usuários) -- não
@@ -1142,23 +1178,12 @@ require __DIR__ . '/templates/header.php';
 
         <div class="card card-stat mt-3">
             <div class="card-body">
-                <strong class="d-block mb-3"><i class="bi bi-calendar-event"></i> Agenda geral</strong>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <strong><i class="bi bi-calendar-event"></i> Agenda geral</strong>
+                    <button type="button" class="btn btn-sm btn-dark botao-novo-treinamento-setor" data-setor-id="" data-aba-retorno="visao-geral"><i class="bi bi-plus-lg"></i> Novo</button>
+                </div>
                 <p class="text-muted small">Treinamentos/reuniões que não são de um setor específico (para agenda de setor, ver a aba Setores).</p>
-                <?php if ($treinamentosGerais): ?>
-                    <ul class="list-unstyled mb-0">
-                        <?php foreach ($treinamentosGerais as $t): ?>
-                            <li class="d-flex align-items-center gap-2 mb-1">
-                                <i class="bi <?= $t['tipo'] === 'reuniao' ? 'bi-camera-video' : 'bi-mortarboard' ?>"></i>
-                                <span class="fw-semibold"><?= e($t['titulo']) ?></span>
-                                <span class="text-muted small"><?= formatar_data($t['data_inicio']) ?><?= $t['hora_inicio'] ? ' ' . substr($t['hora_inicio'], 0, 5) : '' ?></span>
-                                <?php if ($t['link_reuniao']): ?><a href="<?= e($t['link_reuniao']) ?>" target="_blank" class="btn btn-sm btn-outline-dark ms-auto">Entrar</a><?php endif; ?>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php else: ?>
-                    <p class="text-muted small mb-0">Nenhum treinamento ou reunião geral registrado ainda.</p>
-                <?php endif; ?>
-                <button type="button" class="btn btn-sm btn-outline-dark mt-2 botao-novo-treinamento-setor" data-setor-id="" data-aba-retorno="visao-geral"><i class="bi bi-plus-lg"></i> Novo</button>
+                <div class="calendario-mensal" data-eventos='<?= e(json_encode($mapearEventosCalendario($treinamentosGerais), JSON_UNESCAPED_UNICODE)) ?>' data-setor-id="" data-aba-retorno="visao-geral"></div>
             </div>
         </div>
     </div>
@@ -1558,9 +1583,12 @@ require __DIR__ . '/templates/header.php';
 
                     <!-- Calendário -->
                     <div class="tab-pane" id="setorCalendario<?= $idSetorAtual ?>">
-                        <button type="button" class="btn btn-sm btn-dark mb-3 botao-novo-treinamento-setor" data-setor-id="<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Novo treinamento/reunião</button>
+                        <div class="d-flex justify-content-end mb-2">
+                            <button type="button" class="btn btn-sm btn-dark botao-novo-treinamento-setor" data-setor-id="<?= $idSetorAtual ?>" data-aba-retorno="setores"><i class="bi bi-plus-lg"></i> Novo treinamento/reunião</button>
+                        </div>
+                        <div class="calendario-mensal" data-eventos='<?= e(json_encode($mapearEventosCalendario($treinamentosSetor), JSON_UNESCAPED_UNICODE)) ?>' data-setor-id="<?= $idSetorAtual ?>" data-aba-retorno="setores"></div>
                         <?php if ($treinamentosSetor): ?>
-                        <div class="table-responsive">
+                        <div class="table-responsive mt-3">
                         <table class="table table-hover align-middle mb-0">
                             <thead><tr><th>Título</th><th>Tipo</th><th>Status</th><th>Quando</th><th>Responsável</th><th></th></tr></thead>
                             <tbody>
@@ -1594,8 +1622,6 @@ require __DIR__ . '/templates/header.php';
                             </tbody>
                         </table>
                         </div>
-                        <?php else: ?>
-                            <p class="text-muted text-center py-3">Nenhum treinamento ou reunião desse setor ainda.</p>
                         <?php endif; ?>
                     </div>
 
@@ -2006,7 +2032,7 @@ require __DIR__ . '/templates/header.php';
             </div>
             <div class="mb-3"><label class="form-label">Descrição</label><textarea name="descricao" class="form-control" rows="2"></textarea></div>
             <div class="row g-2">
-                <div class="col-6"><label class="form-label">Data início</label><input type="date" name="data_inicio" class="form-control"></div>
+                <div class="col-6"><label class="form-label">Data início</label><input type="date" name="data_inicio" id="novoTreinamentoDataInicio" class="form-control"></div>
                 <div class="col-6"><label class="form-label">Hora início</label><input type="time" name="hora_inicio" class="form-control"></div>
                 <div class="col-6"><label class="form-label">Data fim</label><input type="date" name="data_fim" class="form-control"></div>
                 <div class="col-6"><label class="form-label">Hora fim</label><input type="time" name="hora_fim" class="form-control"></div>
@@ -2324,6 +2350,125 @@ document.addEventListener('DOMContentLoaded', function () {
             if (campoRetorno) campoRetorno.value = 'setores';
             PrimeUI.openModal(document.getElementById('modalNovoKpi'));
         });
+    });
+
+    // Calendário mensal (aba Setores > Calendário, Visão geral > Agenda
+    // geral) -- um por .calendario-mensal encontrado na página, cada um com
+    // seu próprio estado de mês/ano em memória (não recarrega a página pra
+    // navegar entre meses, os eventos já vêm todos no data-eventos).
+    function escaparHtmlCalendario(texto) {
+        var div = document.createElement('div');
+        div.textContent = texto || '';
+        return div.innerHTML;
+    }
+
+    function abrirNovoTreinamentoNaData(container, dataIso) {
+        var campoData = document.getElementById('novoTreinamentoDataInicio');
+        var campoSetor = document.getElementById('novoTreinamentoSetor');
+        var campoRetorno = document.getElementById('novoTreinamentoAbaRetorno');
+        if (campoData) campoData.value = dataIso;
+        if (campoSetor) campoSetor.value = container.getAttribute('data-setor-id') || '';
+        if (campoRetorno) campoRetorno.value = container.getAttribute('data-aba-retorno') || 'setores';
+        PrimeUI.openModal(document.getElementById('modalNovoTreinamento'));
+    }
+
+    document.querySelectorAll('.calendario-mensal').forEach(function (container) {
+        var eventos = [];
+        try { eventos = JSON.parse(container.getAttribute('data-eventos') || '[]'); } catch (e) { eventos = []; }
+
+        var eventosPorDia = {};
+        eventos.forEach(function (ev) {
+            if (!ev.data_inicio) return;
+            (eventosPorDia[ev.data_inicio] = eventosPorDia[ev.data_inicio] || []).push(ev);
+        });
+
+        var hoje = new Date();
+        var anoAtual = hoje.getFullYear();
+        var mesAtual = hoje.getMonth();
+
+        var nomesMeses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+        var nomesDiasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+        function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+        function renderizar() {
+            var primeiroDiaMes = new Date(anoAtual, mesAtual, 1);
+            var diaSemanaInicio = primeiroDiaMes.getDay();
+            var diasNoMes = new Date(anoAtual, mesAtual + 1, 0).getDate();
+            var diasMesAnterior = new Date(anoAtual, mesAtual, 0).getDate();
+            var totalCelulas = diaSemanaInicio + diasNoMes;
+            var linhas = Math.ceil(totalCelulas / 7);
+            var totalCelulasGrid = linhas * 7;
+
+            var html = '<div class="calendario-cabecalho">'
+                + '<button type="button" class="calendario-nav-botao" data-nav="-1" aria-label="Mês anterior">&lsaquo;</button>'
+                + '<span class="calendario-titulo-mes">' + nomesMeses[mesAtual] + ' de ' + anoAtual + '</span>'
+                + '<button type="button" class="calendario-nav-botao" data-nav="1" aria-label="Próximo mês">&rsaquo;</button>'
+                + '</div><div class="calendario-grid">';
+
+            nomesDiasSemana.forEach(function (nome) {
+                html += '<div class="calendario-dia-semana">' + nome + '</div>';
+            });
+
+            for (var i = 0; i < totalCelulasGrid; i++) {
+                var numeroDia, mesCelula, foraDoMes;
+                if (i < diaSemanaInicio) {
+                    numeroDia = diasMesAnterior - (diaSemanaInicio - 1 - i);
+                    mesCelula = mesAtual - 1;
+                    foraDoMes = true;
+                } else if (i >= diaSemanaInicio + diasNoMes) {
+                    numeroDia = i - (diaSemanaInicio + diasNoMes) + 1;
+                    mesCelula = mesAtual + 1;
+                    foraDoMes = true;
+                } else {
+                    numeroDia = i - diaSemanaInicio + 1;
+                    mesCelula = mesAtual;
+                    foraDoMes = false;
+                }
+
+                var dataCelula = new Date(anoAtual, mesCelula, numeroDia);
+                var iso = dataCelula.getFullYear() + '-' + pad2(dataCelula.getMonth() + 1) + '-' + pad2(dataCelula.getDate());
+                var ehHoje = !foraDoMes && dataCelula.toDateString() === hoje.toDateString();
+
+                html += '<div class="calendario-dia' + (foraDoMes ? ' calendario-fora-do-mes' : '') + (ehHoje ? ' calendario-hoje' : '') + '" data-data="' + iso + '">';
+                html += '<span class="calendario-numero-dia">' + dataCelula.getDate() + '</span>';
+
+                var eventosDoDia = eventosPorDia[iso] || [];
+                var maxMostrar = 2;
+                eventosDoDia.slice(0, maxMostrar).forEach(function (ev) {
+                    var classeTipo = ev.status === 'cancelado'
+                        ? 'calendario-evento-cancelado'
+                        : (ev.tipo === 'reuniao' ? 'calendario-evento-reuniao' : 'calendario-evento-treinamento');
+                    var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) + ' ' : '';
+                    html += '<span class="calendario-evento ' + classeTipo + '" title="' + escaparHtmlCalendario(horaTexto + ev.titulo) + '">'
+                        + escaparHtmlCalendario(horaTexto + ev.titulo) + '</span>';
+                });
+                if (eventosDoDia.length > maxMostrar) {
+                    html += '<span class="calendario-mais-eventos">+' + (eventosDoDia.length - maxMostrar) + '</span>';
+                }
+                html += '</div>';
+            }
+
+            html += '</div>';
+            container.innerHTML = html;
+
+            container.querySelectorAll('[data-nav]').forEach(function (botaoNav) {
+                botaoNav.addEventListener('click', function () {
+                    mesAtual += parseInt(botaoNav.getAttribute('data-nav'), 10);
+                    if (mesAtual < 0) { mesAtual = 11; anoAtual--; }
+                    if (mesAtual > 11) { mesAtual = 0; anoAtual++; }
+                    renderizar();
+                });
+            });
+
+            container.querySelectorAll('.calendario-dia').forEach(function (celula) {
+                celula.addEventListener('click', function () {
+                    abrirNovoTreinamentoNaData(container, celula.getAttribute('data-data'));
+                });
+            });
+        }
+
+        renderizar();
     });
 });
 </script>
