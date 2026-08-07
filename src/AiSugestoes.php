@@ -4,18 +4,17 @@ namespace AdminPrime;
 
 /**
  * Sugestões de melhoria por setor (aba Setores) geradas com IA -- fala
- * direto com a API da Anthropic (sem intermediador), mesmo espírito do
- * WhatsAppApi: enquanto ANTHROPIC_API_KEY não estiver configurada, só avisa
- * em vez de quebrar a tela.
+ * direto com a API do Google Gemini (plano gratuito, pedido do Kleber pra
+ * não gerar custo nenhum), mesmo espírito do WhatsAppApi: enquanto
+ * GEMINI_API_KEY não estiver configurada, só avisa em vez de quebrar a tela.
  */
 class AiSugestoes
 {
-    private const VERSAO_API = '2023-06-01';
-    private const MODELO = 'claude-sonnet-5';
+    private const MODELO = 'gemini-2.5-flash';
 
     public static function configurada(): bool
     {
-        return defined('ANTHROPIC_API_KEY') && ANTHROPIC_API_KEY !== '';
+        return defined('GEMINI_API_KEY') && GEMINI_API_KEY !== '';
     }
 
     /**
@@ -31,19 +30,15 @@ class AiSugestoes
             return null;
         }
 
-        $ch = curl_init('https://api.anthropic.com/v1/messages');
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . GEMINI_API_KEY;
+
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'x-api-key: ' . ANTHROPIC_API_KEY,
-                'anthropic-version: ' . self::VERSAO_API,
-                'content-type: application/json',
-            ],
+            CURLOPT_HTTPHEADER => ['content-type: application/json'],
             CURLOPT_POSTFIELDS => json_encode([
-                'model' => self::MODELO,
-                'max_tokens' => 1024,
-                'messages' => [['role' => 'user', 'content' => $prompt]],
+                'contents' => [['parts' => [['text' => $prompt]]]],
             ]),
             CURLOPT_TIMEOUT => 40,
         ]);
@@ -54,11 +49,11 @@ class AiSugestoes
         curl_close($ch);
 
         if ($resposta === false || $codigoHttp >= 300) {
-            error_log('IA: falha na chamada à API da Anthropic: HTTP ' . $codigoHttp . ' ' . $erroCurl . ' -- ' . $resposta);
+            error_log('IA: falha na chamada à API do Gemini: HTTP ' . $codigoHttp . ' ' . $erroCurl . ' -- ' . $resposta);
             return null;
         }
 
         $dados = json_decode($resposta, true);
-        return $dados['content'][0]['text'] ?? null;
+        return $dados['candidates'][0]['content']['parts'][0]['text'] ?? null;
     }
 }

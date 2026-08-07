@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$nomeSetorSugestao) {
             flash_set('erro', 'Setor não encontrado.');
         } elseif (!AiSugestoes::configurada()) {
-            flash_set('erro', 'IA ainda não configurada -- defina a chave da Anthropic (ADMINPRIME_ANTHROPIC_API_KEY) pra usar esse recurso.');
+            flash_set('erro', 'IA ainda não configurada -- defina a chave do Gemini (ADMINPRIME_GEMINI_API_KEY) pra usar esse recurso.');
         } else {
             $stmtChamadosSugestao = $pdo->prepare("SELECT titulo, categoria, status, prioridade FROM chamados WHERE setor_id = ? ORDER BY criado_em DESC LIMIT 25");
             $stmtChamadosSugestao->execute([$setorIdSugestao]);
@@ -1726,7 +1726,7 @@ require __DIR__ . '/templates/header.php';
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                             <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-stars"></i> Gerar sugestões com IA</button>
                             <?php if (!AiSugestoes::configurada()): ?>
-                                <span class="text-muted small ms-2">IA ainda não configurada (ADMINPRIME_ANTHROPIC_API_KEY).</span>
+                                <span class="text-muted small ms-2">IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY).</span>
                             <?php endif; ?>
                         </form>
                         <?php if ($sugestaoIaSetor): ?>

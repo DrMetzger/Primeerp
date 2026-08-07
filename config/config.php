@@ -92,10 +92,12 @@ define('WHATSAPP_VERIFY_TOKEN', getenv('ADMINPRIME_WHATSAPP_VERIFY_TOKEN') ?: 'p
 define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: '');
 
 // IA de sugestões de melhoria por setor (aba Setores, ver src/AiSugestoes.php)
-// -- usa a API da Anthropic direto. Fica em branco até o Kleber configurar a
-// chave; enquanto isso, o botão "Gerar sugestões" mostra um aviso em vez de
-// quebrar (mesmo esquema do WhatsApp/e-mail sem credenciais).
-define('ANTHROPIC_API_KEY', getenv('ADMINPRIME_ANTHROPIC_API_KEY') ?: '');
+// -- usa a API do Google Gemini (plano gratuito, pedido do Kleber pra não
+// gerar custo). Fica em branco até ele configurar a chave (gerada em
+// aistudio.google.com/apikey); enquanto isso, o botão "Gerar sugestões"
+// mostra um aviso em vez de quebrar (mesmo esquema do WhatsApp/e-mail sem
+// credenciais).
+define('GEMINI_API_KEY', getenv('ADMINPRIME_GEMINI_API_KEY') ?: '');
 
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
