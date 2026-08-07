@@ -334,6 +334,31 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
 
 .card-stat .stat-value { font-size: 2rem; font-weight: 700; }
 
+/* Acento colorido por contexto -- borda lateral fininha, pra cada card de
+   número do dashboard ter uma "cor de assunto" própria em vez de tudo
+   ficar preto/índigo igual (pedido do Kleber: "está morto, só azul"). */
+.card-stat.acento-indigo { border-left: 4px solid var(--ph-primary); }
+.card-stat.acento-ciano { border-left: 4px solid var(--ph-accent); }
+.card-stat.acento-verde { border-left: 4px solid var(--ph-success); }
+.card-stat.acento-ambar { border-left: 4px solid var(--ph-warning); }
+.card-stat.acento-rosa { border-left: 4px solid #be123c; }
+.card-stat.acento-violeta { border-left: 4px solid #7c3aed; }
+.card-stat.acento-laranja { border-left: 4px solid #c2410c; }
+
+/* Círculo colorido com ícone -- usado no ícone do setor (icone_setor_html)
+   e nos cards do dashboard (icone_circulo_html), mesmo componente visual
+   reaproveitado nos dois lugares. */
+.icone-circulo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 1.05rem;
+    flex-shrink: 0;
+}
+
 /* Gráficos do dashboard (Chart.js) -- altura fixa pro canvas não colapsar
    pra 0px (Chart.js precisa de um container com altura definida pra
    calcular responsive:true corretamente) nem crescer sem limite. */
@@ -488,7 +513,7 @@ a.filtro-card:hover { box-shadow: var(--ph-elev-2); transform: translateY(-2px);
 }
 
 .navbar-dark.bg-dark {
-    background-color: #1e1b4b !important;
+    background: linear-gradient(100deg, #1e1b4b 0%, #3730a3 55%, #6d28d9 100%) !important;
     color: #fff;
 }
 
@@ -1117,12 +1142,14 @@ a.card-cliente, a.card-cliente:hover {
 /* Lista de setores dentro do modal "Gerenciar setores" (cliente.php) */
 .setor-detalhe {
     border: 1px solid var(--ph-border);
+    border-left: 4px solid var(--ph-primary);
     border-radius: var(--ph-radius);
     padding: .75rem 1rem;
 }
 
 .setor-detalhe + .setor-detalhe { margin-top: .5rem; }
-.setor-detalhe summary { cursor: pointer; display: flex; align-items: center; gap: .5rem; list-style: none; }
+.setor-detalhe summary { cursor: pointer; display: flex; align-items: center; gap: .6rem; list-style: none; }
+.setor-detalhe summary .icone-circulo { width: 30px; height: 30px; font-size: .92rem; }
 .setor-detalhe summary::-webkit-details-marker { display: none; }
 .setor-detalhe summary::before { content: "\25B8"; color: var(--ph-text-muted); transition: transform .15s ease; }
 .setor-detalhe[open] summary::before { transform: rotate(90deg); }

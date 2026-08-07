@@ -1274,9 +1274,9 @@ require __DIR__ . '/templates/header.php';
                     <div class="card-setor-topo"><i class="bi bi-collection"></i> <span class="fw-semibold">Todos os setores</span></div>
                 </div>
                 <?php foreach ($setores as $s): ?>
-                    <div class="card-setor <?= (int) $s['chamados_urgentes'] > 0 ? 'setor-atencao' : '' ?>" data-setor-filtro="<?= $s['id'] ?>" role="button" tabindex="0">
+                    <div class="card-setor <?= (int) $s['chamados_urgentes'] > 0 ? 'setor-atencao' : '' ?>" data-setor-filtro="<?= $s['id'] ?>" role="button" tabindex="0" style="<?= (int) $s['chamados_urgentes'] > 0 ? '' : 'border-left: 4px solid ' . cor_setor($s['id']) . ';' ?>">
                         <div class="card-setor-topo">
-                            <span class="fw-semibold"><?= e($s['nome']) ?></span>
+                            <span class="fw-semibold"><?= icone_setor_html($s) ?> <?= e($s['nome']) ?></span>
                             <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
                         </div>
                         <div class="card-setor-responsavel">
@@ -1531,9 +1531,9 @@ require __DIR__ . '/templates/header.php';
             $sugestaoIaSetor = $ultimaSugestaoIaPorSetorId[$idSetorAtual] ?? null;
             $candidatosRelacionar = array_filter($usuariosCliente, fn ($u) => (int) $u['setor_id'] !== $idSetorAtual);
         ?>
-        <details class="setor-detalhe" <?= $indiceSetor === 0 ? 'open' : '' ?>>
+        <details class="setor-detalhe" style="border-left-color: <?= cor_setor($idSetorAtual) ?>" <?= $indiceSetor === 0 ? 'open' : '' ?>>
             <summary>
-                <i class="bi <?= e($s['icone'] ?: 'bi-diagram-3') ?>"></i>
+                <?= icone_setor_html($s) ?>
                 <span class="fw-semibold"><?= e($s['nome']) ?></span>
                 <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
                 <span class="text-muted small">
@@ -2665,6 +2665,15 @@ document.addEventListener('DOMContentLoaded', function () {
         function paraIso(data) { return data.getFullYear() + '-' + pad2(data.getMonth() + 1) + '-' + pad2(data.getDate()); }
         function mesmoDia(a, b) { return a.toDateString() === b.toDateString(); }
 
+        // Mesma paleta/regra de CORES_SETOR em src/helpers.php (cor_setor())
+        // -- cada setor tem cor própria e fixa, pra distinguir de qual setor
+        // é cada reunião/treinamento na Agenda geral (que mistura setores).
+        var CORES_SETOR_JS = ['#4f46e5', '#0891b2', '#be123c', '#b45309', '#15803d', '#7c3aed', '#0e7490', '#c2410c'];
+        function corSetorEvento(setorId) {
+            if (!setorId) return null;
+            return CORES_SETOR_JS[setorId % CORES_SETOR_JS.length];
+        }
+
         function classeTipoEvento(ev) {
             return ev.status === 'cancelado'
                 ? 'calendario-evento-cancelado'
@@ -2673,13 +2682,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
         function construirChipEvento(ev) {
             var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) + ' ' : '';
-            return '<span class="calendario-evento ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '" title="' + escaparHtmlCalendario(horaTexto + ev.titulo) + '">'
+            var cor = ev.status !== 'cancelado' ? corSetorEvento(ev.setor_id) : null;
+            var estilo = cor ? ' style="background-color:' + cor + '"' : '';
+            return '<span class="calendario-evento ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '"' + estilo + ' title="' + escaparHtmlCalendario(horaTexto + ev.titulo) + '">'
                 + escaparHtmlCalendario(horaTexto + ev.titulo) + '</span>';
         }
 
         function construirItemEvento(ev) {
             var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) : '--:--';
-            return '<div class="calendario-evento-item ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '">'
+            var cor = ev.status !== 'cancelado' ? corSetorEvento(ev.setor_id) : null;
+            var estilo = cor ? ' style="border-left-color:' + cor + ';background-color:' + cor + '1a"' : '';
+            return '<div class="calendario-evento-item ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '"' + estilo + '>'
                 + '<span class="calendario-evento-item-hora">' + escaparHtmlCalendario(horaTexto) + '</span>'
                 + '<span class="calendario-evento-item-titulo">' + escaparHtmlCalendario(ev.titulo) + '</span>'
                 + '</div>';

@@ -125,6 +125,39 @@ function avatar_html(string $nome, ?string $caminhoFoto, string $classeTipo): st
 }
 
 /**
+ * Paleta de cores por setor -- cada setor ganha uma cor própria e FIXA
+ * (baseada no id, nunca muda de uma tela pra outra), pra parar de tudo
+ * ficar na mesma cor índigo do resto do sistema (pedido do Kleber: "só
+ * azul, tem que ser mais vivo"). Reaproveitada no ícone do setor, na borda
+ * dos cards e nos eventos do calendário daquele setor.
+ */
+const CORES_SETOR = [
+    '#4f46e5', // índigo
+    '#0891b2', // ciano
+    '#be123c', // rosa
+    '#b45309', // âmbar
+    '#15803d', // verde
+    '#7c3aed', // violeta
+    '#0e7490', // teal
+    '#c2410c', // laranja
+];
+
+function cor_setor(int $setorId): string
+{
+    return CORES_SETOR[$setorId % count(CORES_SETOR)];
+}
+
+function icone_circulo_html(string $icone, string $cor): string
+{
+    return '<span class="icone-circulo" style="background-color:' . e($cor) . '1f;color:' . e($cor) . ';"><i class="bi ' . e($icone) . '"></i></span>';
+}
+
+function icone_setor_html(array $setor): string
+{
+    return icone_circulo_html($setor['icone'] ?: 'bi-diagram-3', cor_setor((int) $setor['id']));
+}
+
+/**
  * Resolve o avatar "efetivo" de uma pessoa pelo E-MAIL -- pedido do Kleber
  * depois de cadastrar um responsável de setor com o mesmo e-mail do contato
  * master do cliente (a mesma pessoa, usando dois logins diferentes) e ver

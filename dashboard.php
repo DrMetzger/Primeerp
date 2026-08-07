@@ -244,25 +244,28 @@ $clientesAtencao = array_slice($clientesAtencao, 0, 10);
 ob_start(); ?>
 <div class="row g-3">
     <div class="col-sm-6 col-lg-4">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-indigo">
             <div class="card-body">
-                <div class="text-muted small">Clientes ativos</div>
+                <?= icone_circulo_html('bi-people-fill', '#4f46e5') ?>
+                <div class="text-muted small mt-2">Clientes ativos</div>
                 <div class="stat-value text-dark"><?= $totalClientesAtivos ?></div>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-4">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-ambar">
             <div class="card-body">
-                <div class="text-muted small">Chamados aguardando nós</div>
-                <div class="stat-value text-primary"><?= $totalChamadosAguardandoNos ?></div>
+                <?= icone_circulo_html('bi-exclamation-circle-fill', '#b45309') ?>
+                <div class="text-muted small mt-2">Chamados aguardando nós</div>
+                <div class="stat-value" style="color:#b45309"><?= $totalChamadosAguardandoNos ?></div>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-4">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-rosa">
             <div class="card-body">
-                <div class="text-muted small">Chamados urgentes / alta prioridade</div>
+                <?= icone_circulo_html('bi-fire', '#be123c') ?>
+                <div class="text-muted small mt-2">Chamados urgentes / alta prioridade</div>
                 <div class="stat-value text-danger"><?= $totalChamadosUrgentes ?></div>
             </div>
         </div>
@@ -273,36 +276,40 @@ ob_start(); ?>
 ob_start(); ?>
 <div class="row g-3">
     <div class="col-sm-6 col-lg-3">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-ciano">
             <div class="card-body">
-                <div class="text-muted small">Chamados abertos (mês)</div>
+                <?= icone_circulo_html('bi-envelope-open-fill', '#0891b2') ?>
+                <div class="text-muted small mt-2">Chamados abertos (mês)</div>
                 <div class="stat-value text-dark"><?= $chamadosMesAtual ?></div>
                 <?= tile_delta_html($chamadosMesAtual, $chamadosMesPassado) ?>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-verde">
             <div class="card-body">
-                <div class="text-muted small">Chamados fechados (mês)</div>
+                <?= icone_circulo_html('bi-check-circle-fill', '#15803d') ?>
+                <div class="text-muted small mt-2">Chamados fechados (mês)</div>
                 <div class="stat-value text-dark"><?= $fechadosMesAtual ?></div>
                 <?= tile_delta_html($fechadosMesAtual, $fechadosMesPassado) ?>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-violeta">
             <div class="card-body">
-                <div class="text-muted small">Tempo médio de atendimento</div>
+                <?= icone_circulo_html('bi-stopwatch-fill', '#7c3aed') ?>
+                <div class="text-muted small mt-2">Tempo médio de atendimento</div>
                 <div class="stat-value text-dark"><?= e(formatar_duracao_minutos($tempoMedioMinutos)) ?></div>
                 <div class="small text-muted mt-1">Chamados fechados nos últimos 30 dias</div>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card card-stat h-100">
+        <div class="card card-stat h-100 acento-laranja">
             <div class="card-body">
-                <div class="text-muted small">Tempo médio em aberto</div>
+                <?= icone_circulo_html('bi-hourglass-split', '#c2410c') ?>
+                <div class="text-muted small mt-2">Tempo médio em aberto</div>
                 <div class="stat-value text-dark"><?= $idadeMediaDias !== null ? number_format($idadeMediaDias, 1, ',', '.') . ' dias' : '--' ?></div>
                 <div class="small text-muted mt-1">Chamados pendentes agora</div>
             </div>
