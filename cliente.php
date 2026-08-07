@@ -73,24 +73,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // já definida pra aquele KPI/setor, senão o valor calculado sobrescreve
     // um número mas nunca inventa uma meta que ninguém definiu).
     if ($acao === 'calcular_kpis_automaticos') {
-        $setorIdCalculo = (int) $_POST['setor_id'];
+        // setor_id vazio = KPI GERAL do cliente (chamados sem setor
+        // vinculado) -- precisa virar NULL de verdade, não 0: "0" não bate
+        // com nenhum chamado (nem os com setor de verdade, nem os sem
+        // setor, que ficam com setor_id IS NULL no banco).
+        $setorIdCalculo = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+        $condicaoSetor = $setorIdCalculo !== null ? 'setor_id = ?' : 'setor_id IS NULL';
+        $paramsSetor = $setorIdCalculo !== null ? [$setorIdCalculo] : [];
+
         $periodoCalculo = $_POST['periodo'] . '-01';
         $inicioPeriodo = $periodoCalculo . ' 00:00:00';
         $fimPeriodo = date('Y-m-t 23:59:59', strtotime($periodoCalculo));
 
-        $stmtCalculo = $pdo->prepare('
+        $stmtCalculo = $pdo->prepare("
             SELECT
                 COUNT(*) AS total_abertos,
-                SUM(CASE WHEN prioridade IN ("alta", "urgente") THEN 1 ELSE 0 END) AS total_urgentes,
-                (SELECT COUNT(*) FROM chamados WHERE setor_id = ? AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS total_resolvidos,
-                (SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) FROM chamados WHERE setor_id = ? AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS tempo_medio_min
+                SUM(CASE WHEN prioridade IN ('alta', 'urgente') THEN 1 ELSE 0 END) AS total_urgentes,
+                (SELECT COUNT(*) FROM chamados WHERE {$condicaoSetor} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS total_resolvidos,
+                (SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) FROM chamados WHERE {$condicaoSetor} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS tempo_medio_min
             FROM chamados
-            WHERE setor_id = ? AND cliente_id = ? AND criado_em BETWEEN ? AND ?
-        ');
+            WHERE {$condicaoSetor} AND cliente_id = ? AND criado_em BETWEEN ? AND ?
+        ");
         $stmtCalculo->execute([
-            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
-            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
-            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
         ]);
         $resultadoCalculo = $stmtCalculo->fetch();
 
@@ -102,13 +109,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
 
         foreach ($kpisAutomaticos as [$nomeKpiAuto, $valorKpiAuto, $unidadeKpiAuto]) {
-            $stmtMetaAnterior = $pdo->prepare('SELECT meta FROM kpis WHERE setor_id = ? AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1');
-            $stmtMetaAnterior->execute([$setorIdCalculo, $nomeKpiAuto]);
+            $stmtMetaAnterior = $pdo->prepare("SELECT meta FROM kpis WHERE {$condicaoSetor} AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1");
+            $stmtMetaAnterior->execute([...$paramsSetor, $nomeKpiAuto]);
             $metaAnteriorKpi = $stmtMetaAnterior->fetchColumn();
             $metaAnteriorKpi = $metaAnteriorKpi !== false ? $metaAnteriorKpi : null;
 
-            $stmtKpiExistente = $pdo->prepare('SELECT id FROM kpis WHERE setor_id = ? AND nome_kpi = ? AND periodo = ?');
-            $stmtKpiExistente->execute([$setorIdCalculo, $nomeKpiAuto, $periodoCalculo]);
+            $stmtKpiExistente = $pdo->prepare("SELECT id FROM kpis WHERE {$condicaoSetor} AND nome_kpi = ? AND periodo = ?");
+            $stmtKpiExistente->execute([...$paramsSetor, $nomeKpiAuto, $periodoCalculo]);
             $idKpiExistente = $stmtKpiExistente->fetchColumn();
 
             if ($idKpiExistente) {
@@ -120,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        flash_set('sucesso', '4 KPIs calculados automaticamente a partir dos chamados desse setor.');
+        flash_set('sucesso', '4 KPIs calculados automaticamente a partir dos chamados.');
     }
 
     if ($acao === 'criar_treinamento') {
@@ -1572,9 +1579,21 @@ require __DIR__ . '/templates/header.php';
 
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
-        <p class="text-muted small mb-2"><i class="bi bi-graph-up"></i> Métricas gerais do cliente. Métricas de um setor específico ficam na aba Setores, dentro do próprio setor.</p>
-        <div class="toolbar">
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up"></i> KPI (métrica) é qualquer número que ajuda a acompanhar a saúde do atendimento -- ex.: quantos chamados abriram, quantos foram resolvidos, tempo médio de resposta, % dentro do prazo (SLA). Serve pra comparar mês a mês e enxergar se o processo está piorando ou melhorando.</p>
+        <p class="text-muted small mb-2">Essa aba aqui é só o <strong>geral do cliente</strong> (chamados sem setor vinculado) -- se esse cliente tem setores (aba Setores), a métrica de cada setor fica dentro dele mesmo, não aqui. <?= $setores ? 'Como esse cliente tem setor cadastrado, o normal é a maioria (ou todos) dos KPIs aparecerem lá, não aqui.' : '' ?></p>
+        <div class="toolbar d-flex flex-wrap gap-2 align-items-end">
             <button type="button" class="btn btn-dark btn-sm botao-novo-kpi-geral"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
+            <form method="post" class="d-flex gap-2 align-items-end">
+                <?= csrf_field() ?>
+                <input type="hidden" name="acao" value="calcular_kpis_automaticos">
+                <input type="hidden" name="aba_retorno" value="kpis">
+                <input type="hidden" name="setor_id" value="">
+                <div>
+                    <label class="form-label small mb-1">Calcular a partir dos chamados sem setor</label>
+                    <input type="month" name="periodo" class="form-control form-control-sm" value="<?= date('Y-m') ?>" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Calcular automaticamente</button>
+            </form>
         </div>
         <div class="card card-stat">
             <div class="card-body p-0">
