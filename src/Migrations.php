@@ -501,6 +501,56 @@ class Migrations
             ]);
         }
 
+        // Setor passa a ter um ícone (bootstrap-icons) pra ficar mais fácil
+        // de reconhecer visualmente no cadastro -- pedido do Kleber junto
+        // com a separação do cadastro de usuário do cliente (ver mais
+        // abaixo). NULL = setor antigo, sem ícone escolhido ainda (cai num
+        // ícone genérico na exibição).
+        $pdo->exec("ALTER TABLE setores ADD COLUMN IF NOT EXISTS icone VARCHAR(50) NULL COMMENT 'Classe do bootstrap-icons, ex.: bi-cash-coin' AFTER nome");
+
+        // Responsável de setor agora nasce SEM setor (cadastrado na aba
+        // Usuários do cliente) e só ganha setor_id quando alguém o
+        // relaciona a um setor específico -- antes disso era obrigatório
+        // informar o setor já na criação, misturando cadastro de pessoa com
+        // cadastro de setor no mesmo formulário (o Kleber pediu pra separar).
+        $pdo->exec("ALTER TABLE setor_responsaveis MODIFY COLUMN setor_id INT NULL");
+
+        // Sem setor_id obrigatório, não dá mais pra saber de qual CLIENTE é
+        // o responsável só através do JOIN com setores -- precisa de um
+        // vínculo direto. Nasce nullable pra poder fazer o backfill (a partir
+        // do setor atual de cada um) antes de travar como NOT NULL.
+        $pdo->exec("ALTER TABLE setor_responsaveis ADD COLUMN IF NOT EXISTS cliente_id INT NULL COMMENT 'Cliente dono desse cadastro -- direto, não depende mais de ter setor' AFTER id");
+        $pdo->exec("
+            UPDATE setor_responsaveis sr
+            INNER JOIN setores s ON s.id = sr.setor_id
+            SET sr.cliente_id = s.cliente_id
+            WHERE sr.cliente_id IS NULL
+        ");
+        $temPendenteSemCliente = (int) $pdo->query('SELECT COUNT(*) FROM setor_responsaveis WHERE cliente_id IS NULL')->fetchColumn();
+        if ($temPendenteSemCliente === 0) {
+            $pdo->exec('ALTER TABLE setor_responsaveis MODIFY COLUMN cliente_id INT NOT NULL');
+        }
+
+        // Setor ÚNICO do contato master -- substitui o antigo
+        // setores.master_participa (que permitia o master "participar" de
+        // VÁRIOS setores ao mesmo tempo). Como o master já vê/gerencia todos
+        // os setores do cliente independente disso, só precisa estar
+        // atrelado a UM setor (normalmente TI, que costuma tocar os
+        // chamados); esse vínculo agora é editado no cadastro do usuário
+        // (aba Usuários), não mais num checkbox dentro de cada setor. Sem FK
+        // de banco de propósito (mesmo padrão de chamados.setor_id acima).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor único do contato master, ver setores -- substitui setores.master_participa' AFTER contato_documento");
+
+        // Treinamento passa a poder ser de um SETOR específico (não só do
+        // cliente todo), e ganha os campos pra virar também "reunião" (tipo,
+        // horário e link de call) -- pedido do Kleber pra ter uma agenda
+        // organizada por setor.
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor específico, ou NULL = treinamento geral do cliente' AFTER cliente_id");
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS tipo ENUM('treinamento','reuniao') NOT NULL DEFAULT 'treinamento' AFTER titulo");
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS hora_inicio TIME NULL AFTER data_inicio");
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS hora_fim TIME NULL AFTER data_fim");
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS link_reuniao VARCHAR(255) NULL COMMENT 'Link da videochamada (Meet/Teams/Zoom), quando tiver' AFTER hora_fim");
+
         // Clientes iniciais, criados apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn();
         if ($count === 0) {
@@ -521,6 +571,7 @@ class Migrations
         self::atribuirAvatarPadrao($pdo);
         self::vincularAutorRespostasAntigas($pdo);
         self::atribuirResponsavelPadrao($pdo);
+        self::migrarSetorMasterAntigo($pdo);
     }
 
     /**
@@ -673,6 +724,41 @@ class Migrations
             SET r.autor_usuario_id = u.id
             WHERE r.autor_tipo = 'equipe' AND r.autor_usuario_id IS NULL
         ");
+    }
+
+    /**
+     * Migração única: converte o antigo setores.master_participa (o master
+     * podia "participar" de vários setores ao mesmo tempo) pro novo
+     * clientes.setor_id (o master pertence a UM setor só). Pra cliente que
+     * tinha master_participa=1 em mais de um setor, fica com o primeiro
+     * (por id) -- não tem como escolher automaticamente qual é "o certo",
+     * e como o master já vê todos os setores mesmo assim, não faz diferença
+     * prática qual desses foi escolhido; se precisar, o Kleber troca depois
+     * na aba Usuários. Só roda enquanto clientes.setor_id ainda estiver NULL
+     * (idempotente -- não sobrescreve escolha manual já feita). Depois de
+     * migrar os dados, a coluna antiga já não é lida em nenhum lugar do
+     * código -- remove ela pra não deixar lixo morto no schema.
+     */
+    private static function migrarSetorMasterAntigo(PDO $pdo): void
+    {
+        $temColuna = $pdo->query("SHOW COLUMNS FROM setores LIKE 'master_participa'")->fetch();
+        if (!$temColuna) {
+            return;
+        }
+
+        $pdo->exec("
+            UPDATE clientes c
+            INNER JOIN (
+                SELECT cliente_id, MIN(id) AS setor_id
+                FROM setores
+                WHERE master_participa = 1
+                GROUP BY cliente_id
+            ) s ON s.cliente_id = c.id
+            SET c.setor_id = s.setor_id
+            WHERE c.setor_id IS NULL
+        ");
+
+        $pdo->exec('ALTER TABLE setores DROP COLUMN master_participa');
     }
 
     /**

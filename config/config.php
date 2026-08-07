@@ -139,18 +139,40 @@ define('CATEGORIAS_CHAMADO', [
 ]);
 
 // Sugestões de nome pra cadastro rápido de setor (cliente.php, modal
-// Gerenciar setores) -- modelo inicial passado pelo Kleber. Setor é
-// totalmente flexível/cadastrável por cliente, isso aqui é só atalho.
+// Gerenciar setores) -- modelo inicial passado pelo Kleber, agora com um
+// ícone (bootstrap-icons) já sugerido pra cada um. Setor é totalmente
+// flexível/cadastrável por cliente, isso aqui é só atalho -- o nome digitado
+// não precisa bater com nenhuma dessas chaves.
 define('SETORES_SUGERIDOS', [
-    'Ativo Fixo',
-    'Compras',
-    'Estoque/Custos',
-    'Faturamento',
-    'Financeiro',
-    'PCP',
-    'RH',
-    'Ponto Eletrônico',
-    'Contabilidade',
+    'Ativo Fixo' => 'bi-box-seam',
+    'Compras' => 'bi-cart',
+    'Estoque/Custos' => 'bi-boxes',
+    'Faturamento' => 'bi-receipt',
+    'Financeiro' => 'bi-cash-coin',
+    'PCP' => 'bi-diagram-3',
+    'RH' => 'bi-people',
+    'Ponto Eletrônico' => 'bi-clock-history',
+    'Contabilidade' => 'bi-calculator',
+    'Fiscal' => 'bi-file-earmark-text',
+    'TI' => 'bi-hdd-network',
+    'Jurídico' => 'bi-briefcase',
+    'Qualidade' => 'bi-patch-check',
+    'Comercial/Vendas' => 'bi-graph-up-arrow',
+    'Logística' => 'bi-truck',
+    'Manutenção' => 'bi-tools',
+]);
+
+// Ícones (bootstrap-icons) disponíveis no seletor de setor, além dos já
+// sugeridos acima -- pra quando o setor cadastrado não é nenhum dos nomes
+// padrão mas o cliente quer um ícone mesmo assim (ex.: um setor com nome
+// próprio da empresa). Lista só de classes, sem nome associado.
+define('ICONES_SETOR_DISPONIVEIS', [
+    'bi-building', 'bi-diagram-3', 'bi-people', 'bi-person-badge',
+    'bi-cash-coin', 'bi-receipt', 'bi-graph-up-arrow', 'bi-cart',
+    'bi-boxes', 'bi-box-seam', 'bi-truck', 'bi-tools', 'bi-gear',
+    'bi-clock-history', 'bi-calculator', 'bi-file-earmark-text',
+    'bi-briefcase', 'bi-patch-check', 'bi-shield-check', 'bi-hdd-network',
+    'bi-headset', 'bi-chat-dots', 'bi-clipboard-check', 'bi-globe',
 ]);
 
 // Horário comercial em que o PORTAL DO CLIENTE fica acessível (login E

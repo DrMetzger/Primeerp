@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
         $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ? AND cliente_id = ?')->execute([$chamadoId, $clienteId]);
         flash_set('sucesso', 'Chamado sem setor vinculado.');
     } else {
-        $stmtSetorAlvoPortal = $pdo->prepare('SELECT id, nome, master_participa FROM setores WHERE id = ? AND cliente_id = ?');
+        $stmtSetorAlvoPortal = $pdo->prepare('SELECT id, nome FROM setores WHERE id = ? AND cliente_id = ?');
         $stmtSetorAlvoPortal->execute([$novoSetorId, $clienteId]);
         $setorAlvoPortal = $stmtSetorAlvoPortal->fetch();
 
@@ -58,8 +58,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
         $stmtMembrosAlvoPortal->execute([$novoSetorId]);
         $membrosAlvoPortal = $stmtMembrosAlvoPortal->fetchAll();
 
-        if (!$setorAlvoPortal || (!$membrosAlvoPortal && !$setorAlvoPortal['master_participa'])) {
-            flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- cadastre um antes de atribuir chamados a ele.');
+        $stmtSetorMasterPortal = $pdo->prepare('SELECT setor_id FROM clientes WHERE id = ?');
+        $stmtSetorMasterPortal->execute([$clienteId]);
+        $masterNesseSetorPortal = (int) $stmtSetorMasterPortal->fetchColumn() === $novoSetorId;
+
+        if (!$setorAlvoPortal || (!$membrosAlvoPortal && !$masterNesseSetorPortal)) {
+            flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- relacione um usuário antes de atribuir chamados a ele.');
         } else {
             $setorAntigoId = (int) $chamado['setor_id'];
             $pdo->prepare('UPDATE chamados SET setor_id = ? WHERE id = ? AND cliente_id = ?')->execute([$novoSetorId, $chamadoId, $clienteId]);
@@ -68,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
                 foreach ($membrosAlvoPortal as $membro) {
                     Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $membro, $setorAlvoPortal['nome']);
                 }
-                if ($setorAlvoPortal['master_participa'] && $clienteInfo['contato_email']) {
+                if ($masterNesseSetorPortal && $clienteInfo['contato_email']) {
                     Notificacoes::chamadoAtribuidoSetor(
                         ['id' => $chamadoId, 'titulo' => $chamado['titulo']],
                         ['nome' => $nomeMasterCliente, 'email' => $clienteInfo['contato_email']],
@@ -216,9 +220,10 @@ foreach ($respostas as $r) {
 $setoresPortal = [];
 if (ClienteAuth::isMaster()) {
     $stmtSetoresPortal = $pdo->prepare('
-        SELECT s.id, s.nome, s.master_participa,
+        SELECT s.id, s.nome, (c.setor_id = s.id) AS eh_setor_master,
             EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id) AS tem_responsavel
         FROM setores s
+        INNER JOIN clientes c ON c.id = s.cliente_id
         WHERE s.cliente_id = ?
         ORDER BY s.nome ASC
     ');
@@ -258,7 +263,7 @@ require __DIR__ . '/../templates/portal_header.php';
                     <input type="hidden" name="acao" value="atribuir_setor_chamado">
                     <select name="setor_id" class="form-select form-select-sm" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
                         <option value="" <?= !$chamado['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
-                        <?php foreach ($setoresPortal as $s): $temResponsavelPortal = $s['tem_responsavel'] || $s['master_participa']; ?>
+                        <?php foreach ($setoresPortal as $s): $temResponsavelPortal = $s['tem_responsavel'] || $s['eh_setor_master']; ?>
                             <option value="<?= $s['id'] ?>" <?= (int) $chamado['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$temResponsavelPortal ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$temResponsavelPortal ? ' (sem responsável)' : '' ?></option>
                         <?php endforeach; ?>
                     </select>

@@ -115,11 +115,11 @@ if (ClienteAuth::isMaster()) {
         foreach ($stmtRespPortal->fetchAll() as $sr) {
             $responsaveisPorSetorIdPortal[$sr['setor_id']][] = $sr;
         }
-        $stmtClienteInfoPortal = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil FROM clientes WHERE id = ?');
+        $stmtClienteInfoPortal = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil, setor_id FROM clientes WHERE id = ?');
         $stmtClienteInfoPortal->execute([$clienteId]);
         $clienteInfoPortal = $stmtClienteInfoPortal->fetch();
         foreach ($setoresPortal as $s) {
-            if ($s['master_participa']) {
+            if ((int) $clienteInfoPortal['setor_id'] === (int) $s['id']) {
                 $responsaveisPorSetorIdPortal[$s['id']] ??= [];
                 array_unshift($responsaveisPorSetorIdPortal[$s['id']], [
                     'nome' => $clienteInfoPortal['contato_nome'] ?: $clienteInfoPortal['nome'],

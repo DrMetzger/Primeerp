@@ -834,6 +834,29 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .avatar-opcao:hover { border-color: var(--ph-primary); transform: scale(1.08); }
 
+/* Seletor de ícone de setor (modal Gerenciar setores) -- mesma ideia da
+   galeria de avatares, só que com bootstrap-icons em vez de foto. */
+.seletor-icone-setor {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    max-width: 480px;
+}
+.icone-opcao {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: var(--ph-radius-sm);
+    border: 2px solid var(--ph-border);
+    background-color: var(--ph-surface);
+    color: var(--ph-text-muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: transform .1s, border-color .1s, color .1s;
+}
+.icone-opcao:hover { border-color: var(--ph-primary); transform: scale(1.05); }
+.icone-opcao.active { border-color: var(--ph-primary); color: var(--ph-primary); background-color: var(--ph-primary-light); }
+
 /* Chat de chamados (estilo WhatsApp) */
 
 .chat-thread {

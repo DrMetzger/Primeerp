@@ -162,33 +162,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Diferente de "Reenviar convite" (que gera um novo link mas mantém a
-    // senha atual válida até o cliente clicar): reseta de fato -- zera a
-    // senha na hora (invalidando a que ele esqueceu) e já manda um novo
-    // convite pra ele definir outra. Pedido do Kleber porque os clientes
-    // esquecem a senha o tempo todo e antes não tinha um jeito direto de
-    // "resetar", só reenviar convite (que parecia só pra quem nunca tinha
-    // acesso ainda).
-    if ($acao === 'resetar_senha_cliente') {
-        $clienteId = (int) $_POST['cliente_id'];
-        $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
-        $stmt->execute([$clienteId]);
-        $clienteAlvo = $stmt->fetch();
-
-        if (!$clienteAlvo) {
-            flash_set('erro', 'Cliente não encontrado.');
-        } elseif (!$clienteAlvo['contato_email']) {
-            flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de resetar a senha.');
-        } else {
-            $pdo->prepare('UPDATE clientes SET senha_hash = NULL WHERE id = ?')->execute([$clienteId]);
-            $token = bin2hex(random_bytes(32));
-            $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
-                ->execute([$clienteId, $token]);
-            Notificacoes::conviteAcessoPortal($clienteAlvo, $token);
-            flash_set('sucesso', 'Senha resetada. Um novo link para criar senha foi enviado para ' . $clienteAlvo['contato_email'] . '.');
-        }
-    }
-
     if ($acao === 'alternar_status') {
         $usuarioId = (int) $_POST['usuario_id'];
         if ($usuarioId !== Auth::userId()) {
@@ -198,31 +171,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             flash_set('erro', 'Você não pode desativar seu próprio usuário.');
         }
-    }
-
-    if ($acao === 'enviar_convite_portal') {
-        $clienteId = (int) $_POST['cliente_id'];
-        $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
-        $stmt->execute([$clienteId]);
-        $clienteAlvo = $stmt->fetch();
-
-        if (!$clienteAlvo) {
-            flash_set('erro', 'Cliente não encontrado.');
-        } elseif (!$clienteAlvo['contato_email']) {
-            flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
-        } else {
-            $token = bin2hex(random_bytes(32));
-            $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
-                ->execute([$clienteId, $token]);
-            Notificacoes::conviteAcessoPortal($clienteAlvo, $token);
-            flash_set('sucesso', 'Convite enviado para ' . $clienteAlvo['contato_email'] . '.');
-        }
-    }
-
-    if ($acao === 'desativar_portal_cliente') {
-        $clienteId = (int) $_POST['cliente_id'];
-        $pdo->prepare('UPDATE clientes SET portal_ativo = 0, senha_hash = NULL WHERE id = ?')->execute([$clienteId]);
-        flash_set('sucesso', 'Acesso ao portal desativado.');
     }
 
     header('Location: ' . url('usuarios.php'));
@@ -245,7 +193,6 @@ $usuarios = $pdo->query("
     FROM usuarios u
     ORDER BY u.nome ASC
 ")->fetchAll();
-$clientesPortal = $pdo->query('SELECT id, nome, contato_nome, contato_email, portal_ativo, foto_perfil, acesso_fora_horario FROM clientes ORDER BY nome ASC')->fetchAll();
 
 $tituloPagina = 'Usuários';
 require __DIR__ . '/templates/header.php';
@@ -256,121 +203,52 @@ require __DIR__ . '/templates/header.php';
 <?php endif; ?>
 
 <h4 class="mb-3">Usuários</h4>
+<p class="text-muted small mb-3">Usuários da equipe interna. Os usuários de cada CLIENTE (master + responsáveis de setor) agora são cadastrados dentro do próprio cliente, na aba "Usuários" -- ver <a href="<?= url('clientes.php') ?>">Clientes</a>.</p>
 
-<ul class="nav nav-tabs mb-3" id="usuariosTabs">
-    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#equipe"><i class="bi bi-person-badge"></i> Equipe <span class="badge bg-secondary"><?= count($usuarios) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#clientes-portal"><i class="bi bi-people"></i> Clientes (portal) <span class="badge bg-secondary"><?= count($clientesPortal) ?></span></a></li>
-</ul>
-
-<div class="tab-content">
-
-    <div class="tab-pane show active" id="equipe">
-
-        <div class="toolbar">
-            <div class="toolbar-acoes">
-                <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
-            </div>
-        </div>
-
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
-                    <tbody>
-                    <?php foreach ($usuarios as $u):
-                        $uParaJs = array_diff_key($u, ['foto_perfil_dados' => 1, 'senha_hash' => 1]);
-                        $uParaJs['tempo_medio_formatado'] = formatar_duracao_minutos(
-                            $u['media_minutos_atendimento'] !== null ? (float) $u['media_minutos_atendimento'] : null
-                        );
-                    ?>
-                        <tr class="linha-usuario" role="button" tabindex="0"
-                            data-usuario='<?= e(json_encode($uParaJs, JSON_UNESCAPED_UNICODE)) ?>'>
-                            <td><?= avatar_html($u['nome'], $u['foto_perfil'], 'equipe') ?></td>
-                            <td class="fw-semibold"><?= e($u['nome']) ?></td>
-                            <td><?= e($u['email']) ?></td>
-                            <td><span class="badge bg-<?= $u['perfil'] === 'colaborador' ? 'secondary' : 'dark' ?>"><?= e(PERFIS_USUARIO[$u['perfil']] ?? $u['perfil']) ?></span></td>
-                            <td><span class="badge bg-<?= $u['ativo'] ? 'success' : 'secondary' ?>"><?= $u['ativo'] ? 'Ativo' : 'Inativo' ?></span></td>
-                            <td class="text-end">
-                                <?php if ((int)$u['id'] !== Auth::userId()): ?>
-                                <form method="post" class="d-inline" onclick="event.stopPropagation()">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="alternar_status">
-                                    <input type="hidden" name="usuario_id" value="<?= $u['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-dark"><?= $u['ativo'] ? 'Desativar' : 'Ativar' ?></button>
-                                </form>
-                                <?php else: ?>
-                                    <span class="text-muted small">(você)</span>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-                <p class="text-muted small px-3 py-2 mb-0">Clique numa linha pra ver métricas de atendimento, editar dados/avatar ou redefinir a senha.</p>
-                </div>
-            </div>
-        </div>
-
+<div class="toolbar">
+    <div class="toolbar-acoes">
+        <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario"><i class="bi bi-plus-lg"></i> Novo usuário</button>
     </div>
+</div>
 
-    <div class="tab-pane" id="clientes-portal">
-
-        <p class="text-muted small mb-3">Contas de acesso ao portal do cliente. O cadastro do cliente em si (nome, contato, etc.) é feito em <a href="<?= url('clientes.php') ?>">Clientes</a> — aqui você controla só o acesso ao portal.</p>
-
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th></th><th>Cliente</th><th>E-mail de contato</th><th>Status do portal</th><th></th></tr></thead>
-                    <tbody>
-                    <?php foreach ($clientesPortal as $c): ?>
-                        <tr>
-                            <td><?= avatar_html($c['nome'], $c['foto_perfil'], 'cliente') ?></td>
-                            <td class="fw-semibold"><?= e($c['nome']) ?></td>
-                            <td><?= $c['contato_email'] ? e($c['contato_email']) : '<span class="text-muted">— sem e-mail cadastrado —</span>' ?></td>
-                            <td>
-                                <span class="badge bg-<?= $c['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $c['portal_ativo'] ? 'Acesso ativo' : 'Sem acesso ainda' ?></span>
-                                <?php if ($c['acesso_fora_horario']): ?>
-                                    <span class="badge bg-dark" title="Pode usar o portal fora do horário comercial"><i class="bi bi-clock-history"></i> 24h</span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-end">
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="enviar_convite_portal">
-                                    <input type="hidden" name="cliente_id" value="<?= $c['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-dark" <?= $c['contato_email'] ? '' : 'disabled title="Cadastre um e-mail de contato primeiro"' ?>>
-                                        <i class="bi bi-send"></i> <?= $c['portal_ativo'] ? 'Reenviar convite' : 'Enviar convite' ?>
-                                    </button>
-                                </form>
-                                <?php if ($c['portal_ativo']): ?>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual de ' + <?= json_encode($c['nome']) ?> + ' na hora. Confirma o reset?');">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="resetar_senha_cliente">
-                                    <input type="hidden" name="cliente_id" value="<?= $c['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-dark" <?= $c['contato_email'] ? '' : 'disabled title="Cadastre um e-mail de contato primeiro"' ?>>
-                                        <i class="bi bi-key"></i> Resetar senha
-                                    </button>
-                                </form>
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="desativar_portal_cliente">
-                                    <input type="hidden" name="cliente_id" value="<?= $c['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
-                                </form>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-                </div>
-            </div>
+<div class="card card-stat">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($usuarios as $u):
+                $uParaJs = array_diff_key($u, ['foto_perfil_dados' => 1, 'senha_hash' => 1]);
+                $uParaJs['tempo_medio_formatado'] = formatar_duracao_minutos(
+                    $u['media_minutos_atendimento'] !== null ? (float) $u['media_minutos_atendimento'] : null
+                );
+            ?>
+                <tr class="linha-usuario" role="button" tabindex="0"
+                    data-usuario='<?= e(json_encode($uParaJs, JSON_UNESCAPED_UNICODE)) ?>'>
+                    <td><?= avatar_html($u['nome'], $u['foto_perfil'], 'equipe') ?></td>
+                    <td class="fw-semibold"><?= e($u['nome']) ?></td>
+                    <td><?= e($u['email']) ?></td>
+                    <td><span class="badge bg-<?= $u['perfil'] === 'colaborador' ? 'secondary' : 'dark' ?>"><?= e(PERFIS_USUARIO[$u['perfil']] ?? $u['perfil']) ?></span></td>
+                    <td><span class="badge bg-<?= $u['ativo'] ? 'success' : 'secondary' ?>"><?= $u['ativo'] ? 'Ativo' : 'Inativo' ?></span></td>
+                    <td class="text-end">
+                        <?php if ((int)$u['id'] !== Auth::userId()): ?>
+                        <form method="post" class="d-inline" onclick="event.stopPropagation()">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="alternar_status">
+                            <input type="hidden" name="usuario_id" value="<?= $u['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><?= $u['ativo'] ? 'Desativar' : 'Ativar' ?></button>
+                        </form>
+                        <?php else: ?>
+                            <span class="text-muted small">(você)</span>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <p class="text-muted small px-3 py-2 mb-0">Clique numa linha pra ver métricas de atendimento, editar dados/avatar ou redefinir a senha.</p>
         </div>
-
     </div>
-
 </div>
 
 <div class="modal fade" id="modalNovoUsuario" tabindex="-1">

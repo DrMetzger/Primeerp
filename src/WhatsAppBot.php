@@ -345,14 +345,15 @@ class WhatsAppBot
         return null;
     }
 
-    /** Setores com pelo menos 1 responsável cadastrado ou o master participando. */
+    /** Setores com pelo menos 1 responsável relacionado ou que sejam o setor do master. */
     private static function setoresDisponiveis(PDO $pdo, int $clienteId): array
     {
         $stmt = $pdo->prepare("
             SELECT s.id, s.nome
             FROM setores s
+            INNER JOIN clientes c ON c.id = s.cliente_id
             WHERE s.cliente_id = ? AND s.ativo = 1
-              AND (s.master_participa = 1 OR EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id))
+              AND (c.setor_id = s.id OR EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id))
             ORDER BY s.nome ASC
         ");
         $stmt->execute([$clienteId]);
