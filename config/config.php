@@ -74,6 +74,23 @@ define('APP_BASE_PATH', $isLocal ? '' : '/AdminPrime');
 define('MAIL_FROM', 'Prime Hub <' . (SMTP_USER !== '' ? SMTP_USER : 'nao-responda@primeerp.com.br') . '>');
 define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr@primeerp.com.br']);
 
+// WhatsApp Business Platform (API oficial da Meta, direto -- sem BSP) -- bot
+// de menu guiado que abre chamado pelo WhatsApp (ver webhook_whatsapp.php,
+// src/WhatsAppBot.php, src/WhatsAppApi.php). Fica tudo em branco até o
+// Kleber terminar de configurar a conta/número na Meta; enquanto isso,
+// WhatsAppApi só registra em log em vez de chamar a API de verdade (mesmo
+// esquema do e-mail/SMTP em ambiente local).
+define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: '');
+define('WHATSAPP_PHONE_NUMBER_ID', getenv('ADMINPRIME_WHATSAPP_PHONE_NUMBER_ID') ?: '');
+define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: '');
+// Token que a própria Meta usa pra confirmar o webhook na primeira vez
+// (Configuração > Webhook, no painel do app) -- é a gente que inventa essa
+// senha, não vem da Meta.
+define('WHATSAPP_VERIFY_TOKEN', getenv('ADMINPRIME_WHATSAPP_VERIFY_TOKEN') ?: 'primehub-verify-token');
+// Número (só dígitos, com DDI 55) que recebe o aviso de "novo chamado
+// aberto pelo WhatsApp" -- o celular pessoal do Kleber.
+define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: '');
+
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo

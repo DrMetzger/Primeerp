@@ -277,6 +277,50 @@ class Migrations
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS aberto_por_setor_responsavel_id INT NULL COMMENT 'Qual setor_responsaveis abriu, quando aberto_por_tipo=setor' AFTER aberto_por_tipo");
         $pdo->exec("ALTER TABLE chamado_respostas ADD COLUMN IF NOT EXISTS autor_setor_responsavel_id INT NULL COMMENT 'Qual setor_responsaveis respondeu, quando autor_cliente_tipo=setor' AFTER autor_cliente_tipo");
 
+        // Bot de abertura de chamado pelo WhatsApp (menu guiado) -- ver
+        // WhatsAppBot.php e webhook_whatsapp.php. NULL = aberto pelo
+        // portal/admin, sem passar pelo WhatsApp (comportamento de sempre).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS origem_canal VARCHAR(20) NULL COMMENT \"'portal', 'whatsapp' ou NULL (equipe/admin)\" AFTER aberto_por_setor_responsavel_id");
+
+        // Estado da conversa em andamento com um número de WhatsApp -- uma
+        // linha só por telefone (enquanto durar o menu guiado); apagada
+        // assim que o chamado nasce ou a conversa é abandonada/reiniciada.
+        // Não tem FK pra clientes/setores/setor_responsaveis de propósito
+        // (mesmo padrão do resto do arquivo): o vínculo só é confirmado de
+        // verdade na hora de criar o chamado.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS whatsapp_conversas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                telefone VARCHAR(20) NOT NULL UNIQUE COMMENT 'wa_id da Meta -- só dígitos, com DDI',
+                nome_perfil VARCHAR(150) NULL COMMENT 'Nome do perfil do WhatsApp de quem está mandando mensagem',
+                cliente_id INT NULL,
+                setor_id INT NULL,
+                setor_responsavel_id INT NULL COMMENT 'Preenchido só quando o telefone bate com o de um responsável de setor específico (não o master)',
+                etapa VARCHAR(40) NOT NULL DEFAULT 'identificando',
+                titulo VARCHAR(200) NULL,
+                categoria VARCHAR(80) NULL,
+                prioridade VARCHAR(20) NULL,
+                descricao TEXT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Prints/arquivos mandados durante a conversa, ANTES do chamado
+        // existir -- migrados pra chamado_anexos quando o chamado é criado
+        // (ver WhatsAppBot::criarChamado()).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS whatsapp_midias_temp (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                conversa_id INT NOT NULL,
+                arquivo_nome_original VARCHAR(255) NULL,
+                mime_type VARCHAR(100) NULL,
+                dados LONGBLOB NOT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_whatsapp_midias_conversa FOREIGN KEY (conversa_id) REFERENCES whatsapp_conversas(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamados (
                 id INT AUTO_INCREMENT PRIMARY KEY,

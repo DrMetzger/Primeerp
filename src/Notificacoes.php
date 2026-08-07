@@ -163,18 +163,21 @@ class Notificacoes
     }
 
     /**
-     * Preparado para a API do WhatsApp (Meta Cloud API). Enquanto as chaves
-     * não estiverem configuradas, apenas registra em log e não faz nada.
+     * $telefone null = manda pro número do Kleber (WHATSAPP_NOTIFICAR_TELEFONE),
+     * mesma ideia de NOTIFICACAO_EMAILS_EQUIPE pro e-mail -- "avisa a
+     * equipe" por padrão. Ver WhatsAppApi pra saber quando isso vira uma
+     * chamada de verdade pra Meta (só depende de WHATSAPP_ACCESS_TOKEN
+     * estar configurado).
      */
     public static function whatsapp(?string $telefone, string $mensagem): void
     {
-        if (!defined('WHATSAPP_API_TOKEN') || !WHATSAPP_API_TOKEN) {
-            error_log('WhatsApp (não configurado ainda): ' . $mensagem);
+        $destino = $telefone ?: (defined('WHATSAPP_NOTIFICAR_TELEFONE') ? WHATSAPP_NOTIFICAR_TELEFONE : '');
+        if (!$destino) {
+            error_log('WhatsApp (sem número de destino configurado): ' . $mensagem);
             return;
         }
 
-        // TODO: implementar chamada à API do WhatsApp (Meta Cloud API) quando
-        // as credenciais estiverem disponíveis.
+        WhatsAppApi::enviarTexto($destino, $mensagem);
     }
 
     private static function baseUrlAbsoluta(): string

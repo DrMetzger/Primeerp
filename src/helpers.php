@@ -174,6 +174,41 @@ function apenas_digitos(?string $valor): ?string
 }
 
 /**
+ * Compara o wa_id que a Meta manda (DDI + DDD + número, ex: 5511988887777)
+ * com o telefone guardado no cadastro (só DDD + número, sem DDI, ex:
+ * 11988887777 ou 1188887777) -- usado pelo bot do WhatsApp pra achar de
+ * qual cliente/responsável de setor é aquele número. Gera algumas variações
+ * de cada lado (com/sem o "9" extra do celular, que nem todo cadastro tem)
+ * em vez de exigir formato exato, porque na prática ninguém digita telefone
+ * de forma 100% padronizada.
+ */
+function telefones_correspondem(string $waId, ?string $telefoneCadastrado): bool
+{
+    if (!$telefoneCadastrado) {
+        return false;
+    }
+
+    $variacoes = function (string $digitos): array {
+        $v = [$digitos];
+        if (str_starts_with($digitos, '55') && strlen($digitos) > 10) {
+            $v[] = substr($digitos, 2);
+        }
+        // DDD (2) + 9 (celular) + 8 dígitos = 11; sem o 9 = 10.
+        if (strlen($digitos) === 11 && $digitos[2] === '9') {
+            $v[] = substr($digitos, 0, 2) . substr($digitos, 3);
+        } elseif (strlen($digitos) === 10) {
+            $v[] = substr($digitos, 0, 2) . '9' . substr($digitos, 2);
+        }
+        return $v;
+    };
+
+    $ladoA = $variacoes(apenas_digitos($waId) ?? '');
+    $ladoB = $variacoes(apenas_digitos($telefoneCadastrado) ?? '');
+
+    return (bool) array_intersect($ladoA, $ladoB);
+}
+
+/**
  * Normaliza CPF/RG do contato -- guarda só dígitos (e o "X" que o RG pode
  * terminar com), sem pontos/traços, pra não ter o mesmo documento salvo de
  * formas diferentes.
@@ -698,6 +733,40 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
     }
 
     return $erros;
+}
+
+/**
+ * Mesma ideia de processar_anexos_chamado(), mas pra bytes que já chegaram
+ * na memória (não um upload via formulário) -- usado pelo bot do WhatsApp,
+ * que baixa a mídia da API da Meta antes de ter qualquer $_FILES. Retorna
+ * uma mensagem de erro, ou null se salvou certo.
+ */
+function salvar_bytes_como_anexo_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $nomeOriginal, string $mime, string $bytes): ?string
+{
+    $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$mime] ?? null;
+    if (!$extensaoPermitida) {
+        return '"' . $nomeOriginal . '" não é um tipo de arquivo permitido (use imagem ou PDF).';
+    }
+    if (strlen($bytes) > ANEXO_CHAMADO_MAX_SIZE) {
+        return '"' . $nomeOriginal . '" é maior que o limite de ' . (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) . 'MB.';
+    }
+
+    $dirChamado = UPLOADS_DIR . '/chamados/' . $chamadoId;
+    if (!is_dir($dirChamado)) {
+        mkdir($dirChamado, 0755, true);
+    }
+
+    $nomeArmazenado = bin2hex(random_bytes(16)) . '.' . $extensaoPermitida;
+    $destino = $dirChamado . '/' . $nomeArmazenado;
+
+    if (file_put_contents($destino, $bytes) === false) {
+        return 'Não foi possível salvar "' . $nomeOriginal . '" no servidor.';
+    }
+
+    $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$chamadoId, $respostaId, $enviadoPor, $nomeOriginal, 'chamados/' . $chamadoId . '/' . $nomeArmazenado, strlen($bytes), $bytes]);
+
+    return null;
 }
 
 /**
