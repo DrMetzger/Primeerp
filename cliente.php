@@ -111,6 +111,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Status do treinamento atualizado.');
     }
 
+    // Editar um treinamento/reunião já existente (clicando nele no
+    // calendário) -- reaproveita os mesmos campos da criação. Se a
+    // data/hora mudar, zera lembrete_enviado_em pra o lembrete de 5min
+    // antes ser recalculado em cima do novo horário.
+    if ($acao === 'editar_treinamento') {
+        $treinamentoIdEditar = (int) $_POST['treinamento_id'];
+        $stmt = $pdo->prepare('
+            UPDATE treinamentos SET
+                setor_id = ?, titulo = ?, tipo = ?, descricao = ?, status = ?,
+                data_inicio = ?, hora_inicio = ?, data_fim = ?, hora_fim = ?,
+                link_reuniao = ?, responsavel_id = ?, lembrete_enviado_em = NULL
+            WHERE id = ? AND cliente_id = ?
+        ');
+        $stmt->execute([
+            $_POST['setor_id'] ?: null,
+            trim($_POST['titulo']),
+            $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento',
+            trim($_POST['descricao']) ?: null,
+            $_POST['status'] ?: 'planejado',
+            $_POST['data_inicio'] ?: null,
+            $_POST['hora_inicio'] ?: null,
+            $_POST['data_fim'] ?: null,
+            $_POST['hora_fim'] ?: null,
+            trim($_POST['link_reuniao'] ?? '') ?: null,
+            $_POST['responsavel_id'] ?: null,
+            $treinamentoIdEditar,
+            $clienteId,
+        ]);
+        flash_set('sucesso', 'Treinamento/reunião atualizado.');
+    }
+
+    if ($acao === 'excluir_treinamento') {
+        $pdo->prepare('DELETE FROM treinamentos WHERE id = ? AND cliente_id = ?')
+            ->execute([(int) $_POST['treinamento_id'], $clienteId]);
+        flash_set('sucesso', 'Treinamento/reunião removido.');
+    }
+
     // --- Propostas de desenvolvimento (backlog de melhoria por setor) ----
 
     if ($acao === 'criar_proposta') {
@@ -118,9 +155,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($tituloProposta === '') {
             flash_set('erro', 'Informe o título da proposta.');
         } else {
-            $pdo->prepare('INSERT INTO propostas_desenvolvimento (cliente_id, setor_id, titulo, descricao, criado_por) VALUES (?, ?, ?, ?, ?)')
-                ->execute([$clienteId, $_POST['setor_id'] ?: null, $tituloProposta, trim($_POST['descricao'] ?? '') ?: null, Auth::userId()]);
-            flash_set('sucesso', 'Proposta registrada.');
+            // Anexo é opcional (ex.: PDF de uma proposta de integração com
+            // API) -- reaproveita a tabela documentos (mesmo backup/
+            // restauração/download que documento já tem), a proposta só
+            // guarda a referência.
+            $documentoIdProposta = null;
+            $erroUploadProposta = null;
+            if (!empty($_FILES['arquivo']['name'])) {
+                $documentoIdProposta = salvar_documento_upload(
+                    $pdo,
+                    $clienteId,
+                    $_POST['setor_id'] ?: null,
+                    $tituloProposta,
+                    null,
+                    'Proposta de desenvolvimento',
+                    $_FILES['arquivo'],
+                    Auth::userId(),
+                    $erroUploadProposta
+                );
+            }
+
+            $pdo->prepare('INSERT INTO propostas_desenvolvimento (cliente_id, setor_id, titulo, descricao, documento_id, criado_por) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([$clienteId, $_POST['setor_id'] ?: null, $tituloProposta, trim($_POST['descricao'] ?? '') ?: null, $documentoIdProposta, Auth::userId()]);
+
+            flash_set(
+                $erroUploadProposta ? 'erro' : 'sucesso',
+                $erroUploadProposta ? ('Proposta registrada, mas o anexo falhou: ' . $erroUploadProposta) : 'Proposta registrada.'
+            );
         }
     }
 
@@ -143,17 +204,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Sem chave configurada, avisa em vez de travar (mesmo padrão do
     // WhatsApp).
     if ($acao === 'gerar_sugestao_ia') {
+        $ehAjaxSugestaoIa = ($_POST['ajax'] ?? '') === '1';
         $setorIdSugestao = (int) $_POST['setor_id'];
         $stmtSetorSugestao = $pdo->prepare('SELECT nome FROM setores WHERE id = ? AND cliente_id = ?');
         $stmtSetorSugestao->execute([$setorIdSugestao, $clienteId]);
         $nomeSetorSugestao = $stmtSetorSugestao->fetchColumn();
 
-        if (!$nomeSetorSugestao) {
-            flash_set('erro', 'Setor não encontrado.');
-        } elseif (!AiSugestoes::configurada()) {
-            flash_set('erro', 'IA ainda não configurada -- defina a chave do Gemini (ADMINPRIME_GEMINI_API_KEY) pra usar esse recurso.');
-        } else {
-            $stmtChamadosSugestao = $pdo->prepare("SELECT titulo, categoria, status, prioridade FROM chamados WHERE setor_id = ? ORDER BY criado_em DESC LIMIT 25");
+        $respostaSugestaoIa = ['sucesso' => false, 'mensagem' => 'Setor não encontrado.', 'sugestao' => null, 'gerado_em' => null];
+
+        if ($nomeSetorSugestao) {
+            // Escopo bem definido do que a IA analisa desse setor: os
+            // últimos 25 chamados (título/categoria/status/prioridade) e os
+            // últimos 15 KPIs registrados -- nada além disso (não lê
+            // documentos, propostas ou conversas).
+            $stmtChamadosSugestao = $pdo->prepare('SELECT titulo, categoria, status, prioridade FROM chamados WHERE setor_id = ? ORDER BY criado_em DESC LIMIT 25');
             $stmtChamadosSugestao->execute([$setorIdSugestao]);
             $chamadosSugestao = $stmtChamadosSugestao->fetchAll();
 
@@ -182,52 +246,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $prompt .= "(nenhum KPI registrado ainda)\n";
             }
 
-            $sugestaoGerada = AiSugestoes::gerar($prompt);
-            if ($sugestaoGerada === null) {
-                flash_set('erro', 'Não foi possível gerar a sugestão agora -- tenta de novo em alguns instantes.');
+            $resultadoIa = AiSugestoes::gerar($prompt);
+            if (!$resultadoIa['ok']) {
+                $respostaSugestaoIa['mensagem'] = 'Não foi possível gerar a sugestão: ' . $resultadoIa['erro'];
             } else {
                 $pdo->prepare('INSERT INTO setor_sugestoes_ia (setor_id, sugestao, criado_por) VALUES (?, ?, ?)')
-                    ->execute([$setorIdSugestao, $sugestaoGerada, Auth::userId()]);
-                flash_set('sucesso', 'Sugestão gerada.');
+                    ->execute([$setorIdSugestao, $resultadoIa['texto'], Auth::userId()]);
+                $respostaSugestaoIa = [
+                    'sucesso' => true,
+                    'mensagem' => 'Sugestão gerada.',
+                    'sugestao' => $resultadoIa['texto'],
+                    'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
+                ];
             }
         }
+
+        if ($ehAjaxSugestaoIa) {
+            header('Content-Type: application/json');
+            echo json_encode($respostaSugestaoIa, JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        flash_set($respostaSugestaoIa['sucesso'] ? 'sucesso' : 'erro', $respostaSugestaoIa['mensagem']);
     }
 
     if ($acao === 'upload_documento' && isset($_FILES['arquivo'])) {
-        $arquivo = $_FILES['arquivo'];
-        if ($arquivo['error'] !== UPLOAD_ERR_OK) {
-            flash_set('erro', 'Falha no upload do arquivo.');
-        } elseif ($arquivo['size'] > UPLOADS_MAX_SIZE) {
-            flash_set('erro', 'Arquivo maior que o limite permitido (15MB).');
-        } else {
-            $dirCliente = UPLOADS_DIR . '/clientes/' . $clienteId;
-            if (!is_dir($dirCliente)) {
-                mkdir($dirCliente, 0755, true);
-            }
-            $extensao = strtolower(pathinfo($arquivo['name'], PATHINFO_EXTENSION));
-            $nomeArmazenado = bin2hex(random_bytes(16)) . ($extensao ? '.' . $extensao : '');
-            $destino = $dirCliente . '/' . $nomeArmazenado;
-
-            if (move_uploaded_file($arquivo['tmp_name'], $destino)) {
-                // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
-                $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([
-                    $clienteId,
-                    $_POST['setor_id'] ?: null,
-                    trim($_POST['titulo']) ?: $arquivo['name'],
-                    trim($_POST['descricao']) ?: null,
-                    trim($_POST['categoria']) ?: null,
-                    $arquivo['name'],
-                    'clientes/' . $clienteId . '/' . $nomeArmazenado,
-                    $arquivo['size'],
-                    Auth::userId(),
-                    file_get_contents($destino),
-                ]);
-                flash_set('sucesso', 'Documento enviado.');
-            } else {
-                flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
-            }
-        }
+        $erroUploadDocumento = null;
+        $idDocumentoNovo = salvar_documento_upload(
+            $pdo,
+            $clienteId,
+            $_POST['setor_id'] ?: null,
+            trim($_POST['titulo']),
+            trim($_POST['descricao']) ?: null,
+            trim($_POST['categoria']) ?: null,
+            $_FILES['arquivo'],
+            Auth::userId(),
+            $erroUploadDocumento
+        );
+        flash_set($idDocumentoNovo ? 'sucesso' : 'erro', $idDocumentoNovo ? 'Documento enviado.' : $erroUploadDocumento);
     }
 
     if ($acao === 'enviar_convite_portal') {
@@ -816,7 +872,14 @@ foreach ($documentos as $doc) {
 // Propostas de melhoria/desenvolvimento por setor (aba Setores) -- backlog
 // de evolução do processo, separado do chamado normal (que é
 // atendimento/suporte pontual).
-$propostas = $pdo->prepare('SELECT p.*, u.nome AS criado_por_nome FROM propostas_desenvolvimento p LEFT JOIN usuarios u ON u.id = p.criado_por WHERE p.cliente_id = ? ORDER BY p.criado_em DESC');
+$propostas = $pdo->prepare('
+    SELECT p.*, u.nome AS criado_por_nome, d.arquivo_nome_original
+    FROM propostas_desenvolvimento p
+    LEFT JOIN usuarios u ON u.id = p.criado_por
+    LEFT JOIN documentos d ON d.id = p.documento_id
+    WHERE p.cliente_id = ?
+    ORDER BY p.criado_em DESC
+');
 $propostas->execute([$clienteId]);
 $propostas = $propostas->fetchAll();
 $propostasPorSetorId = [];
@@ -852,12 +915,15 @@ $mapearEventosCalendario = fn (array $lista) => array_map(fn ($t) => [
     'id' => $t['id'],
     'titulo' => $t['titulo'],
     'tipo' => $t['tipo'],
+    'descricao' => $t['descricao'],
     'data_inicio' => $t['data_inicio'],
     'hora_inicio' => $t['hora_inicio'],
     'data_fim' => $t['data_fim'],
     'hora_fim' => $t['hora_fim'],
     'link_reuniao' => $t['link_reuniao'],
     'status' => $t['status'],
+    'setor_id' => $t['setor_id'],
+    'responsavel_id' => $t['responsavel_id'],
 ], $lista);
 
 $usuarios = $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll();
@@ -1662,24 +1728,32 @@ require __DIR__ . '/templates/header.php';
 
                     <!-- Propostas de desenvolvimento -->
                     <div class="tab-pane" id="setorPropostas<?= $idSetorAtual ?>">
-                        <form method="post" class="row g-2 align-items-end mb-3">
+                        <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="criar_proposta">
                             <input type="hidden" name="aba_retorno" value="setores">
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
-                            <div class="col-md-4"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título da proposta" required></div>
-                            <div class="col-md-6"><input type="text" name="descricao" class="form-control form-control-sm" placeholder="Descrição (opcional)"></div>
+                            <div class="col-md-3"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título da proposta" required></div>
+                            <div class="col-md-4"><input type="text" name="descricao" class="form-control form-control-sm" placeholder="Descrição (opcional)"></div>
+                            <div class="col-md-3"><input type="file" name="arquivo" class="form-control form-control-sm" title="Anexo opcional (ex.: PDF de uma proposta de integração)"></div>
                             <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-plus-lg"></i> Registrar</button></div>
                         </form>
                         <?php if ($propostasSetor): ?>
                         <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
-                            <thead><tr><th>Título</th><th>Descrição</th><th>Status</th><th>Criado por</th><th></th></tr></thead>
+                            <thead><tr><th>Título</th><th>Descrição</th><th>Anexo</th><th>Status</th><th>Criado por</th><th></th></tr></thead>
                             <tbody>
                             <?php foreach ($propostasSetor as $p): ?>
                                 <tr>
                                     <td class="fw-semibold"><?= e($p['titulo']) ?></td>
                                     <td class="text-muted small"><?= e($p['descricao']) ?></td>
+                                    <td>
+                                        <?php if ($p['documento_id']): ?>
+                                            <a href="<?= url('download.php?id=' . $p['documento_id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-paperclip"></i> <?= e($p['arquivo_nome_original']) ?></a>
+                                        <?php else: ?>
+                                            <span class="text-muted">-</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <form method="post" class="d-inline">
                                             <?= csrf_field() ?>
@@ -1745,16 +1819,23 @@ require __DIR__ . '/templates/header.php';
 
                     <!-- IA -->
                     <div class="tab-pane" id="setorIa<?= $idSetorAtual ?>">
-                        <form method="post" class="mb-3">
+                        <p class="text-muted small">
+                            <i class="bi bi-info-circle"></i> A IA analisa só os <strong>últimos 25 chamados</strong>
+                            (título, categoria, status, prioridade) e os <strong>últimos 15 KPIs</strong> registrados
+                            desse setor, e devolve um diagnóstico rápido do processo + sugestões de melhoria.
+                            Não lê documentos, propostas nem conversas.
+                        </p>
+                        <form method="post" class="mb-3 form-gerar-sugestao-ia" data-setor-id="<?= $idSetorAtual ?>">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="gerar_sugestao_ia">
                             <input type="hidden" name="aba_retorno" value="setores">
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
-                            <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-stars"></i> Gerar sugestões com IA</button>
+                            <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> Gerar sugestões com IA</button>
                             <?php if (!AiSugestoes::configurada()): ?>
                                 <span class="text-muted small ms-2">IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY).</span>
                             <?php endif; ?>
                         </form>
+                        <div class="resultado-sugestao-ia" id="resultadoSugestaoIa<?= $idSetorAtual ?>">
                         <?php if ($sugestaoIaSetor): ?>
                             <div class="card card-stat">
                                 <div class="card-body">
@@ -1765,6 +1846,7 @@ require __DIR__ . '/templates/header.php';
                         <?php else: ?>
                             <p class="text-muted text-center py-3">Nenhuma sugestão gerada ainda pra esse setor.</p>
                         <?php endif; ?>
+                        </div>
                     </div>
 
                 </div>
@@ -2051,6 +2133,77 @@ require __DIR__ . '/templates/header.php';
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
             <button type="submit" class="btn btn-dark">Criar</button>
         </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar Treinamento/Reunião -- aberto clicando num evento existente
+     do calendário (dados já vêm do JS, sem precisar buscar no servidor) -->
+<div class="modal fade" id="modalEditarTreinamento" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="formEditarTreinamento">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="editar_treinamento">
+        <input type="hidden" name="aba_retorno" id="editarTreinamentoAbaRetorno" value="setores">
+        <input type="hidden" name="treinamento_id" id="editarTreinamentoId">
+        <div class="modal-header"><h5 class="modal-title">Editar treinamento/reunião</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" id="editarTreinamentoTitulo" class="form-control" required></div>
+            <div class="row g-2 mb-1">
+                <div class="col-6"><label class="form-label">Tipo</label>
+                    <select name="tipo" id="editarTreinamentoTipo" class="form-select">
+                        <option value="treinamento">Treinamento</option>
+                        <option value="reuniao">Reunião</option>
+                    </select>
+                </div>
+                <div class="col-6"><label class="form-label">Setor</label>
+                    <select name="setor_id" id="editarTreinamentoSetor" class="form-select">
+                        <option value="">Geral (todo o cliente)</option>
+                        <?php foreach ($setores as $s): ?>
+                            <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="mb-3"><label class="form-label">Descrição</label><textarea name="descricao" id="editarTreinamentoDescricao" class="form-control" rows="2"></textarea></div>
+            <div class="row g-2 mb-1">
+                <div class="col-6"><label class="form-label">Data início</label><input type="date" name="data_inicio" id="editarTreinamentoDataInicio" class="form-control"></div>
+                <div class="col-6"><label class="form-label">Hora início</label><input type="time" name="hora_inicio" id="editarTreinamentoHoraInicio" class="form-control"></div>
+                <div class="col-6"><label class="form-label">Data fim</label><input type="date" name="data_fim" id="editarTreinamentoDataFim" class="form-control"></div>
+                <div class="col-6"><label class="form-label">Hora fim</label><input type="time" name="hora_fim" id="editarTreinamentoHoraFim" class="form-control"></div>
+            </div>
+            <div class="mb-3"><label class="form-label">Link da videochamada</label><input type="url" name="link_reuniao" id="editarTreinamentoLink" class="form-control" placeholder="Meet, Teams, Zoom..."></div>
+            <div class="mb-3"><label class="form-label">Status</label>
+                <select name="status" id="editarTreinamentoStatus" class="form-select">
+                    <?php foreach (['planejado' => 'Planejado', 'em_andamento' => 'Em andamento', 'concluido' => 'Concluído', 'cancelado' => 'Cancelado'] as $val => $label): ?>
+                        <option value="<?= $val ?>"><?= $label ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mb-3"><label class="form-label">Responsável (equipe)</label>
+                <select name="responsavel_id" id="editarTreinamentoResponsavel" class="form-select">
+                    <option value="">-</option>
+                    <?php foreach ($usuarios as $u): ?>
+                        <option value="<?= $u['id'] ?>"><?= e($u['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer justify-content-between">
+            <button type="button" class="btn btn-outline-danger botao-excluir-treinamento"><i class="bi bi-trash"></i> Excluir</button>
+            <div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-dark">Salvar</button>
+            </div>
+        </div>
+      </form>
+      <form method="post" id="formExcluirTreinamento" class="d-none">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="excluir_treinamento">
+        <input type="hidden" name="aba_retorno" value="setores">
+        <input type="hidden" name="treinamento_id" id="excluirTreinamentoId">
       </form>
     </div>
   </div>
@@ -2352,6 +2505,78 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    // Overlay de carregamento -- mostrado em TODO submit de formulário
+    // (feedback visual imediato, pedido do Kleber depois de reclamar que os
+    // cliques "pareciam não fazer nada" enquanto a página recarregava).
+    // Criado uma vez só, reaproveitado por qualquer chamada.
+    var overlayCarregandoEl = document.createElement('div');
+    overlayCarregandoEl.className = 'overlay-carregando';
+    overlayCarregandoEl.innerHTML = '<div class="overlay-carregando-caixa">'
+        + '<i class="bi overlay-carregando-icone"></i>'
+        + '<div class="overlay-carregando-texto"></div>'
+        + '</div>';
+    document.body.appendChild(overlayCarregandoEl);
+
+    function mostrarCarregando(mensagem, comEstrelas) {
+        overlayCarregandoEl.querySelector('.overlay-carregando-icone').className = 'bi overlay-carregando-icone ' + (comEstrelas ? 'bi-stars' : 'bi-arrow-repeat');
+        overlayCarregandoEl.querySelector('.overlay-carregando-texto').textContent = mensagem;
+        overlayCarregandoEl.classList.add('mostrando');
+    }
+
+    function escondercarregando() {
+        overlayCarregandoEl.classList.remove('mostrando');
+    }
+
+    // Todo submit de formulário na página mostra o overlay -- na maioria
+    // dos casos a própria troca de página (recarregamento normal) já
+    // "esconde" o overlay junto, então não precisa de código pra escondê-lo
+    // de novo aqui. Formulários com tratamento próprio (ex.: gerar sugestão
+    // de IA, abaixo) chamam stopPropagation() pra não disparar esse aviso
+    // genérico em cima do aviso específico deles.
+    document.addEventListener('submit', function (e) {
+        if (e.defaultPrevented) return;
+        mostrarCarregando('Salvando...', false);
+    });
+
+    // Gerar sugestão de IA -- via AJAX (fetch), sem recarregar a página
+    // inteira (era o que mais incomodava: o usuário perdia o lugar onde
+    // estava -- qual setor, qual sub-aba -- a cada geração). Atualiza só o
+    // resultado, na mesma sub-aba.
+    document.querySelectorAll('.form-gerar-sugestao-ia').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            mostrarCarregando('Gerando sugestão com IA...', true);
+
+            var dados = new FormData(form);
+            dados.set('ajax', '1');
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (resp) { return resp.json(); })
+                .then(function (json) {
+                    var setorId = form.getAttribute('data-setor-id');
+                    var alvo = document.getElementById('resultadoSugestaoIa' + setorId);
+                    if (!alvo) return;
+                    if (json.sucesso) {
+                        alvo.innerHTML = '<div class="card card-stat"><div class="card-body">'
+                            + '<p class="text-muted small mb-2">Gerado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
+                            + '<div style="white-space: pre-wrap;">' + escaparHtmlCalendario(json.sugestao) + '</div>'
+                            + '</div></div>';
+                    } else {
+                        alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
+                    }
+                })
+                .catch(function (erro) {
+                    var setorId = form.getAttribute('data-setor-id');
+                    var alvo = document.getElementById('resultadoSugestaoIa' + setorId);
+                    if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a sugestão: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                })
+                .finally(function () {
+                    escondercarregando();
+                });
+        });
+    });
+
     // Calendário mensal (aba Setores > Calendário, Visão geral > Agenda
     // geral) -- um por .calendario-mensal encontrado na página, cada um com
     // seu próprio estado de mês/ano em memória (não recarrega a página pra
@@ -2372,6 +2597,32 @@ document.addEventListener('DOMContentLoaded', function () {
         PrimeUI.openModal(document.getElementById('modalNovoTreinamento'));
     }
 
+    // Clique num evento existente do calendário -- os dados já vieram
+    // prontos no data-eventos, então só preenche o modal de edição, sem
+    // precisar buscar nada no servidor.
+    function abrirEditarTreinamento(evento, abaRetorno) {
+        document.getElementById('editarTreinamentoId').value = evento.id;
+        document.getElementById('editarTreinamentoAbaRetorno').value = abaRetorno || 'setores';
+        document.getElementById('editarTreinamentoTitulo').value = evento.titulo || '';
+        document.getElementById('editarTreinamentoTipo').value = evento.tipo || 'treinamento';
+        document.getElementById('editarTreinamentoSetor').value = evento.setor_id || '';
+        document.getElementById('editarTreinamentoDescricao').value = evento.descricao || '';
+        document.getElementById('editarTreinamentoDataInicio').value = evento.data_inicio || '';
+        document.getElementById('editarTreinamentoHoraInicio').value = evento.hora_inicio ? evento.hora_inicio.substring(0, 5) : '';
+        document.getElementById('editarTreinamentoDataFim').value = evento.data_fim || '';
+        document.getElementById('editarTreinamentoHoraFim').value = evento.hora_fim ? evento.hora_fim.substring(0, 5) : '';
+        document.getElementById('editarTreinamentoLink').value = evento.link_reuniao || '';
+        document.getElementById('editarTreinamentoStatus').value = evento.status || 'planejado';
+        document.getElementById('editarTreinamentoResponsavel').value = evento.responsavel_id || '';
+        document.getElementById('excluirTreinamentoId').value = evento.id;
+        PrimeUI.openModal(document.getElementById('modalEditarTreinamento'));
+    }
+
+    document.querySelector('.botao-excluir-treinamento').addEventListener('click', function () {
+        if (!confirm('Excluir este treinamento/reunião? Essa ação não pode ser desfeita.')) return;
+        document.getElementById('formExcluirTreinamento').submit();
+    });
+
     document.querySelectorAll('.calendario-mensal').forEach(function (container) {
         var eventos = [];
         try { eventos = JSON.parse(container.getAttribute('data-eventos') || '[]'); } catch (e) { eventos = []; }
@@ -2383,90 +2634,207 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         var hoje = new Date();
-        var anoAtual = hoje.getFullYear();
-        var mesAtual = hoje.getMonth();
+        var modoAtual = 'mes'; // 'mes' | 'semana' | 'dia'
+        var dataFoco = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
 
         var nomesMeses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
         var nomesDiasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+        var nomesDiasSemanaCompleto = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
         function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+        function paraIso(data) { return data.getFullYear() + '-' + pad2(data.getMonth() + 1) + '-' + pad2(data.getDate()); }
+        function mesmoDia(a, b) { return a.toDateString() === b.toDateString(); }
 
-        function renderizar() {
-            var primeiroDiaMes = new Date(anoAtual, mesAtual, 1);
+        function classeTipoEvento(ev) {
+            return ev.status === 'cancelado'
+                ? 'calendario-evento-cancelado'
+                : (ev.tipo === 'reuniao' ? 'calendario-evento-reuniao' : 'calendario-evento-treinamento');
+        }
+
+        function construirChipEvento(ev) {
+            var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) + ' ' : '';
+            return '<span class="calendario-evento ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '" title="' + escaparHtmlCalendario(horaTexto + ev.titulo) + '">'
+                + escaparHtmlCalendario(horaTexto + ev.titulo) + '</span>';
+        }
+
+        function construirItemEvento(ev) {
+            var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) : '--:--';
+            return '<div class="calendario-evento-item ' + classeTipoEvento(ev) + '" data-evento-id="' + ev.id + '">'
+                + '<span class="calendario-evento-item-hora">' + escaparHtmlCalendario(horaTexto) + '</span>'
+                + '<span class="calendario-evento-item-titulo">' + escaparHtmlCalendario(ev.titulo) + '</span>'
+                + '</div>';
+        }
+
+        function eventosOrdenados(iso) {
+            var lista = (eventosPorDia[iso] || []).slice();
+            lista.sort(function (a, b) { return (a.hora_inicio || '').localeCompare(b.hora_inicio || ''); });
+            return lista;
+        }
+
+        function renderizarMes() {
+            var ano = dataFoco.getFullYear(), mes = dataFoco.getMonth();
+            var primeiroDiaMes = new Date(ano, mes, 1);
             var diaSemanaInicio = primeiroDiaMes.getDay();
-            var diasNoMes = new Date(anoAtual, mesAtual + 1, 0).getDate();
-            var diasMesAnterior = new Date(anoAtual, mesAtual, 0).getDate();
+            var diasNoMes = new Date(ano, mes + 1, 0).getDate();
+            var diasMesAnterior = new Date(ano, mes, 0).getDate();
             var totalCelulas = diaSemanaInicio + diasNoMes;
             var linhas = Math.ceil(totalCelulas / 7);
             var totalCelulasGrid = linhas * 7;
 
-            var html = '<div class="calendario-cabecalho">'
-                + '<button type="button" class="calendario-nav-botao" data-nav="-1" aria-label="Mês anterior">&lsaquo;</button>'
-                + '<span class="calendario-titulo-mes">' + nomesMeses[mesAtual] + ' de ' + anoAtual + '</span>'
-                + '<button type="button" class="calendario-nav-botao" data-nav="1" aria-label="Próximo mês">&rsaquo;</button>'
-                + '</div><div class="calendario-grid">';
-
+            var corpo = '<div class="calendario-grid">';
             nomesDiasSemana.forEach(function (nome) {
-                html += '<div class="calendario-dia-semana">' + nome + '</div>';
+                corpo += '<div class="calendario-dia-semana">' + nome + '</div>';
             });
 
             for (var i = 0; i < totalCelulasGrid; i++) {
                 var numeroDia, mesCelula, foraDoMes;
                 if (i < diaSemanaInicio) {
                     numeroDia = diasMesAnterior - (diaSemanaInicio - 1 - i);
-                    mesCelula = mesAtual - 1;
+                    mesCelula = mes - 1;
                     foraDoMes = true;
                 } else if (i >= diaSemanaInicio + diasNoMes) {
                     numeroDia = i - (diaSemanaInicio + diasNoMes) + 1;
-                    mesCelula = mesAtual + 1;
+                    mesCelula = mes + 1;
                     foraDoMes = true;
                 } else {
                     numeroDia = i - diaSemanaInicio + 1;
-                    mesCelula = mesAtual;
+                    mesCelula = mes;
                     foraDoMes = false;
                 }
 
-                var dataCelula = new Date(anoAtual, mesCelula, numeroDia);
-                var iso = dataCelula.getFullYear() + '-' + pad2(dataCelula.getMonth() + 1) + '-' + pad2(dataCelula.getDate());
-                var ehHoje = !foraDoMes && dataCelula.toDateString() === hoje.toDateString();
+                var dataCelula = new Date(ano, mesCelula, numeroDia);
+                var iso = paraIso(dataCelula);
+                var ehHoje = !foraDoMes && mesmoDia(dataCelula, hoje);
 
-                html += '<div class="calendario-dia' + (foraDoMes ? ' calendario-fora-do-mes' : '') + (ehHoje ? ' calendario-hoje' : '') + '" data-data="' + iso + '">';
-                html += '<span class="calendario-numero-dia">' + dataCelula.getDate() + '</span>';
+                corpo += '<div class="calendario-dia' + (foraDoMes ? ' calendario-fora-do-mes' : '') + (ehHoje ? ' calendario-hoje' : '') + '" data-abrir-novo="' + iso + '">';
+                corpo += '<span class="calendario-numero-dia" data-ir-dia="' + iso + '">' + dataCelula.getDate() + '</span>';
 
-                var eventosDoDia = eventosPorDia[iso] || [];
+                var eventosDoDia = eventosOrdenados(iso);
                 var maxMostrar = 2;
-                eventosDoDia.slice(0, maxMostrar).forEach(function (ev) {
-                    var classeTipo = ev.status === 'cancelado'
-                        ? 'calendario-evento-cancelado'
-                        : (ev.tipo === 'reuniao' ? 'calendario-evento-reuniao' : 'calendario-evento-treinamento');
-                    var horaTexto = ev.hora_inicio ? ev.hora_inicio.substring(0, 5) + ' ' : '';
-                    html += '<span class="calendario-evento ' + classeTipo + '" title="' + escaparHtmlCalendario(horaTexto + ev.titulo) + '">'
-                        + escaparHtmlCalendario(horaTexto + ev.titulo) + '</span>';
-                });
+                eventosDoDia.slice(0, maxMostrar).forEach(function (ev) { corpo += construirChipEvento(ev); });
                 if (eventosDoDia.length > maxMostrar) {
-                    html += '<span class="calendario-mais-eventos">+' + (eventosDoDia.length - maxMostrar) + '</span>';
+                    corpo += '<span class="calendario-mais-eventos" data-ir-dia="' + iso + '">+' + (eventosDoDia.length - maxMostrar) + ' mais</span>';
                 }
-                html += '</div>';
+                corpo += '</div>';
+            }
+            corpo += '</div>';
+
+            return { titulo: nomesMeses[mes] + ' de ' + ano, corpo: corpo };
+        }
+
+        function renderizarSemana() {
+            var inicioSemana = new Date(dataFoco);
+            inicioSemana.setDate(dataFoco.getDate() - dataFoco.getDay());
+            var fimSemana = new Date(inicioSemana);
+            fimSemana.setDate(inicioSemana.getDate() + 6);
+
+            var corpo = '<div class="calendario-semana-grid">';
+            for (var i = 0; i < 7; i++) {
+                var dia = new Date(inicioSemana);
+                dia.setDate(inicioSemana.getDate() + i);
+                var iso = paraIso(dia);
+                var ehHoje = mesmoDia(dia, hoje);
+
+                corpo += '<div class="calendario-semana-coluna' + (ehHoje ? ' calendario-hoje' : '') + '" data-abrir-novo="' + iso + '">';
+                corpo += '<div class="calendario-semana-cabecalho-dia" data-ir-dia="' + iso + '">'
+                    + '<span class="calendario-semana-nome-dia">' + nomesDiasSemana[i] + '</span>'
+                    + '<span class="calendario-numero-dia">' + dia.getDate() + '</span>'
+                    + '</div>';
+
+                eventosOrdenados(iso).forEach(function (ev) { corpo += construirChipEvento(ev); });
+                corpo += '</div>';
+            }
+            corpo += '</div>';
+
+            return {
+                titulo: inicioSemana.getDate() + ' a ' + fimSemana.getDate() + ' de ' + nomesMeses[fimSemana.getMonth()] + ' de ' + fimSemana.getFullYear(),
+                corpo: corpo,
+            };
+        }
+
+        function renderizarDia() {
+            var iso = paraIso(dataFoco);
+            var eventosDoDia = eventosOrdenados(iso);
+
+            var corpo = '<div class="calendario-dia-lista">';
+            if (!eventosDoDia.length) {
+                corpo += '<div class="calendario-dia-vazio" data-abrir-novo="' + iso + '">Nenhum treinamento ou reunião neste dia. Clique aqui para criar um.</div>';
+            } else {
+                eventosDoDia.forEach(function (ev) { corpo += construirItemEvento(ev); });
+            }
+            corpo += '</div>';
+
+            return {
+                titulo: nomesDiasSemanaCompleto[dataFoco.getDay()] + ', ' + dataFoco.getDate() + ' de ' + nomesMeses[dataFoco.getMonth()] + ' de ' + dataFoco.getFullYear(),
+                corpo: corpo,
+            };
+        }
+
+        function irParaDia(iso) {
+            var partes = iso.split('-');
+            dataFoco = new Date(parseInt(partes[0], 10), parseInt(partes[1], 10) - 1, parseInt(partes[2], 10));
+            modoAtual = 'dia';
+            renderizar();
+        }
+
+        function renderizar() {
+            var resultado = modoAtual === 'semana' ? renderizarSemana() : (modoAtual === 'dia' ? renderizarDia() : renderizarMes());
+
+            var rotulosModo = { mes: 'Mês', semana: 'Semana', dia: 'Dia' };
+            var modosHtml = ['mes', 'semana', 'dia'].map(function (m) {
+                return '<button type="button" class="calendario-modo-botao' + (modoAtual === m ? ' active' : '') + '" data-modo="' + m + '">' + rotulosModo[m] + '</button>';
+            }).join('');
+
+            container.innerHTML = '<div class="calendario-cabecalho">'
+                + '<div class="d-flex align-items-center gap-2">'
+                + '<button type="button" class="calendario-nav-botao" data-nav="-1" aria-label="Anterior">&lsaquo;</button>'
+                + '<span class="calendario-titulo-mes">' + resultado.titulo + '</span>'
+                + '<button type="button" class="calendario-nav-botao" data-nav="1" aria-label="Próximo">&rsaquo;</button>'
+                + '</div>'
+                + '<div class="calendario-modos">' + modosHtml + '</div>'
+                + '</div>' + resultado.corpo;
+        }
+
+        // Delegado num único listener no container (sobrevive aos
+        // re-renders, já que innerHTML muda mas o container em si não).
+        container.addEventListener('click', function (e) {
+            var navEl = e.target.closest('[data-nav]');
+            if (navEl) {
+                var dir = parseInt(navEl.getAttribute('data-nav'), 10);
+                if (modoAtual === 'semana') dataFoco.setDate(dataFoco.getDate() + dir * 7);
+                else if (modoAtual === 'dia') dataFoco.setDate(dataFoco.getDate() + dir);
+                else { dataFoco.setDate(1); dataFoco.setMonth(dataFoco.getMonth() + dir); }
+                renderizar();
+                return;
             }
 
-            html += '</div>';
-            container.innerHTML = html;
+            var modoEl = e.target.closest('[data-modo]');
+            if (modoEl) {
+                modoAtual = modoEl.getAttribute('data-modo');
+                renderizar();
+                return;
+            }
 
-            container.querySelectorAll('[data-nav]').forEach(function (botaoNav) {
-                botaoNav.addEventListener('click', function () {
-                    mesAtual += parseInt(botaoNav.getAttribute('data-nav'), 10);
-                    if (mesAtual < 0) { mesAtual = 11; anoAtual--; }
-                    if (mesAtual > 11) { mesAtual = 0; anoAtual++; }
-                    renderizar();
-                });
-            });
+            var chipEl = e.target.closest('[data-evento-id]');
+            if (chipEl) {
+                var eventoId = parseInt(chipEl.getAttribute('data-evento-id'), 10);
+                var evento = eventos.filter(function (ev) { return ev.id === eventoId; })[0];
+                if (evento) abrirEditarTreinamento(evento, container.getAttribute('data-aba-retorno'));
+                return;
+            }
 
-            container.querySelectorAll('.calendario-dia').forEach(function (celula) {
-                celula.addEventListener('click', function () {
-                    abrirNovoTreinamentoNaData(container, celula.getAttribute('data-data'));
-                });
-            });
-        }
+            var diaIrEl = e.target.closest('[data-ir-dia]');
+            if (diaIrEl) {
+                irParaDia(diaIrEl.getAttribute('data-ir-dia'));
+                return;
+            }
+
+            var novoEl = e.target.closest('[data-abrir-novo]');
+            if (novoEl) {
+                abrirNovoTreinamentoNaData(container, novoEl.getAttribute('data-abrir-novo'));
+                return;
+            }
+        });
 
         renderizar();
     });

@@ -551,6 +551,13 @@ class Migrations
         $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS hora_fim TIME NULL AFTER data_fim");
         $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS link_reuniao VARCHAR(255) NULL COMMENT 'Link da videochamada (Meet/Teams/Zoom), quando tiver' AFTER hora_fim");
 
+        // Marca quando o lembrete de "faltam 5 minutos" já foi disparado --
+        // ver cron_lembretes_treinamento.php. NULL = ainda não avisou.
+        // Editar o treinamento (data/hora) zera esse campo de novo (ver ação
+        // 'editar_treinamento' em cliente.php), pra recalcular o lembrete em
+        // cima do novo horário.
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS lembrete_enviado_em DATETIME NULL AFTER link_reuniao");
+
         // Aba "Setores" (substitui as antigas abas Documentos/Treinamentos,
         // que agora vivem DENTRO de cada setor): documento e KPI passam a
         // poder ser de um setor específico, ou NULL = geral do cliente
@@ -577,6 +584,14 @@ class Migrations
                 CONSTRAINT fk_propostas_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Proposta pode vir com um anexo (ex.: PDF de uma proposta de
+        // integração com API) -- em vez de duplicar arquivo_*/dados/backup
+        // de documentos aqui, a proposta só GUARDA A REFERÊNCIA pra uma
+        // linha em documentos (mesmo setor, categoria 'Proposta de
+        // desenvolvimento') -- reaproveita 100% do upload/backup/download
+        // que já existe pra documento, sem duplicar lógica.
+        $pdo->exec("ALTER TABLE propostas_desenvolvimento ADD COLUMN IF NOT EXISTS documento_id INT NULL COMMENT 'Anexo opcional -- referencia documentos.id' AFTER descricao");
 
         // Histórico de sugestões geradas por IA pra cada setor (análise do
         // processo a partir de chamados/KPIs/treinamentos) -- guarda cada

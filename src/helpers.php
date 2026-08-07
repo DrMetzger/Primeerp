@@ -516,6 +516,57 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
 }
 
 /**
+ * Salva um upload genérico na tabela documentos -- extraído pra ser
+ * reaproveitado tanto pelo upload "solto" (aba Setores/Visão geral) quanto
+ * por um anexo de proposta de desenvolvimento (que quer o mesmo
+ * backup/restauração/download que documento já tem, sem duplicar a lógica).
+ * $arquivo é o item de $_FILES (ex.: $_FILES['arquivo']). Retorna o id do
+ * documento criado, ou null se o upload falhar (erro fica em $erro, por
+ * referência, pra quem chamou decidir a mensagem de flash).
+ */
+function salvar_documento_upload(\PDO $pdo, int $clienteId, ?int $setorId, string $titulo, ?string $descricao, ?string $categoria, array $arquivo, ?int $criadoPor, ?string &$erro = null): ?int
+{
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        $erro = 'Falha no upload do arquivo.';
+        return null;
+    }
+    if ($arquivo['size'] > UPLOADS_MAX_SIZE) {
+        $erro = 'Arquivo maior que o limite permitido (15MB).';
+        return null;
+    }
+
+    $dirCliente = UPLOADS_DIR . '/clientes/' . $clienteId;
+    if (!is_dir($dirCliente)) {
+        mkdir($dirCliente, 0755, true);
+    }
+    $extensao = strtolower(pathinfo($arquivo['name'], PATHINFO_EXTENSION));
+    $nomeArmazenado = bin2hex(random_bytes(16)) . ($extensao ? '.' . $extensao : '');
+    $destino = $dirCliente . '/' . $nomeArmazenado;
+
+    if (!move_uploaded_file($arquivo['tmp_name'], $destino)) {
+        $erro = 'Não foi possível salvar o arquivo no servidor.';
+        return null;
+    }
+
+    // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
+    $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $clienteId,
+        $setorId,
+        $titulo ?: $arquivo['name'],
+        $descricao,
+        $categoria,
+        $arquivo['name'],
+        'clientes/' . $clienteId . '/' . $nomeArmazenado,
+        $arquivo['size'],
+        $criadoPor,
+        file_get_contents($destino),
+    ]);
+
+    return (int) $pdo->lastInsertId();
+}
+
+/**
  * Formata telefone brasileiro pra exibição/preenchimento inicial de campo
  * (a máscara ENQUANTO a pessoa digita é feita em JS, ver assets/js/app.js
  * -- essa função aqui é só pra quando o valor já vem do banco sem máscara,

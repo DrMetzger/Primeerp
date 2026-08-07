@@ -98,6 +98,13 @@ define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELE
 // gerando sugestão de verdade só testando a tela.
 define('GEMINI_API_KEY', getenv('ADMINPRIME_GEMINI_API_KEY') ?: ($isLocal ? '' : 'AQ.Ab8RN6LMT65gzPC8BDs0oFobulw8Gh0iKis5sVzHSwrozb8EeA'));
 
+// Token usado por cron_lembretes_treinamento.php quando o cron job é
+// disparado por URL (em vez de comando CLI) -- sem ele, qualquer um que
+// descobrisse a URL poderia forçar o disparo dos lembretes. Não precisa
+// disso se o Cron Job do Hostinger rodar via CLI (php cron_lembretes_...php),
+// só quando for via URL/wget.
+define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: ($isLocal ? 'teste-local' : '9333d390beced8c03a2a8668c38ee1f9d7333def0501d182'));
+
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo

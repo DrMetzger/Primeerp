@@ -54,6 +54,30 @@ class Notificacoes
     }
 
     /**
+     * Lembrete de "falta pouco" -- disparado pelo cron_lembretes_treinamento.php
+     * uns 5 minutos antes do horário marcado. Só e-mail por enquanto, mesmo
+     * motivo de novoTreinamento() (WhatsApp ainda não liberado pela Meta).
+     */
+    public static function lembreteTreinamento(array $treinamento, string $nomeCliente, ?string $nomeSetor): void
+    {
+        $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $treinamento['cliente_id'] . '#setores');
+        $ehReuniao = $treinamento['tipo'] === 'reuniao';
+        $hora = $treinamento['hora_inicio'] ? substr($treinamento['hora_inicio'], 0, 5) : '';
+
+        $corpo = "
+            <p>⏰ " . ($ehReuniao ? 'Reunião' : 'Treinamento') . " com <strong>" . e($nomeCliente) . "</strong>" . ($nomeSetor ? ' (setor ' . e($nomeSetor) . ')' : '') . " começa em poucos minutos (às <strong>{$hora}</strong>).</p>
+            <p><strong>Título:</strong> " . e($treinamento['titulo']) . "</p>
+            " . ($treinamento['link_reuniao'] ? '<p><strong>Link:</strong> <a href="' . e($treinamento['link_reuniao']) . '">' . e($treinamento['link_reuniao']) . '</a></p>' : '') . "
+            <p><a href=\"$link\">Ver no Prime Hub</a></p>
+        ";
+
+        $assunto = '⏰ Em 5 min: ' . ($ehReuniao ? 'reunião' : 'treinamento') . " {$treinamento['titulo']} ({$nomeCliente})";
+        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+            Mailer::enviar($emailEquipe, $assunto, $corpo);
+        }
+    }
+
+    /**
      * Chamado aberto pelo formulário público (abrir_chamado.php, sem login).
      * $clienteId é null quando não foi possível casar automaticamente com
      * nenhum cliente cadastrado -- nesse caso o chamado precisa de triagem

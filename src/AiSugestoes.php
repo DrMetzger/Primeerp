@@ -20,14 +20,17 @@ class AiSugestoes
     /**
      * $prompt já vem pronto (contexto do setor montado por quem chamou --
      * cliente.php sabe os dados, essa classe só sabe falar com a API).
-     * Retorna null se não tiver chave configurada ou se a chamada falhar
-     * (fica logado, não trava a tela).
+     * Retorna sempre um array ['ok' => bool, 'texto' => ?string, 'erro' =>
+     * ?string] -- diferente da versão anterior (que só devolvia null em
+     * qualquer falha), pra dar pra mostrar NA TELA o motivo real quando o
+     * Google recusar a chamada (conta sem cota liberada, chave errada,
+     * modelo indisponível, etc.), sem precisar ir atrás de log de servidor
+     * pra descobrir por quê.
      */
-    public static function gerar(string $prompt): ?string
+    public static function gerar(string $prompt): array
     {
         if (!self::configurada()) {
-            error_log('IA (não configurada ainda) -- geraria sugestão a partir do prompt: ' . $prompt);
-            return null;
+            return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada (ADMINPRIME_GEMINI_API_KEY).'];
         }
 
         $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . GEMINI_API_KEY;
@@ -48,12 +51,28 @@ class AiSugestoes
         $erroCurl = curl_error($ch);
         curl_close($ch);
 
-        if ($resposta === false || $codigoHttp >= 300) {
-            error_log('IA: falha na chamada à API do Gemini: HTTP ' . $codigoHttp . ' ' . $erroCurl . ' -- ' . $resposta);
-            return null;
+        if ($resposta === false) {
+            error_log('IA: falha de rede chamando o Gemini: ' . $erroCurl);
+            return ['ok' => false, 'texto' => null, 'erro' => 'Falha de rede ao chamar o Gemini: ' . $erroCurl];
         }
 
         $dados = json_decode($resposta, true);
-        return $dados['candidates'][0]['content']['parts'][0]['text'] ?? null;
+
+        if ($codigoHttp >= 300) {
+            $mensagemGoogle = $dados['error']['message'] ?? $resposta;
+            error_log('IA: falha na chamada à API do Gemini: HTTP ' . $codigoHttp . ' -- ' . $mensagemGoogle);
+            return ['ok' => false, 'texto' => null, 'erro' => "Gemini retornou HTTP {$codigoHttp}: {$mensagemGoogle}"];
+        }
+
+        $texto = $dados['candidates'][0]['content']['parts'][0]['text'] ?? null;
+        if ($texto === null) {
+            // Resposta 200 mas sem texto -- normalmente bloqueio de safety
+            // (finishReason=SAFETY) ou resposta vazia. Mostra o que o
+            // Google mandou pra dar pra entender o motivo.
+            $motivo = $dados['candidates'][0]['finishReason'] ?? 'desconhecido';
+            return ['ok' => false, 'texto' => null, 'erro' => "Gemini respondeu sem texto (motivo: {$motivo})."];
+        }
+
+        return ['ok' => true, 'texto' => $texto, 'erro' => null];
     }
 }
