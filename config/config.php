@@ -91,6 +91,12 @@ define('WHATSAPP_VERIFY_TOKEN', getenv('ADMINPRIME_WHATSAPP_VERIFY_TOKEN') ?: 'p
 // aberto pelo WhatsApp" -- o celular pessoal do Kleber.
 define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: '');
 
+// IA de sugestões de melhoria por setor (aba Setores, ver src/AiSugestoes.php)
+// -- usa a API da Anthropic direto. Fica em branco até o Kleber configurar a
+// chave; enquanto isso, o botão "Gerar sugestões" mostra um aviso em vez de
+// quebrar (mesmo esquema do WhatsApp/e-mail sem credenciais).
+define('ANTHROPIC_API_KEY', getenv('ADMINPRIME_ANTHROPIC_API_KEY') ?: '');
+
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
@@ -117,8 +123,10 @@ define('PERFIS_USUARIO', [
 ]);
 
 // Quantidade de avatares prontos em assets/img/avatares/ (avatar-1.svg até
-// avatar-N.svg) -- opção pra quem não quiser subir a própria foto.
-define('QUANTIDADE_AVATARES_PREDEFINIDOS', 16);
+// avatar-N.svg) -- opção pra quem não quiser subir a própria foto. Kleber
+// pediu pra aumentar a variedade depois de perceber que os cadastros
+// rápidos (aba Usuários) nascem sem avatar até alguém escolher um.
+define('QUANTIDADE_AVATARES_PREDEFINIDOS', 24);
 
 // Categorias de chamado -- mesma lista de área que já existia no HESK (o
 // sistema de chamados antigo), pra manter a mesma linguagem que os clientes
@@ -160,6 +168,8 @@ define('SETORES_SUGERIDOS', [
     'Comercial/Vendas' => 'bi-graph-up-arrow',
     'Logística' => 'bi-truck',
     'Manutenção' => 'bi-tools',
+    'Inspeção de Processos' => 'bi-clipboard-check',
+    'Inspeção de Entradas' => 'bi-box-arrow-in-down',
 ]);
 
 // Ícones (bootstrap-icons) disponíveis no seletor de setor, além dos já

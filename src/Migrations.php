@@ -551,6 +551,50 @@ class Migrations
         $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS hora_fim TIME NULL AFTER data_fim");
         $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS link_reuniao VARCHAR(255) NULL COMMENT 'Link da videochamada (Meet/Teams/Zoom), quando tiver' AFTER hora_fim");
 
+        // Aba "Setores" (substitui as antigas abas Documentos/Treinamentos,
+        // que agora vivem DENTRO de cada setor): documento e KPI passam a
+        // poder ser de um setor específico, ou NULL = geral do cliente
+        // (inclusive os dois slots fixos de contrato em Visão Geral, que
+        // continuam sem setor_id de propósito).
+        $pdo->exec("ALTER TABLE documentos ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor específico, ou NULL = documento geral do cliente' AFTER cliente_id");
+        $pdo->exec("ALTER TABLE kpis ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor específico, ou NULL = KPI geral do cliente' AFTER cliente_id");
+
+        // Propostas de melhoria/desenvolvimento registradas dentro de um
+        // setor -- pedido do Kleber pra ter um lugar de acompanhar ideias de
+        // evolução do processo daquele setor, separado do chamado normal
+        // (que é atendimento/suporte, não é backlog de melhoria).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS propostas_desenvolvimento (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                setor_id INT NULL,
+                titulo VARCHAR(200) NOT NULL,
+                descricao TEXT NULL,
+                status ENUM('proposta','aprovada','em_andamento','concluida','recusada') NOT NULL DEFAULT 'proposta',
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_propostas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_propostas_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Histórico de sugestões geradas por IA pra cada setor (análise do
+        // processo a partir de chamados/KPIs/treinamentos) -- guarda cada
+        // geração (não sobrescreve), a tela mostra sempre a mais recente.
+        // Sem FK pra setores de propósito (mesmo padrão do resto do
+        // arquivo) -- se o setor for excluído, essas linhas ficam órfãs mas
+        // inofensivas (nunca mais aparecem em tela nenhuma).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setor_sugestoes_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setor_id INT NOT NULL,
+                sugestao TEXT NOT NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_sugestoes_ia_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Clientes iniciais, criados apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn();
         if ($count === 0) {

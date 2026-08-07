@@ -833,6 +833,7 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 .avatar-opcao img { width: 100%; height: 100%; border-radius: 50%; display: block; }
 
 .avatar-opcao:hover { border-color: var(--ph-primary); transform: scale(1.08); }
+.avatar-opcao.active { border-color: var(--ph-primary); }
 
 /* Seletor de ícone de setor (modal Gerenciar setores) -- mesma ideia da
    galeria de avatares, só que com bootstrap-icons em vez de foto. */

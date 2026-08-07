@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 
+use AdminPrime\AiSugestoes;
 use AdminPrime\Auth;
 use AdminPrime\Database;
 use AdminPrime\Notificacoes;
@@ -49,9 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_kpi') {
-        $stmt = $pdo->prepare('INSERT INTO kpis (cliente_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
+            $_POST['setor_id'] ?: null,
             trim($_POST['nome_kpi']),
             str_replace(',', '.', $_POST['valor']),
             $_POST['meta'] !== '' ? str_replace(',', '.', $_POST['meta']) : null,
@@ -87,6 +89,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Status do treinamento atualizado.');
     }
 
+    // --- Propostas de desenvolvimento (backlog de melhoria por setor) ----
+
+    if ($acao === 'criar_proposta') {
+        $tituloProposta = trim($_POST['titulo'] ?? '');
+        if ($tituloProposta === '') {
+            flash_set('erro', 'Informe o título da proposta.');
+        } else {
+            $pdo->prepare('INSERT INTO propostas_desenvolvimento (cliente_id, setor_id, titulo, descricao, criado_por) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$clienteId, $_POST['setor_id'] ?: null, $tituloProposta, trim($_POST['descricao'] ?? '') ?: null, Auth::userId()]);
+            flash_set('sucesso', 'Proposta registrada.');
+        }
+    }
+
+    if ($acao === 'atualizar_status_proposta') {
+        $pdo->prepare('UPDATE propostas_desenvolvimento SET status=? WHERE id=? AND cliente_id=?')
+            ->execute([$_POST['status'], (int) $_POST['proposta_id'], $clienteId]);
+        flash_set('sucesso', 'Status da proposta atualizado.');
+    }
+
+    if ($acao === 'excluir_proposta') {
+        $pdo->prepare('DELETE FROM propostas_desenvolvimento WHERE id=? AND cliente_id=?')
+            ->execute([(int) $_POST['proposta_id'], $clienteId]);
+        flash_set('sucesso', 'Proposta removida.');
+    }
+
+    // --- Sugestões de melhoria por setor, geradas com IA -----------------
+    // Ver src/AiSugestoes.php -- monta um prompt com o nome do setor, os
+    // chamados mais recentes (título/categoria) e os KPIs registrados, pede
+    // pra IA analisar se o processo parece saudável e sugerir melhorias.
+    // Sem chave configurada, avisa em vez de travar (mesmo padrão do
+    // WhatsApp).
+    if ($acao === 'gerar_sugestao_ia') {
+        $setorIdSugestao = (int) $_POST['setor_id'];
+        $stmtSetorSugestao = $pdo->prepare('SELECT nome FROM setores WHERE id = ? AND cliente_id = ?');
+        $stmtSetorSugestao->execute([$setorIdSugestao, $clienteId]);
+        $nomeSetorSugestao = $stmtSetorSugestao->fetchColumn();
+
+        if (!$nomeSetorSugestao) {
+            flash_set('erro', 'Setor não encontrado.');
+        } elseif (!AiSugestoes::configurada()) {
+            flash_set('erro', 'IA ainda não configurada -- defina a chave da Anthropic (ADMINPRIME_ANTHROPIC_API_KEY) pra usar esse recurso.');
+        } else {
+            $stmtChamadosSugestao = $pdo->prepare("SELECT titulo, categoria, status, prioridade FROM chamados WHERE setor_id = ? ORDER BY criado_em DESC LIMIT 25");
+            $stmtChamadosSugestao->execute([$setorIdSugestao]);
+            $chamadosSugestao = $stmtChamadosSugestao->fetchAll();
+
+            $stmtKpisSugestao = $pdo->prepare('SELECT nome_kpi, valor, meta, unidade, periodo FROM kpis WHERE setor_id = ? ORDER BY periodo DESC LIMIT 15');
+            $stmtKpisSugestao->execute([$setorIdSugestao]);
+            $kpisSugestao = $stmtKpisSugestao->fetchAll();
+
+            $prompt = "Você é um consultor de processos de uma consultoria de ERP (TOTVS Protheus). "
+                . "Analise o setor \"{$nomeSetorSugestao}\" do cliente \"{$cliente['nome']}\" com base nos dados abaixo "
+                . "e responda em português, de forma direta e prática, em até 6 tópicos: "
+                . "(1) um diagnóstico rápido de como está o processo desse setor, "
+                . "(2) problemas ou padrões preocupantes que você identificou (se houver), "
+                . "(3) sugestões concretas de melhoria.\n\n"
+                . "Chamados recentes desse setor (título / categoria / status / prioridade):\n";
+            foreach ($chamadosSugestao as $c) {
+                $prompt .= "- {$c['titulo']} | {$c['categoria']} | {$c['status']} | {$c['prioridade']}\n";
+            }
+            if (!$chamadosSugestao) {
+                $prompt .= "(nenhum chamado registrado ainda)\n";
+            }
+            $prompt .= "\nKPIs registrados desse setor (nome / valor / meta / unidade / período):\n";
+            foreach ($kpisSugestao as $k) {
+                $prompt .= "- {$k['nome_kpi']} | {$k['valor']} | " . ($k['meta'] ?? '-') . " | {$k['unidade']} | {$k['periodo']}\n";
+            }
+            if (!$kpisSugestao) {
+                $prompt .= "(nenhum KPI registrado ainda)\n";
+            }
+
+            $sugestaoGerada = AiSugestoes::gerar($prompt);
+            if ($sugestaoGerada === null) {
+                flash_set('erro', 'Não foi possível gerar a sugestão agora -- tenta de novo em alguns instantes.');
+            } else {
+                $pdo->prepare('INSERT INTO setor_sugestoes_ia (setor_id, sugestao, criado_por) VALUES (?, ?, ?)')
+                    ->execute([$setorIdSugestao, $sugestaoGerada, Auth::userId()]);
+                flash_set('sucesso', 'Sugestão gerada.');
+            }
+        }
+    }
+
     if ($acao === 'upload_documento' && isset($_FILES['arquivo'])) {
         $arquivo = $_FILES['arquivo'];
         if ($arquivo['error'] !== UPLOAD_ERR_OK) {
@@ -104,9 +188,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (move_uploaded_file($arquivo['tmp_name'], $destino)) {
                 // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
-                $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $stmt->execute([
                     $clienteId,
+                    $_POST['setor_id'] ?: null,
                     trim($_POST['titulo']) ?: $arquivo['name'],
                     trim($_POST['descricao']) ?: null,
                     trim($_POST['categoria']) ?: null,
@@ -267,10 +352,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
             $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+            $indiceAvatarNovo = (int) ($_POST['avatar'] ?? 0);
+            $avatarNovo = ($indiceAvatarNovo >= 1 && $indiceAvatarNovo <= QUANTIDADE_AVATARES_PREDEFINIDOS)
+                ? 'assets/img/avatares/avatar-' . $indiceAvatarNovo . '.svg'
+                : null;
 
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento) VALUES (?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovo]);
                 $responsavelId = (int) $pdo->lastInsertId();
 
                 // Mesma pessoa que já é o contato master desse cliente,
@@ -660,13 +749,60 @@ if ($chamados) {
     }
 }
 
+// KPI (métrica) agora pode ser de um setor específico (aba Setores) ou
+// geral do cliente (setor_id NULL) -- ver Migrations. Agrupado por setor_id
+// pra cada setor mostrar só as métricas dele; os gerais aparecem na Visão
+// geral.
 $kpis = $pdo->prepare('SELECT * FROM kpis WHERE cliente_id = ? ORDER BY periodo DESC, nome_kpi ASC');
 $kpis->execute([$clienteId]);
 $kpis = $kpis->fetchAll();
+$kpisPorSetorId = [];
+$kpisGerais = [];
+foreach ($kpis as $k) {
+    if ($k['setor_id']) {
+        $kpisPorSetorId[$k['setor_id']][] = $k;
+    } else {
+        $kpisGerais[] = $k;
+    }
+}
 
+// Documento também pode ser de um setor específico ou geral do cliente.
+// Dois documentos gerais são "slots fixos" (contrato social e contrato de
+// prestação de serviços da PrimeERP, mostrados na Visão geral) -- os demais
+// documentos gerais (histórico de antes dessa separação existir, ou algo
+// que realmente não é de um setor específico) aparecem numa lista simples,
+// também na Visão geral.
 $documentos = $pdo->prepare('SELECT d.*, u.nome AS criado_por_nome FROM documentos d LEFT JOIN usuarios u ON u.id = d.criado_por WHERE d.cliente_id = ? ORDER BY d.criado_em DESC');
 $documentos->execute([$clienteId]);
 $documentos = $documentos->fetchAll();
+$documentosPorSetorId = [];
+$documentosGerais = [];
+$contratoSocial = null;
+$contratoPrestacaoServicos = null;
+foreach ($documentos as $doc) {
+    if ($doc['setor_id']) {
+        $documentosPorSetorId[$doc['setor_id']][] = $doc;
+    } elseif ($doc['categoria'] === 'Contrato Social') {
+        $contratoSocial ??= $doc; // primeiro = mais recente (ORDER BY criado_em DESC)
+    } elseif ($doc['categoria'] === 'Contrato de Prestação de Serviços') {
+        $contratoPrestacaoServicos ??= $doc;
+    } else {
+        $documentosGerais[] = $doc;
+    }
+}
+
+// Propostas de melhoria/desenvolvimento por setor (aba Setores) -- backlog
+// de evolução do processo, separado do chamado normal (que é
+// atendimento/suporte pontual).
+$propostas = $pdo->prepare('SELECT p.*, u.nome AS criado_por_nome FROM propostas_desenvolvimento p LEFT JOIN usuarios u ON u.id = p.criado_por WHERE p.cliente_id = ? ORDER BY p.criado_em DESC');
+$propostas->execute([$clienteId]);
+$propostas = $propostas->fetchAll();
+$propostasPorSetorId = [];
+foreach ($propostas as $p) {
+    if ($p['setor_id']) {
+        $propostasPorSetorId[$p['setor_id']][] = $p;
+    }
+}
 
 $treinamentos = $pdo->prepare('
     SELECT t.*, u.nome AS responsavel_nome, s.nome AS setor_nome
@@ -679,9 +815,12 @@ $treinamentos = $pdo->prepare('
 $treinamentos->execute([$clienteId]);
 $treinamentos = $treinamentos->fetchAll();
 $treinamentosPorSetorId = [];
+$treinamentosGerais = [];
 foreach ($treinamentos as $t) {
     if ($t['setor_id']) {
         $treinamentosPorSetorId[$t['setor_id']][] = $t;
+    } else {
+        $treinamentosGerais[] = $t;
     }
 }
 
@@ -720,6 +859,21 @@ $nomesSetoresPorId = array_column($setores, 'nome', 'id');
 // que permitia "participar" de vários ao mesmo tempo) -- editado na aba
 // Usuários, ver ação 'definir_setor_master'.
 $idSetorMaster = $cliente['setor_id'] ? (int) $cliente['setor_id'] : null;
+
+// Última sugestão de IA gerada pra cada setor (histórico completo fica só
+// no banco -- a tela sempre mostra a mais recente). ORDER BY criado_em DESC
+// + "primeira ocorrência por setor_id vence" evita precisar de uma
+// subquery por setor.
+$ultimaSugestaoIaPorSetorId = [];
+if ($setores) {
+    $idsSetoresSugestao = array_column($setores, 'id');
+    $placeholdersSugestao = implode(',', array_fill(0, count($idsSetoresSugestao), '?'));
+    $stmtSugestoes = $pdo->prepare("SELECT * FROM setor_sugestoes_ia WHERE setor_id IN ($placeholdersSugestao) ORDER BY criado_em DESC");
+    $stmtSugestoes->execute($idsSetoresSugestao);
+    foreach ($stmtSugestoes->fetchAll() as $sug) {
+        $ultimaSugestaoIaPorSetorId[$sug['setor_id']] ??= $sug;
+    }
+}
 
 // Responsáveis de cada setor, agrupados por setor_id -- um setor pode ter
 // VÁRIOS (pedido do Kleber, ex.: Financeiro com mais de uma pessoa). Quando
@@ -774,8 +928,7 @@ require __DIR__ . '/templates/header.php';
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral">Visão geral</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados">Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis">KPIs</a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#documentos">Documentos <span class="badge bg-secondary"><?= count($documentos) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#treinamentos">Treinamentos <span class="badge bg-secondary"><?= count($treinamentos) ?></span></a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores">Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios">Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
 </ul>
 
@@ -918,6 +1071,96 @@ require __DIR__ . '/templates/header.php';
                 </div>
             </div>
         </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <strong class="d-block mb-3">Contratos</strong>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Contrato social da empresa</label>
+                        <?php if ($contratoSocial): ?>
+                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoSocial['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoSocial['arquivo_nome_original']) ?></a></p>
+                        <?php else: ?>
+                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
+                        <?php endif; ?>
+                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_documento">
+                            <input type="hidden" name="aba_retorno" value="visao-geral">
+                            <input type="hidden" name="titulo" value="Contrato Social">
+                            <input type="hidden" name="categoria" value="Contrato Social">
+                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoSocial ? 'Trocar' : 'Enviar' ?></button>
+                        </form>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Contrato de prestação de serviços (PrimeERP)</label>
+                        <?php if ($contratoPrestacaoServicos): ?>
+                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoPrestacaoServicos['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoPrestacaoServicos['arquivo_nome_original']) ?></a></p>
+                        <?php else: ?>
+                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
+                        <?php endif; ?>
+                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_documento">
+                            <input type="hidden" name="aba_retorno" value="visao-geral">
+                            <input type="hidden" name="titulo" value="Contrato de Prestação de Serviços">
+                            <input type="hidden" name="categoria" value="Contrato de Prestação de Serviços">
+                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoPrestacaoServicos ? 'Trocar' : 'Enviar' ?></button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <strong class="d-block mb-3"><i class="bi bi-file-earmark"></i> Outros documentos gerais</strong>
+                <p class="text-muted small">Documentos que não são de um setor específico (para documento de setor, ver a aba Setores).</p>
+                <?php if ($documentosGerais): ?>
+                    <ul class="list-unstyled mb-3">
+                        <?php foreach ($documentosGerais as $doc): ?>
+                            <li class="d-flex align-items-center gap-2 mb-1">
+                                <a href="<?= url('download.php?id=' . $doc['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($doc['titulo']) ?></a>
+                                <span class="text-muted small"><?= $doc['categoria'] ? e($doc['categoria']) . ' · ' : '' ?><?= formatar_data($doc['criado_em']) ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="upload_documento">
+                    <input type="hidden" name="aba_retorno" value="visao-geral">
+                    <div class="col-md-3"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (opcional)"></div>
+                    <div class="col-md-3"><input type="text" name="categoria" class="form-control form-control-sm" placeholder="Categoria (opcional)"></div>
+                    <div class="col-md-4"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
+                    <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <strong class="d-block mb-3"><i class="bi bi-calendar-event"></i> Agenda geral</strong>
+                <p class="text-muted small">Treinamentos/reuniões que não são de um setor específico (para agenda de setor, ver a aba Setores).</p>
+                <?php if ($treinamentosGerais): ?>
+                    <ul class="list-unstyled mb-0">
+                        <?php foreach ($treinamentosGerais as $t): ?>
+                            <li class="d-flex align-items-center gap-2 mb-1">
+                                <i class="bi <?= $t['tipo'] === 'reuniao' ? 'bi-camera-video' : 'bi-mortarboard' ?>"></i>
+                                <span class="fw-semibold"><?= e($t['titulo']) ?></span>
+                                <span class="text-muted small"><?= formatar_data($t['data_inicio']) ?><?= $t['hora_inicio'] ? ' ' . substr($t['hora_inicio'], 0, 5) : '' ?></span>
+                                <?php if ($t['link_reuniao']): ?><a href="<?= e($t['link_reuniao']) ?>" target="_blank" class="btn btn-sm btn-outline-dark ms-auto">Entrar</a><?php endif; ?>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php else: ?>
+                    <p class="text-muted small mb-0">Nenhum treinamento ou reunião geral registrado ainda.</p>
+                <?php endif; ?>
+                <button type="button" class="btn btn-sm btn-outline-dark mt-2 botao-novo-treinamento-setor" data-setor-id="" data-aba-retorno="visao-geral"><i class="bi bi-plus-lg"></i> Novo</button>
+            </div>
+        </div>
     </div>
 
     <!-- CHAMADOS -->
@@ -928,7 +1171,7 @@ require __DIR__ . '/templates/header.php';
         <div class="painel-setores mb-3">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                 <p class="text-muted small mb-0"><i class="bi bi-diagram-3"></i> Esse cliente tem setores independentes -- clique num card pra ver só os chamados daquele setor.</p>
-                <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalGerenciarSetores"><i class="bi bi-gear"></i> Gerenciar setores</button>
+                <button type="button" class="btn btn-sm btn-outline-dark botao-ir-para-setores"><i class="bi bi-gear"></i> Gerenciar setores</button>
             </div>
             <div class="grid-setores">
                 <div class="card-setor card-setor-todos active" data-setor-filtro="todos" role="button" tabindex="0">
@@ -979,7 +1222,7 @@ require __DIR__ . '/templates/header.php';
             <div class="toolbar-acoes">
                 <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoChamado"><i class="bi bi-plus-lg"></i> Registrar chamado</button>
                 <?php if (!$setores): ?>
-                    <button type="button" class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalGerenciarSetores"><i class="bi bi-diagram-3"></i> Configurar setores</button>
+                    <button type="button" class="btn btn-outline-dark botao-ir-para-setores"><i class="bi bi-diagram-3"></i> Configurar setores</button>
                 <?php endif; ?>
             </div>
             <div class="toolbar-filtros">
@@ -1111,6 +1354,7 @@ require __DIR__ . '/templates/header.php';
 
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
+        <p class="text-muted small mb-2"><i class="bi bi-graph-up"></i> Métricas gerais do cliente. Métricas de um setor específico ficam na aba Setores, dentro do próprio setor.</p>
         <div class="toolbar">
             <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoKpi"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
         </div>
@@ -1122,7 +1366,7 @@ require __DIR__ . '/templates/header.php';
                     <tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th></tr>
                     </thead>
                     <tbody>
-                    <?php foreach ($kpis as $k): ?>
+                    <?php foreach ($kpisGerais as $k): ?>
                         <tr>
                             <td><?= date('m/Y', strtotime($k['periodo'])) ?></td>
                             <td class="fw-semibold"><?= e($k['nome_kpi']) ?></td>
@@ -1136,8 +1380,8 @@ require __DIR__ . '/templates/header.php';
                             <td class="text-muted small"><?= e($k['observacoes']) ?></td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($kpis)): ?>
-                        <tr><td colspan="5" class="text-muted text-center py-3">Nenhum KPI registrado ainda.</td></tr>
+                    <?php if (empty($kpisGerais)): ?>
+                        <tr><td colspan="5" class="text-muted text-center py-3">Nenhum KPI geral registrado ainda.</td></tr>
                     <?php endif; ?>
                     </tbody>
                 </table>
@@ -1146,92 +1390,361 @@ require __DIR__ . '/templates/header.php';
         </div>
     </div>
 
-    <!-- DOCUMENTOS -->
-    <div class="tab-pane" id="documentos">
-        <div class="toolbar">
-            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoDocumento"><i class="bi bi-upload"></i> Enviar documento</button>
-        </div>
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                    <tr><th>Título</th><th>Categoria</th><th>Arquivo</th><th>Enviado por</th><th>Data</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($documentos as $doc): ?>
-                        <tr>
-                            <td class="fw-semibold"><?= e($doc['titulo']) ?></td>
-                            <td><?= e($doc['categoria'] ?: '-') ?></td>
-                            <td><?= e($doc['arquivo_nome_original']) ?> <small class="text-muted">(<?= round($doc['arquivo_tamanho']/1024) ?> KB)</small></td>
-                            <td><?= e($doc['criado_por_nome'] ?: '-') ?></td>
-                            <td><?= formatar_data($doc['criado_em']) ?></td>
-                            <td class="text-end">
-                                <a href="<?= url('download.php?id=' . $doc['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($documentos)): ?>
-                        <tr><td colspan="6" class="text-muted text-center py-3">Nenhum documento enviado ainda.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- SETORES -->
+    <div class="tab-pane" id="setores">
+        <p class="text-muted small">Cada setor tem seu próprio espaço: configurações, calendário de treinamentos/reuniões, documentos, propostas de melhoria, métricas e sugestões de IA sobre o processo dele.</p>
 
-    <!-- TREINAMENTOS -->
-    <div class="tab-pane" id="treinamentos">
-        <div class="toolbar">
-            <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNovoTreinamento"><i class="bi bi-plus-lg"></i> Novo treinamento/reunião</button>
+        <form method="post" class="row g-2 align-items-end mb-2">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="criar_setor">
+            <input type="hidden" name="aba_retorno" value="setores">
+            <input type="hidden" name="icone" id="novoSetorIcone" value="bi-diagram-3">
+            <div class="col"><input type="text" name="nome" id="novoSetorNome" class="form-control" placeholder="Nome do novo setor" required></div>
+            <div class="col-auto"><button type="submit" class="btn btn-dark"><i class="bi bi-plus-lg"></i> Criar setor</button></div>
+        </form>
+        <div class="seletor-icone-setor mb-2" data-campo-destino="novoSetorIcone">
+            <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
+                <button type="button" class="icone-opcao <?= $ic === 'bi-diagram-3' ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
+            <?php endforeach; ?>
         </div>
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                    <tr><th>Título</th><th>Tipo</th><th>Setor</th><th>Status</th><th>Quando</th><th>Responsável</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($treinamentos as $t): ?>
-                        <tr>
-                            <td class="fw-semibold"><?= e($t['titulo']) ?></td>
-                            <td><?= $t['tipo'] === 'reuniao' ? '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-camera-video"></i> Reunião</span>' : '<span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-mortarboard"></i> Treinamento</span>' ?></td>
-                            <td><?= $t['setor_nome'] ? e($t['setor_nome']) : '<span class="text-muted">Geral</span>' ?></td>
-                            <td>
+
+        <?php
+        $nomesSetoresExistentesLower = array_map('mb_strtolower', array_column($setores, 'nome'));
+        $sugestoesSetorDisponiveis = array_filter(SETORES_SUGERIDOS, fn ($nomeSug) => !in_array(mb_strtolower($nomeSug), $nomesSetoresExistentesLower, true), ARRAY_FILTER_USE_KEY);
+        ?>
+        <?php if ($sugestoesSetorDisponiveis): ?>
+        <div class="mb-4">
+            <p class="text-muted small mb-1">Sugestões rápidas (clique pra preencher nome + ícone):</p>
+            <?php foreach ($sugestoesSetorDisponiveis as $nomeSug => $iconeSug): ?>
+                <button type="button" class="btn btn-sm btn-outline-secondary mb-1 botao-sugestao-setor" data-nome="<?= e($nomeSug) ?>" data-icone="<?= e($iconeSug) ?>"><i class="bi <?= e($iconeSug) ?>"></i> <?= e($nomeSug) ?></button>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!$setores): ?>
+            <p class="text-muted text-center py-4 mb-0"><i class="bi bi-diagram-3" style="font-size:2rem;"></i><br>Nenhum setor cadastrado ainda.</p>
+        <?php endif; ?>
+
+        <?php foreach ($setores as $indiceSetor => $s):
+            $idSetorAtual = (int) $s['id'];
+            $membrosReais = array_filter($responsaveisPorSetorId[$idSetorAtual] ?? [], fn ($m) => empty($m['eh_master']));
+            $treinamentosSetor = $treinamentosPorSetorId[$idSetorAtual] ?? [];
+            $documentosSetor = $documentosPorSetorId[$idSetorAtual] ?? [];
+            $propostasSetor = $propostasPorSetorId[$idSetorAtual] ?? [];
+            $kpisSetor = $kpisPorSetorId[$idSetorAtual] ?? [];
+            $sugestaoIaSetor = $ultimaSugestaoIaPorSetorId[$idSetorAtual] ?? null;
+            $candidatosRelacionar = array_filter($usuariosCliente, fn ($u) => (int) $u['setor_id'] !== $idSetorAtual);
+        ?>
+        <details class="setor-detalhe" <?= $indiceSetor === 0 ? 'open' : '' ?>>
+            <summary>
+                <i class="bi <?= e($s['icone'] ?: 'bi-diagram-3') ?>"></i>
+                <span class="fw-semibold"><?= e($s['nome']) ?></span>
+                <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
+                <span class="text-muted small">
+                    — <?= count($membrosReais) ?> <?= count($membrosReais) === 1 ? 'responsável' : 'responsáveis' ?><?= $idSetorMaster === $idSetorAtual ? ' + master' : '' ?>
+                </span>
+            </summary>
+            <div class="setor-detalhe-corpo">
+                <ul class="nav nav-tabs nav-tabs-sm" id="setorSubTabs<?= $idSetorAtual ?>">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#setorConfig<?= $idSetorAtual ?>"><i class="bi bi-gear"></i> Configurações</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorCalendario<?= $idSetorAtual ?>"><i class="bi bi-calendar-event"></i> Calendário <span class="badge bg-secondary"><?= count($treinamentosSetor) ?></span></a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorDocs<?= $idSetorAtual ?>"><i class="bi bi-file-earmark"></i> Documentos <span class="badge bg-secondary"><?= count($documentosSetor) ?></span></a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorPropostas<?= $idSetorAtual ?>"><i class="bi bi-lightbulb"></i> Propostas <span class="badge bg-secondary"><?= count($propostasSetor) ?></span></a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorMetricas<?= $idSetorAtual ?>"><i class="bi bi-graph-up"></i> Métricas <span class="badge bg-secondary"><?= count($kpisSetor) ?></span></a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorIa<?= $idSetorAtual ?>"><i class="bi bi-stars"></i> IA</a></li>
+                </ul>
+                <div class="tab-content pt-3">
+
+                    <!-- Configurações -->
+                    <div class="tab-pane show active" id="setorConfig<?= $idSetorAtual ?>">
+                        <form method="post" class="row g-2 align-items-end mb-2">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="atualizar_setor">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <input type="hidden" name="icone" id="setorIcone<?= $idSetorAtual ?>" value="<?= e($s['icone'] ?: 'bi-diagram-3') ?>">
+                            <div class="col-md-6"><label class="form-label">Nome do setor</label><input type="text" name="nome" class="form-control" value="<?= e($s['nome']) ?>" required></div>
+                            <div class="col-md-3 form-check ms-2 mb-2">
+                                <input type="checkbox" name="ativo" id="setorAtivo<?= $idSetorAtual ?>" class="form-check-input" value="1" <?= $s['ativo'] ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="setorAtivo<?= $idSetorAtual ?>">Ativo</label>
+                            </div>
+                            <div class="col-md-3"><button type="submit" class="btn btn-sm btn-outline-dark w-100"><i class="bi bi-check2"></i> Salvar</button></div>
+                        </form>
+                        <div class="seletor-icone-setor mb-3" data-campo-destino="setorIcone<?= $idSetorAtual ?>">
+                            <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
+                                <button type="button" class="icone-opcao <?= $ic === ($s['icone'] ?: 'bi-diagram-3') ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <hr>
+                        <p class="text-muted small mb-2"><i class="bi bi-people"></i> Responsáveis (cada um com login próprio no portal, só desse setor)</p>
+                        <?php if (!$membrosReais): ?>
+                            <p class="text-muted small">Nenhum responsável relacionado ainda<?= $idSetorMaster === $idSetorAtual ? ' (o master já cobre esse setor, mas fica à vontade pra relacionar mais alguém)' : '' ?>.</p>
+                        <?php endif; ?>
+                        <?php foreach ($membrosReais as $m): ?>
+                        <div class="responsavel-setor-item d-flex align-items-center gap-3 mb-2">
+                            <?= avatar_html($m['nome'], resolver_avatar_por_email($pdo, $m['email'], $m['foto_perfil']), 'cliente') ?>
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold"><?= e($m['nome']) ?></div>
+                                <div class="text-muted small"><?= e($m['email']) ?></div>
+                            </div>
+                            <span class="badge bg-<?= $m['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $m['portal_ativo'] ? 'Portal ativo' : 'Sem acesso' ?></span>
+                            <div class="d-flex flex-wrap gap-1">
                                 <form method="post" class="d-inline">
                                     <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="atualizar_treinamento_status">
-                                    <input type="hidden" name="aba_retorno" value="treinamentos">
-                                    <input type="hidden" name="treinamento_id" value="<?= $t['id'] ?>">
-                                    <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
-                                        <?php foreach (['planejado' => 'Planejado', 'em_andamento' => 'Em andamento', 'concluido' => 'Concluído', 'cancelado' => 'Cancelado'] as $val => $label): ?>
-                                            <option value="<?= $val ?>" <?= $t['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
+                                    <input type="hidden" name="acao" value="enviar_convite_setor">
+                                    <input type="hidden" name="aba_retorno" value="setores">
+                                    <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-send"></i> <?= $m['portal_ativo'] ? 'Reenviar convite' : 'Convite' ?></button>
                                 </form>
-                            </td>
-                            <td class="small">
-                                <?= formatar_data($t['data_inicio']) ?><?= $t['hora_inicio'] ? ' ' . substr($t['hora_inicio'], 0, 5) : '' ?>
-                                <?php if ($t['data_fim'] && $t['data_fim'] !== $t['data_inicio']): ?><br>até <?= formatar_data($t['data_fim']) ?><?php endif; ?>
-                            </td>
-                            <td><?= e($t['responsavel_nome'] ?: '-') ?></td>
-                            <td class="text-end">
-                                <?php if ($t['link_reuniao']): ?>
-                                    <a href="<?= e($t['link_reuniao']) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-camera-video"></i> Entrar</a>
+                                <?php if ($m['portal_ativo']): ?>
+                                <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual de <?= e($m['nome']) ?> na hora. Confirma o reset?');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="resetar_senha_setor">
+                                    <input type="hidden" name="aba_retorno" value="setores">
+                                    <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-key"></i> Resetar senha</button>
+                                </form>
+                                <form method="post" class="d-inline">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="desativar_portal_setor">
+                                    <input type="hidden" name="aba_retorno" value="setores">
+                                    <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
+                                </form>
                                 <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($treinamentos)): ?>
-                        <tr><td colspan="7" class="text-muted text-center py-3">Nenhum treinamento ou reunião registrado ainda.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+                                <form method="post" class="d-inline" onsubmit="return confirm('Desvincular <?= e($m['nome']) ?> desse setor? A pessoa continua cadastrada na aba Usuários.');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="relacionar_responsavel_setor">
+                                    <input type="hidden" name="aba_retorno" value="setores">
+                                    <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                                    <input type="hidden" name="setor_id" value="">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Desvincular</button>
+                                </form>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+
+                        <?php if ($candidatosRelacionar): ?>
+                        <form method="post" class="row g-2 align-items-end mt-2 mb-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="relacionar_responsavel_setor">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <div class="col">
+                                <label class="form-label small mb-1"><i class="bi bi-search"></i> Buscar usuário já cadastrado no cliente e relacionar a esse setor:</label>
+                                <select name="responsavel_id" class="form-select form-select-sm" required>
+                                    <option value="" disabled selected>Selecione...</option>
+                                    <?php foreach ($candidatosRelacionar as $cand): ?>
+                                        <option value="<?= $cand['id'] ?>"><?= e($cand['nome']) ?> (<?= e($cand['email']) ?>)<?= $cand['setor_id'] ? ' — hoje em ' . e($nomesSetoresPorId[$cand['setor_id']] ?? '?') : '' ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-auto"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-link-45deg"></i> Relacionar</button></div>
+                        </form>
+                        <?php else: ?>
+                            <p class="text-muted small">Nenhum outro usuário do cliente disponível pra relacionar -- cadastre um na aba <strong>Usuários</strong>.</p>
+                        <?php endif; ?>
+
+                        <hr>
+                        <form method="post" onsubmit="return confirm('Excluir o setor &quot;<?= e($s['nome']) ?>&quot;? Os chamados e responsáveis dele continuam salvos, só ficam sem setor vinculado.');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="excluir_setor">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Excluir setor</button>
+                        </form>
+                    </div>
+
+                    <!-- Calendário -->
+                    <div class="tab-pane" id="setorCalendario<?= $idSetorAtual ?>">
+                        <button type="button" class="btn btn-sm btn-dark mb-3 botao-novo-treinamento-setor" data-setor-id="<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Novo treinamento/reunião</button>
+                        <?php if ($treinamentosSetor): ?>
+                        <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Título</th><th>Tipo</th><th>Status</th><th>Quando</th><th>Responsável</th><th></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($treinamentosSetor as $t): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= e($t['titulo']) ?></td>
+                                    <td><?= $t['tipo'] === 'reuniao' ? '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-camera-video"></i> Reunião</span>' : '<span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-mortarboard"></i> Treinamento</span>' ?></td>
+                                    <td>
+                                        <form method="post" class="d-inline">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="acao" value="atualizar_treinamento_status">
+                                            <input type="hidden" name="aba_retorno" value="setores">
+                                            <input type="hidden" name="treinamento_id" value="<?= $t['id'] ?>">
+                                            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                                                <?php foreach (['planejado' => 'Planejado', 'em_andamento' => 'Em andamento', 'concluido' => 'Concluído', 'cancelado' => 'Cancelado'] as $val => $label): ?>
+                                                    <option value="<?= $val ?>" <?= $t['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </form>
+                                    </td>
+                                    <td class="small">
+                                        <?= formatar_data($t['data_inicio']) ?><?= $t['hora_inicio'] ? ' ' . substr($t['hora_inicio'], 0, 5) : '' ?>
+                                        <?php if ($t['data_fim'] && $t['data_fim'] !== $t['data_inicio']): ?><br>até <?= formatar_data($t['data_fim']) ?><?php endif; ?>
+                                    </td>
+                                    <td><?= e($t['responsavel_nome'] ?: '-') ?></td>
+                                    <td class="text-end">
+                                        <?php if ($t['link_reuniao']): ?><a href="<?= e($t['link_reuniao']) ?>" target="_blank" class="btn btn-sm btn-outline-dark"><i class="bi bi-camera-video"></i> Entrar</a><?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhum treinamento ou reunião desse setor ainda.</p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Documentos -->
+                    <div class="tab-pane" id="setorDocs<?= $idSetorAtual ?>">
+                        <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_documento">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <div class="col-md-3"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (opcional)"></div>
+                            <div class="col-md-3"><input type="text" name="categoria" class="form-control form-control-sm" placeholder="Categoria (opcional)"></div>
+                            <div class="col-md-4"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
+                            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                        </form>
+                        <?php if ($documentosSetor): ?>
+                        <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Título</th><th>Categoria</th><th>Arquivo</th><th>Enviado por</th><th>Data</th><th></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($documentosSetor as $doc): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= e($doc['titulo']) ?></td>
+                                    <td><?= e($doc['categoria'] ?: '-') ?></td>
+                                    <td><?= e($doc['arquivo_nome_original']) ?> <small class="text-muted">(<?= round($doc['arquivo_tamanho']/1024) ?> KB)</small></td>
+                                    <td><?= e($doc['criado_por_nome'] ?: '-') ?></td>
+                                    <td><?= formatar_data($doc['criado_em']) ?></td>
+                                    <td class="text-end"><a href="<?= url('download.php?id=' . $doc['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhum documento desse setor ainda.</p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Propostas de desenvolvimento -->
+                    <div class="tab-pane" id="setorPropostas<?= $idSetorAtual ?>">
+                        <form method="post" class="row g-2 align-items-end mb-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="criar_proposta">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <div class="col-md-4"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título da proposta" required></div>
+                            <div class="col-md-6"><input type="text" name="descricao" class="form-control form-control-sm" placeholder="Descrição (opcional)"></div>
+                            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-plus-lg"></i> Registrar</button></div>
+                        </form>
+                        <?php if ($propostasSetor): ?>
+                        <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Título</th><th>Descrição</th><th>Status</th><th>Criado por</th><th></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($propostasSetor as $p): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= e($p['titulo']) ?></td>
+                                    <td class="text-muted small"><?= e($p['descricao']) ?></td>
+                                    <td>
+                                        <form method="post" class="d-inline">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="acao" value="atualizar_status_proposta">
+                                            <input type="hidden" name="aba_retorno" value="setores">
+                                            <input type="hidden" name="proposta_id" value="<?= $p['id'] ?>">
+                                            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                                                <?php foreach (['proposta' => 'Proposta', 'aprovada' => 'Aprovada', 'em_andamento' => 'Em andamento', 'concluida' => 'Concluída', 'recusada' => 'Recusada'] as $val => $label): ?>
+                                                    <option value="<?= $val ?>" <?= $p['status'] === $val ? 'selected' : '' ?>><?= $label ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </form>
+                                    </td>
+                                    <td><?= e($p['criado_por_nome'] ?: '-') ?></td>
+                                    <td class="text-end">
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir a proposta &quot;<?= e($p['titulo']) ?>&quot;?');">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="acao" value="excluir_proposta">
+                                            <input type="hidden" name="aba_retorno" value="setores">
+                                            <input type="hidden" name="proposta_id" value="<?= $p['id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhuma proposta de melhoria registrada ainda pra esse setor.</p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Métricas -->
+                    <div class="tab-pane" id="setorMetricas<?= $idSetorAtual ?>">
+                        <button type="button" class="btn btn-sm btn-dark mb-3 botao-novo-kpi-setor" data-setor-id="<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Registrar métrica</button>
+                        <?php if ($kpisSetor): ?>
+                        <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th></tr></thead>
+                            <tbody>
+                            <?php foreach ($kpisSetor as $k): ?>
+                                <tr>
+                                    <td><?= date('m/Y', strtotime($k['periodo'])) ?></td>
+                                    <td class="fw-semibold"><?= e($k['nome_kpi']) ?></td>
+                                    <td><?= e(number_format((float) $k['valor'], 2, ',', '.')) ?> <?= e($k['unidade']) ?></td>
+                                    <td>
+                                        <?php if ($k['meta'] !== null): ?>
+                                            <?= e(number_format((float) $k['meta'], 2, ',', '.')) ?>
+                                            <?= (float) $k['valor'] >= (float) $k['meta'] ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-exclamation-circle-fill text-warning"></i>' ?>
+                                        <?php else: ?>-<?php endif; ?>
+                                    </td>
+                                    <td class="text-muted small"><?= e($k['observacoes']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhuma métrica registrada ainda pra esse setor -- registre pra ajudar a IA a avaliar o processo.</p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- IA -->
+                    <div class="tab-pane" id="setorIa<?= $idSetorAtual ?>">
+                        <form method="post" class="mb-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="gerar_sugestao_ia">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-stars"></i> Gerar sugestões com IA</button>
+                            <?php if (!AiSugestoes::configurada()): ?>
+                                <span class="text-muted small ms-2">IA ainda não configurada (ADMINPRIME_ANTHROPIC_API_KEY).</span>
+                            <?php endif; ?>
+                        </form>
+                        <?php if ($sugestaoIaSetor): ?>
+                            <div class="card card-stat">
+                                <div class="card-body">
+                                    <p class="text-muted small mb-2">Gerado em <?= formatar_data($sugestaoIaSetor['criado_em']) ?></p>
+                                    <div style="white-space: pre-wrap;"><?= e($sugestaoIaSetor['sugestao']) ?></div>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhuma sugestão gerada ainda pra esse setor.</p>
+                        <?php endif; ?>
+                    </div>
+
                 </div>
             </div>
-        </div>
+        </details>
+        <?php endforeach; ?>
     </div>
 
     <!-- USUÁRIOS -->
@@ -1292,20 +1805,38 @@ require __DIR__ . '/templates/header.php';
                             </td>
                             <td><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
                             <td class="text-end" onclick="event.stopPropagation()">
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="enviar_convite_setor">
-                                    <input type="hidden" name="aba_retorno" value="usuarios">
-                                    <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $uc['setor_id'] ? '' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i></button>
-                                </form>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Remover <?= e($uc['nome']) ?>? Isso também apaga o acesso dele ao portal, se tiver.');">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="excluir_usuario_cliente">
-                                    <input type="hidden" name="aba_retorno" value="usuarios">
-                                    <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                                </form>
+                                <div class="d-flex flex-wrap gap-1 justify-content-end">
+                                    <form method="post" class="d-inline">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="acao" value="enviar_convite_setor">
+                                        <input type="hidden" name="aba_retorno" value="usuarios">
+                                        <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $uc['setor_id'] ? '' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i> <?= $uc['portal_ativo'] ? 'Reenviar convite' : 'Convite' ?></button>
+                                    </form>
+                                    <?php if ($uc['portal_ativo']): ?>
+                                    <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual de <?= e($uc['nome']) ?> na hora. Confirma o reset?');">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="acao" value="resetar_senha_setor">
+                                        <input type="hidden" name="aba_retorno" value="usuarios">
+                                        <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-key"></i> Resetar senha</button>
+                                    </form>
+                                    <form method="post" class="d-inline">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="acao" value="desativar_portal_setor">
+                                        <input type="hidden" name="aba_retorno" value="usuarios">
+                                        <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
+                                    </form>
+                                    <?php endif; ?>
+                                    <form method="post" class="d-inline" onsubmit="return confirm('Remover <?= e($uc['nome']) ?>? Isso também apaga o acesso dele ao portal, se tiver.');">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="acao" value="excluir_usuario_cliente">
+                                        <input type="hidden" name="aba_retorno" value="usuarios">
+                                        <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Excluir</button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -1377,179 +1908,6 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<!-- Modal Gerenciar setores -->
-<div class="modal fade" id="modalGerenciarSetores" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-diagram-3"></i> Setores de <?= e($cliente['nome']) ?></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted small">Cada setor pode ter um ou mais responsáveis com login próprio no portal -- eles só veem e abrem chamados do setor deles. Cadastre a pessoa na aba <strong>Usuários</strong> primeiro, depois relacione ela a um setor aqui.</p>
-
-        <form method="post" class="row g-2 align-items-end mb-2">
-            <?= csrf_field() ?>
-            <input type="hidden" name="acao" value="criar_setor">
-            <input type="hidden" name="aba_retorno" value="chamados">
-            <input type="hidden" name="icone" id="novoSetorIcone" value="bi-diagram-3">
-            <div class="col"><input type="text" name="nome" id="novoSetorNome" class="form-control" placeholder="Nome do novo setor" required></div>
-            <div class="col-auto"><button type="submit" class="btn btn-dark"><i class="bi bi-plus-lg"></i> Criar setor</button></div>
-        </form>
-        <div class="seletor-icone-setor mb-2" data-campo-destino="novoSetorIcone">
-            <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
-                <button type="button" class="icone-opcao <?= $ic === 'bi-diagram-3' ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
-            <?php endforeach; ?>
-        </div>
-
-        <?php
-        $nomesSetoresExistentesLower = array_map('mb_strtolower', array_column($setores, 'nome'));
-        $sugestoesSetorDisponiveis = array_filter(SETORES_SUGERIDOS, fn ($nomeSug) => !in_array(mb_strtolower($nomeSug), $nomesSetoresExistentesLower, true), ARRAY_FILTER_USE_KEY);
-        ?>
-        <?php if ($sugestoesSetorDisponiveis): ?>
-        <div class="mb-4">
-            <p class="text-muted small mb-1">Sugestões rápidas (clique pra preencher nome + ícone):</p>
-            <?php foreach ($sugestoesSetorDisponiveis as $nomeSug => $iconeSug): ?>
-                <button type="button" class="btn btn-sm btn-outline-secondary mb-1 botao-sugestao-setor" data-nome="<?= e($nomeSug) ?>" data-icone="<?= e($iconeSug) ?>"><i class="bi <?= e($iconeSug) ?>"></i> <?= e($nomeSug) ?></button>
-            <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-
-        <?php if (!$setores): ?>
-            <p class="text-muted text-center py-4 mb-0"><i class="bi bi-diagram-3" style="font-size:2rem;"></i><br>Nenhum setor cadastrado ainda.</p>
-        <?php endif; ?>
-
-        <?php
-        // Pra "buscar e relacionar": pessoas dessa empresa que ainda NÃO
-        // estão nesse setor específico (podem estar sem setor nenhum, ou
-        // relacionadas a outro -- mudar de setor também é uma forma válida
-        // de "relacionar").
-        ?>
-        <?php foreach ($setores as $indiceSetor => $s): $membrosReais = $responsaveisPorSetorId[$s['id']] ?? []; $membrosReais = array_filter($membrosReais, fn ($m) => empty($m['eh_master'])); $treinamentosSetor = $treinamentosPorSetorId[$s['id']] ?? []; ?>
-        <details class="setor-detalhe" <?= $indiceSetor === 0 ? 'open' : '' ?>>
-            <summary>
-                <i class="bi <?= e($s['icone'] ?: 'bi-diagram-3') ?>"></i>
-                <span class="fw-semibold"><?= e($s['nome']) ?></span>
-                <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
-                <span class="text-muted small">
-                    — <?= count($membrosReais) ?> <?= count($membrosReais) === 1 ? 'responsável' : 'responsáveis' ?><?= $idSetorMaster === (int) $s['id'] ? ' + master' : '' ?>
-                </span>
-            </summary>
-            <div class="setor-detalhe-corpo">
-                <form method="post" class="row g-2 align-items-end mb-2">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="atualizar_setor">
-                    <input type="hidden" name="aba_retorno" value="chamados">
-                    <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <input type="hidden" name="icone" id="setorIcone<?= $s['id'] ?>" value="<?= e($s['icone'] ?: 'bi-diagram-3') ?>">
-                    <div class="col-md-6"><label class="form-label">Nome do setor</label><input type="text" name="nome" class="form-control" value="<?= e($s['nome']) ?>" required></div>
-                    <div class="col-md-3 form-check ms-2 mb-2">
-                        <input type="checkbox" name="ativo" id="setorAtivo<?= $s['id'] ?>" class="form-check-input" value="1" <?= $s['ativo'] ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="setorAtivo<?= $s['id'] ?>">Ativo</label>
-                    </div>
-                    <div class="col-md-3"><button type="submit" class="btn btn-sm btn-outline-dark w-100"><i class="bi bi-check2"></i> Salvar</button></div>
-                </form>
-                <div class="seletor-icone-setor mb-3" data-campo-destino="setorIcone<?= $s['id'] ?>">
-                    <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
-                        <button type="button" class="icone-opcao <?= $ic === ($s['icone'] ?: 'bi-diagram-3') ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
-                    <?php endforeach; ?>
-                </div>
-
-                <hr>
-                <p class="text-muted small mb-2"><i class="bi bi-people"></i> Responsáveis (cada um com login próprio no portal, só desse setor)</p>
-
-                <?php if (!$membrosReais): ?>
-                    <p class="text-muted small">Nenhum responsável relacionado ainda<?= $idSetorMaster === (int) $s['id'] ? ' (o master já cobre esse setor, mas fica à vontade pra relacionar mais alguém)' : '' ?>.</p>
-                <?php endif; ?>
-
-                <?php foreach ($membrosReais as $m): ?>
-                <div class="responsavel-setor-item d-flex align-items-center gap-3 mb-2">
-                    <?= avatar_html($m['nome'], resolver_avatar_por_email($pdo, $m['email'], $m['foto_perfil']), 'cliente') ?>
-                    <div class="flex-grow-1">
-                        <div class="fw-semibold"><?= e($m['nome']) ?></div>
-                        <div class="text-muted small"><?= e($m['email']) ?></div>
-                    </div>
-                    <span class="badge bg-<?= $m['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $m['portal_ativo'] ? 'Portal ativo' : 'Sem acesso' ?></span>
-                    <div class="d-flex flex-wrap gap-1">
-                        <form method="post" class="d-inline">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="enviar_convite_setor">
-                            <input type="hidden" name="aba_retorno" value="chamados">
-                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $m['portal_ativo'] ? 'Reenviar convite' : 'Enviar convite' ?>"><i class="bi bi-send"></i></button>
-                        </form>
-                        <form method="post" class="d-inline" onsubmit="return confirm('Desvincular <?= e($m['nome']) ?> desse setor? A pessoa continua cadastrada na aba Usuários.');">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="relacionar_responsavel_setor">
-                            <input type="hidden" name="aba_retorno" value="chamados">
-                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
-                            <input type="hidden" name="setor_id" value="">
-                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Desvincular desse setor"><i class="bi bi-x-lg"></i></button>
-                        </form>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-
-                <?php
-                $candidatos = array_filter($usuariosCliente, fn ($u) => (int) $u['setor_id'] !== (int) $s['id']);
-                ?>
-                <?php if ($candidatos): ?>
-                <form method="post" class="row g-2 align-items-end mt-2 mb-3">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="relacionar_responsavel_setor">
-                    <input type="hidden" name="aba_retorno" value="chamados">
-                    <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <div class="col">
-                        <label class="form-label small mb-1"><i class="bi bi-search"></i> Buscar usuário já cadastrado no cliente e relacionar a esse setor:</label>
-                        <select name="responsavel_id" class="form-select form-select-sm" required>
-                            <option value="" disabled selected>Selecione...</option>
-                            <?php foreach ($candidatos as $cand): ?>
-                                <option value="<?= $cand['id'] ?>"><?= e($cand['nome']) ?> (<?= e($cand['email']) ?>)<?= $cand['setor_id'] ? ' — hoje em ' . e($nomesSetoresPorId[$cand['setor_id']] ?? '?') : '' ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-auto"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-link-45deg"></i> Relacionar</button></div>
-                </form>
-                <?php else: ?>
-                    <p class="text-muted small">Nenhum outro usuário do cliente disponível pra relacionar -- cadastre um na aba <strong>Usuários</strong>.</p>
-                <?php endif; ?>
-
-                <hr>
-                <p class="text-muted small mb-2"><i class="bi bi-calendar-event"></i> Treinamentos e reuniões desse setor</p>
-                <?php if ($treinamentosSetor): ?>
-                    <ul class="list-unstyled mb-3">
-                        <?php foreach ($treinamentosSetor as $ts): ?>
-                            <li class="d-flex align-items-center gap-2 mb-1">
-                                <i class="bi <?= $ts['tipo'] === 'reuniao' ? 'bi-camera-video' : 'bi-mortarboard' ?>"></i>
-                                <span class="fw-semibold"><?= e($ts['titulo']) ?></span>
-                                <span class="text-muted small"><?= formatar_data($ts['data_inicio']) ?><?= $ts['hora_inicio'] ? ' ' . substr($ts['hora_inicio'], 0, 5) : '' ?></span>
-                                <?php if ($ts['link_reuniao']): ?><a href="<?= e($ts['link_reuniao']) ?>" target="_blank" class="btn btn-sm btn-outline-dark ms-auto">Entrar</a><?php endif; ?>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php else: ?>
-                    <p class="text-muted small">Nenhum treinamento ou reunião desse setor ainda -- crie na aba <strong>Treinamentos</strong>.</p>
-                <?php endif; ?>
-
-                <hr>
-                <form method="post" onsubmit="return confirm('Excluir o setor &quot;<?= e($s['nome']) ?>&quot;? Os chamados e responsáveis dele continuam salvos, só ficam sem setor vinculado.');">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="excluir_setor">
-                    <input type="hidden" name="aba_retorno" value="chamados">
-                    <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Excluir setor</button>
-                </form>
-            </div>
-        </details>
-        <?php endforeach; ?>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Modal Exportar Chamados -->
 <div class="modal fade" id="modalExportarChamados" tabindex="-1">
   <div class="modal-dialog">
@@ -1590,7 +1948,7 @@ require __DIR__ . '/templates/header.php';
       <form method="post">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" value="criar_kpi">
-        <input type="hidden" name="aba_retorno" value="kpis">
+        <input type="hidden" name="aba_retorno" id="novoKpiAbaRetorno" value="kpis">
         <div class="modal-header"><h5 class="modal-title">Registrar KPI</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <div class="mb-3"><label class="form-label">Nome do KPI *</label><input type="text" name="nome_kpi" class="form-control" required placeholder="Ex: SLA de atendimento, chamados resolvidos..."></div>
@@ -1600,35 +1958,19 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-4"><label class="form-label">Unidade</label><input type="text" name="unidade" class="form-control" placeholder="%, dias, un."></div>
             </div>
             <div class="mb-3 mt-2"><label class="form-label">Período (mês/ano) *</label><input type="month" name="periodo" class="form-control" required value="<?= date('Y-m') ?>"></div>
+            <div class="mb-3"><label class="form-label">Setor</label>
+                <select name="setor_id" id="novoKpiSetor" class="form-select">
+                    <option value="">Geral (todo o cliente)</option>
+                    <?php foreach ($setores as $s): ?>
+                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
             <div class="mb-3"><label class="form-label">Observações</label><input type="text" name="observacoes" class="form-control"></div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
             <button type="submit" class="btn btn-dark">Registrar</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Novo Documento -->
-<div class="modal fade" id="modalNovoDocumento" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <form method="post" enctype="multipart/form-data">
-        <?= csrf_field() ?>
-        <input type="hidden" name="acao" value="upload_documento">
-        <input type="hidden" name="aba_retorno" value="documentos">
-        <div class="modal-header"><h5 class="modal-title">Enviar documento</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <div class="mb-3"><label class="form-label">Título</label><input type="text" name="titulo" class="form-control" placeholder="Se deixar vazio, usa o nome do arquivo"></div>
-            <div class="mb-3"><label class="form-label">Categoria</label><input type="text" name="categoria" class="form-control" placeholder="Ex: Contrato, Manual, Ata de reunião..."></div>
-            <div class="mb-3"><label class="form-label">Descrição</label><textarea name="descricao" class="form-control" rows="2"></textarea></div>
-            <div class="mb-3"><label class="form-label">Arquivo * (máx. 15MB)</label><input type="file" name="arquivo" class="form-control" required></div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-dark">Enviar</button>
         </div>
       </form>
     </div>
@@ -1642,7 +1984,7 @@ require __DIR__ . '/templates/header.php';
       <form method="post">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" value="criar_treinamento">
-        <input type="hidden" name="aba_retorno" value="treinamentos">
+        <input type="hidden" name="aba_retorno" id="novoTreinamentoAbaRetorno" value="setores">
         <div class="modal-header"><h5 class="modal-title">Novo treinamento/reunião</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <div class="mb-3"><label class="form-label">Título *</label><input type="text" name="titulo" class="form-control" required></div>
@@ -1654,7 +1996,7 @@ require __DIR__ . '/templates/header.php';
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Setor</label>
-                    <select name="setor_id" class="form-select">
+                    <select name="setor_id" id="novoTreinamentoSetor" class="form-select">
                         <option value="">Geral (todo o cliente)</option>
                         <?php foreach ($setores as $s): ?>
                             <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
@@ -1698,6 +2040,15 @@ require __DIR__ . '/templates/header.php';
         <input type="hidden" name="aba_retorno" value="usuarios">
         <div class="modal-header"><h5 class="modal-title">Novo usuário</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
+            <input type="hidden" name="avatar" id="novoUsuarioClienteAvatar" value="1">
+            <p class="text-muted small mb-1">Escolha um avatar (pode trocar depois):</p>
+            <div class="galeria-avatares mb-3" id="galeriaAvatarNovoUsuarioCliente">
+                <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                    <button type="button" class="avatar-opcao <?= $i === 1 ? 'active' : '' ?>" data-avatar="<?= $i ?>" title="Usar este avatar">
+                        <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                    </button>
+                <?php endfor; ?>
+            </div>
             <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" class="form-control" required></div>
             <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" class="form-control" required></div>
             <div class="row g-2">
@@ -1897,6 +2248,19 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    // Seletor de avatar no cadastro de NOVO usuário -- escolhe um avatar
+    // pronto já na criação (antes só dava pra trocar depois de editar).
+    var galeriaAvatarNovo = document.getElementById('galeriaAvatarNovoUsuarioCliente');
+    if (galeriaAvatarNovo) {
+        galeriaAvatarNovo.querySelectorAll('.avatar-opcao').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                document.getElementById('novoUsuarioClienteAvatar').value = botao.getAttribute('data-avatar');
+                galeriaAvatarNovo.querySelectorAll('.avatar-opcao').forEach(function (b) { b.classList.remove('active'); });
+                botao.classList.add('active');
+            });
+        });
+    }
+
     // Linha da aba Usuários -- clique abre o modal de edição já preenchido
     // (mesmo padrão do modal de usuário da equipe em usuarios.php).
     var baseUrlAvatarCliente = <?= json_encode(url('')) ?>;
@@ -1920,6 +2284,45 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         linha.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') linha.click();
+        });
+    });
+
+    // "Gerenciar setores" / "Configurar setores" (aba Chamados) -- antes
+    // abria um modal, agora só troca pra aba Setores.
+    document.querySelectorAll('.botao-ir-para-setores').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            var link = document.querySelector('.nav-tabs a[href="#setores"]');
+            if (link) {
+                PrimeUI.showTab(link);
+                history.replaceState(null, '', '#setores');
+                link.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    });
+
+    // "Novo treinamento/reunião" de dentro de um setor específico (aba
+    // Setores > Calendário) -- pré-seleciona o setor no modal compartilhado
+    // antes de abrir, em vez de duplicar o modal pra cada setor.
+    document.querySelectorAll('.botao-novo-treinamento-setor').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            var campo = document.getElementById('novoTreinamentoSetor');
+            var campoRetorno = document.getElementById('novoTreinamentoAbaRetorno');
+            if (campo) campo.value = botao.getAttribute('data-setor-id');
+            if (campoRetorno) campoRetorno.value = botao.getAttribute('data-aba-retorno') || 'setores';
+            PrimeUI.openModal(document.getElementById('modalNovoTreinamento'));
+        });
+    });
+
+    // "Registrar métrica" de dentro de um setor específico (aba Setores >
+    // Métricas) -- mesma ideia, pré-seleciona o setor e ajusta o retorno
+    // pra voltar pra aba Setores (não pra aba KPIs geral).
+    document.querySelectorAll('.botao-novo-kpi-setor').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            var campoSetor = document.getElementById('novoKpiSetor');
+            var campoRetorno = document.getElementById('novoKpiAbaRetorno');
+            if (campoSetor) campoSetor.value = botao.getAttribute('data-setor-id');
+            if (campoRetorno) campoRetorno.value = 'setores';
+            PrimeUI.openModal(document.getElementById('modalNovoKpi'));
         });
     });
 });
