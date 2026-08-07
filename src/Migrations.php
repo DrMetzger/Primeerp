@@ -42,6 +42,14 @@ class Migrations
         // pedido também pros dados cadastrais da própria equipe.
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS documento VARCHAR(20) NULL COMMENT 'CPF do usuário da equipe, só dígitos' AFTER telefone");
 
+        // Layout customizado do dashboard, POR USUÁRIO -- pedido do Kleber
+        // pra poder reorganizar os widgets (ordem + largura de cada um) sem
+        // precisar pedir pra gente mexer no código, e cada colega poder ter
+        // o próprio arranjo (o do Petronilho pode ficar diferente do dele).
+        // JSON: [{"id":"clientes_atencao","span":12}, ...]. NULL = ainda não
+        // customizou, usa a ordem padrão (ver dashboard.php).
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS dashboard_layout TEXT NULL COMMENT 'JSON com ordem/largura dos widgets do dashboard desse usuário' AFTER perfil");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS clientes (
                 id INT AUTO_INCREMENT PRIMARY KEY,

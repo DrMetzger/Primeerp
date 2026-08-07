@@ -9,6 +9,41 @@ Auth::requireLogin();
 
 $pdo = Database::connection();
 
+// --- Layout customizado do dashboard (por usuário) ------------------------
+// Cada widget tem um id fixo, uma ordem e uma largura (span, de 1 a 12,
+// mesmo sistema de colunas do Bootstrap) -- pedido do Kleber pra poder
+// reorganizar sem depender da gente, e cada colega da equipe ter o próprio
+// arranjo, já que é salvo em usuarios.dashboard_layout (JSON), não é global.
+$larguraMinimaWidget = 3;
+$larguraMaximaWidget = 12;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'salvar_layout_dashboard') {
+    csrf_verify();
+    $layoutRecebido = json_decode($_POST['layout'] ?? '', true);
+    $layoutValido = [];
+    if (is_array($layoutRecebido)) {
+        foreach ($layoutRecebido as $item) {
+            if (!isset($item['id'], $item['span']) || !is_string($item['id']) || !preg_match('/^[a-z_]+$/', $item['id'])) {
+                continue;
+            }
+            $span = max($larguraMinimaWidget, min($larguraMaximaWidget, (int) $item['span']));
+            $layoutValido[] = ['id' => $item['id'], 'span' => $span];
+        }
+    }
+    $pdo->prepare('UPDATE usuarios SET dashboard_layout = ? WHERE id = ?')
+        ->execute([$layoutValido ? json_encode($layoutValido) : null, Auth::userId()]);
+    header('Location: ' . url('dashboard.php'));
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'resetar_layout_dashboard') {
+    csrf_verify();
+    $pdo->prepare('UPDATE usuarios SET dashboard_layout = NULL WHERE id = ?')->execute([Auth::userId()]);
+    flash_set('sucesso', 'Layout do dashboard restaurado ao padrão.');
+    header('Location: ' . url('dashboard.php'));
+    exit;
+}
+
 $totalClientesAtivos = (int) $pdo->query("SELECT COUNT(*) FROM clientes WHERE status = 'ativo'")->fetchColumn();
 
 // Chamados que dependem de uma ação nossa agora: os que ainda não tiveram
@@ -200,11 +235,14 @@ $clientesAtencao = array_filter($clientesAtencao, fn ($c) => $c['pontuacao'] > 0
 usort($clientesAtencao, fn ($a, $b) => $b['pontuacao'] <=> $a['pontuacao']);
 $clientesAtencao = array_slice($clientesAtencao, 0, 10);
 
-$tituloPagina = 'Dashboard';
-require __DIR__ . '/templates/header.php';
-?>
+// --- Cada bloco do dashboard vira um "widget" arrastável/redimensionável --
+// captura o HTML de cada um numa variável (em vez de ecoar direto) pra poder
+// desenhar todos dentro do grid customizável, na ordem/largura que o
+// usuário logado escolheu (ver dashboard_layout em usuarios). Conteúdo de
+// cada widget é o mesmo de sempre, só mudou o "porta-retrato" em volta.
 
-<div class="row g-3 mb-3">
+ob_start(); ?>
+<div class="row g-3">
     <div class="col-sm-6 col-lg-4">
         <div class="card card-stat h-100">
             <div class="card-body">
@@ -230,8 +268,10 @@ require __DIR__ . '/templates/header.php';
         </div>
     </div>
 </div>
+<?php $htmlKpisPrincipais = ob_get_clean();
 
-<div class="row g-3 mb-4">
+ob_start(); ?>
+<div class="row g-3">
     <div class="col-sm-6 col-lg-3">
         <div class="card card-stat h-100">
             <div class="card-body">
@@ -269,79 +309,74 @@ require __DIR__ . '/templates/header.php';
         </div>
     </div>
 </div>
+<?php $htmlKpisSecundarios = ob_get_clean();
 
-<h5 class="mb-3 d-flex align-items-center gap-2">
-    <i class="bi bi-graph-up-arrow text-primary"></i> Indicadores e tendências
-</h5>
-
-<div class="row g-3 mb-4">
-    <div class="col-lg-7">
-        <div class="card card-stat h-100">
-            <div class="card-header bg-white fw-bold">Volume de chamados -- últimos 6 meses</div>
-            <div class="card-body">
-                <div class="chart-wrap"><canvas id="graficoVolume"></canvas></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-5">
-        <div class="card card-stat h-100">
-            <div class="card-header bg-white fw-bold">Chamados pendentes por status</div>
-            <div class="card-body">
-                <?php if ($totalPendentesAgora > 0): ?>
-                    <div class="chart-wrap chart-wrap-sm"><canvas id="graficoStatus"></canvas></div>
-                <?php else: ?>
-                    <p class="text-muted text-center py-5 mb-0">Nenhum chamado pendente agora. 🎉</p>
-                <?php endif; ?>
-            </div>
-        </div>
+ob_start(); ?>
+<div class="card card-stat h-100">
+    <div class="card-header bg-white fw-bold">Volume de chamados -- últimos 6 meses</div>
+    <div class="card-body">
+        <div class="chart-wrap"><canvas id="graficoVolume"></canvas></div>
     </div>
 </div>
+<?php $htmlGraficoVolume = ob_get_clean();
 
-<div class="row g-3 mb-4">
-    <div class="col-lg-5">
-        <div class="card card-stat h-100">
-            <div class="card-header bg-white fw-bold">Chamados pendentes por prioridade</div>
-            <div class="card-body">
-                <?php if ($totalPendentesAgora > 0): ?>
-                    <div class="chart-wrap chart-wrap-sm"><canvas id="graficoPrioridade"></canvas></div>
-                <?php else: ?>
-                    <p class="text-muted text-center py-5 mb-0">Nenhum chamado pendente agora. 🎉</p>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-7">
-        <div class="card card-stat h-100">
-            <div class="card-header bg-white fw-bold">Tempo médio de atendimento -- últimos 6 meses</div>
-            <div class="card-body">
-                <?php if ($temDadosTempoAtendimento): ?>
-                    <div class="chart-wrap"><canvas id="graficoTempoMedio"></canvas></div>
-                <?php else: ?>
-                    <p class="text-muted text-center py-5 mb-0">
-                        <i class="bi bi-info-circle"></i> Ainda não há chamados fechados o suficiente pra
-                        montar essa tendência -- passa a aparecer conforme os próximos forem encerrados.
-                    </p>
-                <?php endif; ?>
-            </div>
-        </div>
+ob_start(); ?>
+<div class="card card-stat h-100">
+    <div class="card-header bg-white fw-bold">Chamados pendentes por status</div>
+    <div class="card-body">
+        <?php if ($totalPendentesAgora > 0): ?>
+            <div class="chart-wrap chart-wrap-sm"><canvas id="graficoStatus"></canvas></div>
+        <?php else: ?>
+            <p class="text-muted text-center py-5 mb-0">Nenhum chamado pendente agora. 🎉</p>
+        <?php endif; ?>
     </div>
 </div>
+<?php $htmlGraficoStatus = ob_get_clean();
 
-<?php if ($topClientesMes): ?>
-<div class="row g-3 mb-4">
-    <div class="col-12">
-        <div class="card card-stat">
-            <div class="card-header bg-white fw-bold">Clientes com mais chamados este mês</div>
-            <div class="card-body">
-                <div class="chart-wrap chart-wrap-bar-h" style="height: <?= 42 * count($topClientesMes) + 20 ?>px;">
-                    <canvas id="graficoTopClientes"></canvas>
-                </div>
+ob_start(); ?>
+<div class="card card-stat h-100">
+    <div class="card-header bg-white fw-bold">Chamados pendentes por prioridade</div>
+    <div class="card-body">
+        <?php if ($totalPendentesAgora > 0): ?>
+            <div class="chart-wrap chart-wrap-sm"><canvas id="graficoPrioridade"></canvas></div>
+        <?php else: ?>
+            <p class="text-muted text-center py-5 mb-0">Nenhum chamado pendente agora. 🎉</p>
+        <?php endif; ?>
+    </div>
+</div>
+<?php $htmlGraficoPrioridade = ob_get_clean();
+
+ob_start(); ?>
+<div class="card card-stat h-100">
+    <div class="card-header bg-white fw-bold">Tempo médio de atendimento -- últimos 6 meses</div>
+    <div class="card-body">
+        <?php if ($temDadosTempoAtendimento): ?>
+            <div class="chart-wrap"><canvas id="graficoTempoMedio"></canvas></div>
+        <?php else: ?>
+            <p class="text-muted text-center py-5 mb-0">
+                <i class="bi bi-info-circle"></i> Ainda não há chamados fechados o suficiente pra
+                montar essa tendência -- passa a aparecer conforme os próximos forem encerrados.
+            </p>
+        <?php endif; ?>
+    </div>
+</div>
+<?php $htmlGraficoTempoMedio = ob_get_clean();
+
+$htmlGraficoTopClientes = null;
+if ($topClientesMes) {
+    ob_start(); ?>
+    <div class="card card-stat h-100">
+        <div class="card-header bg-white fw-bold">Clientes com mais chamados este mês</div>
+        <div class="card-body">
+            <div class="chart-wrap chart-wrap-bar-h" style="height: <?= 42 * count($topClientesMes) + 20 ?>px;">
+                <canvas id="graficoTopClientes"></canvas>
             </div>
         </div>
     </div>
-</div>
-<?php endif; ?>
+    <?php $htmlGraficoTopClientes = ob_get_clean();
+}
 
+ob_start(); ?>
 <h5 class="mb-2 d-flex align-items-center gap-2">
     <i class="bi bi-exclamation-triangle-fill text-danger"></i> Clientes que precisam de mais atenção
 </h5>
@@ -355,7 +390,7 @@ require __DIR__ . '/templates/header.php';
         <p class="text-muted p-3 mb-0">Nenhum cliente com chamado em aberto no momento. 🎉</p>
     </div>
 <?php else: ?>
-<div class="grid-clientes mb-4">
+<div class="grid-clientes">
     <?php foreach ($clientesAtencao as $c): ?>
         <a href="<?= url('cliente.php?id=' . $c['id'] . '#chamados') ?>"
            class="card-cliente <?= $c['chamados_urgentes'] > 0 ? 'cliente-atencao' : '' ?>">
@@ -386,14 +421,16 @@ require __DIR__ . '/templates/header.php';
         </a>
     <?php endforeach; ?>
 </div>
-<?php endif; ?>
+<?php endif;
+$htmlClientesAtencao = ob_get_clean();
 
+ob_start(); ?>
 <h5 class="mb-2 d-flex align-items-center gap-2">
     <i class="bi bi-table text-primary"></i> Atendimento por cliente
 </h5>
 <p class="text-muted small mb-3">Mesmos números dos gráficos acima, detalhados por cliente.</p>
 
-<div class="card card-stat mb-4">
+<div class="card card-stat">
     <div class="card-body p-0">
         <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
@@ -427,6 +464,105 @@ require __DIR__ . '/templates/header.php';
         </table>
         </div>
     </div>
+</div>
+<?php $htmlTabelaAtendimento = ob_get_clean();
+
+// Catálogo de widgets disponíveis (id => título curto pro modo de
+// personalizar, largura padrão de 1 a 12, e o HTML já capturado acima).
+// "Clientes que precisam de mais atenção" mudou de lugar no padrão -- antes
+// vinha quase no fim da página, agora já aparece logo depois dos KPIs
+// (pedido direto do Kleber: "precisam subir"). Quem já personalizou o
+// próprio layout não é afetado por essa mudança de padrão.
+$larguraTerco = 4;
+$larguraMeio = 6;
+$larguraDoisTercos = 8;
+$larguraTotal = 12;
+
+$widgetsDisponiveis = [
+    'kpis_principais'     => ['span' => $larguraTotal, 'html' => $htmlKpisPrincipais],
+    'kpis_secundarios'    => ['span' => $larguraTotal, 'html' => $htmlKpisSecundarios],
+    'clientes_atencao'    => ['span' => $larguraTotal, 'html' => $htmlClientesAtencao],
+    'grafico_volume'      => ['span' => 7, 'html' => $htmlGraficoVolume],
+    'grafico_status'      => ['span' => 5, 'html' => $htmlGraficoStatus],
+    'grafico_prioridade'  => ['span' => 5, 'html' => $htmlGraficoPrioridade],
+    'grafico_tempo_medio' => ['span' => 7, 'html' => $htmlGraficoTempoMedio],
+    'tabela_atendimento'  => ['span' => $larguraTotal, 'html' => $htmlTabelaAtendimento],
+];
+if ($htmlGraficoTopClientes !== null) {
+    $widgetsDisponiveis['grafico_top_clientes'] = ['span' => $larguraTotal, 'html' => $htmlGraficoTopClientes];
+}
+
+$ordemPadrao = [
+    'kpis_principais', 'kpis_secundarios', 'clientes_atencao',
+    'grafico_volume', 'grafico_status', 'grafico_prioridade', 'grafico_tempo_medio', 'grafico_top_clientes',
+    'tabela_atendimento',
+];
+
+// Layout salvo desse usuário (se já tiver personalizado) -- widget que não
+// existe mais é ignorado, e widget novo que não estava no layout salvo (ex.:
+// se a gente adicionar mais um no futuro) entra no final, ordem padrão, em
+// vez de desaparecer silenciosamente.
+$stmtLayout = $pdo->prepare('SELECT dashboard_layout FROM usuarios WHERE id = ?');
+$stmtLayout->execute([Auth::userId()]);
+$layoutSalvo = json_decode((string) $stmtLayout->fetchColumn(), true);
+
+$widgetsOrdenados = [];
+if (is_array($layoutSalvo)) {
+    foreach ($layoutSalvo as $item) {
+        $id = $item['id'] ?? null;
+        if ($id && isset($widgetsDisponiveis[$id]) && !array_key_exists($id, $widgetsOrdenados)) {
+            $widgetsOrdenados[$id] = max($larguraMinimaWidget, min($larguraMaximaWidget, (int) ($item['span'] ?? $widgetsDisponiveis[$id]['span'])));
+        }
+    }
+}
+foreach ($ordemPadrao as $id) {
+    if (isset($widgetsDisponiveis[$id]) && !array_key_exists($id, $widgetsOrdenados)) {
+        $widgetsOrdenados[$id] = $widgetsDisponiveis[$id]['span'];
+    }
+}
+
+$tituloPagina = 'Dashboard';
+require __DIR__ . '/templates/header.php';
+?>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+    <h4 class="mb-0">Dashboard</h4>
+    <div class="d-flex align-items-center gap-2">
+        <form method="post" id="formRestaurarDashboard" onsubmit="return confirm('Isso restaura a ordem e o tamanho padrão dos widgets (só o seu layout, não afeta outros usuários). Confirma?');">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="resetar_layout_dashboard">
+            <button type="submit" class="btn btn-sm btn-outline-secondary d-none" id="btnRestaurarDashboard">Restaurar padrão</button>
+        </form>
+        <button type="button" class="btn btn-sm btn-outline-dark" id="btnPersonalizarDashboard"><i class="bi bi-grip-horizontal"></i> Personalizar</button>
+    </div>
+</div>
+<p class="text-muted small mb-3 d-none" id="avisoPersonalizarDashboard">
+    <i class="bi bi-info-circle"></i> Arraste um card pela alça <i class="bi bi-grip-vertical"></i> pra reordenar, e use os
+    botões de tamanho pra ajustar a largura. É só o SEU dashboard -- cada usuário guarda o próprio arranjo.
+</p>
+
+<form method="post" id="formLayoutDashboard">
+    <?= csrf_field() ?>
+    <input type="hidden" name="acao" value="salvar_layout_dashboard">
+    <input type="hidden" name="layout" id="campoLayoutDashboard">
+</form>
+
+<div class="dashboard-grid" id="dashboardGrid">
+    <?php foreach ($widgetsOrdenados as $id => $span): ?>
+        <div class="dashboard-widget" data-widget-id="<?= e($id) ?>" data-span="<?= $span ?>" style="grid-column: span <?= $span ?>;">
+            <div class="dashboard-widget-controles">
+                <span class="dashboard-widget-alca" title="Arrastar pra reordenar"><i class="bi bi-grip-vertical"></i> Arrastar</span>
+                <div class="dashboard-widget-tamanhos" role="group">
+                    <?php foreach ([$larguraTerco => '1/3', $larguraMeio => '1/2', $larguraDoisTercos => '2/3', $larguraTotal => 'Total'] as $opcaoSpan => $label): ?>
+                        <button type="button" class="dashboard-widget-tamanho-btn <?= $span === $opcaoSpan ? 'active' : '' ?>" data-span="<?= $opcaoSpan ?>"><?= $label ?></button>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="dashboard-widget-conteudo">
+                <?= $widgetsDisponiveis[$id]['html'] ?>
+            </div>
+        </div>
+    <?php endforeach; ?>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -570,6 +706,95 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+});
+</script>
+
+<script>
+// Dashboard customizável: arrastar pra reordenar + botões pra redimensionar,
+// salvando o arranjo POR USUÁRIO (pedido do Kleber: "não dá pra ficar te
+// pedindo isso" -- cada um ajusta o próprio dashboard sem precisar de mim).
+document.addEventListener('DOMContentLoaded', function () {
+    var grid = document.getElementById('dashboardGrid');
+    if (!grid) return;
+
+    var btnPersonalizar = document.getElementById('btnPersonalizarDashboard');
+    var btnRestaurar = document.getElementById('btnRestaurarDashboard');
+    var aviso = document.getElementById('avisoPersonalizarDashboard');
+    var formLayout = document.getElementById('formLayoutDashboard');
+    var campoLayout = document.getElementById('campoLayoutDashboard');
+
+    function widgets() {
+        return Array.prototype.slice.call(grid.querySelectorAll('.dashboard-widget'));
+    }
+
+    function salvarLayoutAtual() {
+        var layout = widgets().map(function (w) {
+            return { id: w.getAttribute('data-widget-id'), span: parseInt(w.getAttribute('data-span'), 10) };
+        });
+        campoLayout.value = JSON.stringify(layout);
+        formLayout.submit();
+    }
+
+    function ativarModoPersonalizar(ativo) {
+        grid.classList.toggle('modo-personalizar', ativo);
+        aviso.classList.toggle('d-none', !ativo);
+        btnRestaurar.classList.toggle('d-none', !ativo);
+        widgets().forEach(function (w) {
+            w.setAttribute('draggable', ativo ? 'true' : 'false');
+        });
+    }
+
+    if (btnPersonalizar) {
+        btnPersonalizar.addEventListener('click', function () {
+            ativarModoPersonalizar(!grid.classList.contains('modo-personalizar'));
+        });
+    }
+
+    // Arrastar (HTML5 drag and drop nativo, sem biblioteca) -- solta ANTES
+    // ou DEPOIS do card mais próximo do cursor, dependendo de qual metade
+    // dele o mouse está passando por cima.
+    var arrastando = null;
+
+    grid.addEventListener('dragstart', function (e) {
+        var widget = e.target.closest('.dashboard-widget');
+        if (!widget || widget.getAttribute('draggable') !== 'true') return;
+        arrastando = widget;
+        widget.classList.add('arrastando');
+        e.dataTransfer.effectAllowed = 'move';
+    });
+
+    grid.addEventListener('dragend', function () {
+        if (arrastando) {
+            arrastando.classList.remove('arrastando');
+            arrastando = null;
+            salvarLayoutAtual();
+        }
+    });
+
+    grid.addEventListener('dragover', function (e) {
+        if (!arrastando) return;
+        e.preventDefault();
+        var alvo = e.target.closest('.dashboard-widget');
+        if (!alvo || alvo === arrastando) return;
+        var retangulo = alvo.getBoundingClientRect();
+        var depois = e.clientY > retangulo.top + retangulo.height / 2;
+        grid.insertBefore(arrastando, depois ? alvo.nextSibling : alvo);
+    });
+
+    // Botões de tamanho (1/3, 1/2, 2/3, Total) -- mudam a largura do card e
+    // já salvam na hora, igual um select com onchange.
+    grid.addEventListener('click', function (e) {
+        var botao = e.target.closest('.dashboard-widget-tamanho-btn');
+        if (!botao) return;
+        var widget = botao.closest('.dashboard-widget');
+        var span = botao.getAttribute('data-span');
+        widget.setAttribute('data-span', span);
+        widget.style.gridColumn = 'span ' + span;
+        botao.parentElement.querySelectorAll('.dashboard-widget-tamanho-btn').forEach(function (b) {
+            b.classList.toggle('active', b === botao);
+        });
+        salvarLayoutAtual();
+    });
 });
 </script>
 
