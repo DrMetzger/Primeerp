@@ -1069,6 +1069,24 @@ a.card-cliente, a.card-cliente:hover {
 .card-setor-responsavel { display: flex; align-items: center; gap: .5rem; font-size: .85rem; color: var(--ph-text-muted); }
 .card-setor-insights { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: auto; }
 
+/* Setor pode ter mais de um responsável -- avatares em fileira, levemente
+   sobrepostos, em vez de um só avatar+nome como antes. */
+.card-setor-responsavel-avatares { display: flex; }
+.card-setor-responsavel-avatares .avatar-circle {
+    width: 22px; height: 22px; font-size: .7rem;
+    border: 2px solid var(--ph-surface);
+    margin-left: -8px;
+}
+.card-setor-responsavel-avatares .avatar-circle:first-child { margin-left: 0; }
+
+/* Cada responsável de setor, dentro do modal "Gerenciar setores" -- vários
+   por setor agora, cada um com o próprio bloco de edição/avatar/convite. */
+.responsavel-setor-item {
+    background-color: var(--ph-neutral-bg);
+    border-radius: var(--ph-radius-sm);
+    padding: .75rem;
+}
+
 .card-setor-todos { align-items: center; justify-content: center; text-align: center; background-color: var(--ph-primary-light); }
 .card-setor-todos .card-setor-topo { justify-content: center; }
 

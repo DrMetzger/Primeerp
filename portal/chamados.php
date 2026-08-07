@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
         // Título padronizado em MAIÚSCULAS -- pedido do Kleber pra não ter
         // cada chamado com uma capitalização diferente ("Erro no sistema",
         // "ERRO NO SISTEMA", "erro no sistema" tudo misturado na listagem).
-        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, aberto_por_setor_responsavel_id, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
             mb_strtoupper($titulo, 'UTF-8'),
@@ -48,6 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
             $_POST['prioridade'] ?? 'media',
             'cliente',
             ClienteAuth::isMaster() ? 'master' : 'setor',
+            ClienteAuth::isMaster() ? null : ClienteAuth::setorResponsavelId(),
             $setorIdNovoChamado,
         ]);
         $chamadoId = (int) $pdo->lastInsertId();
@@ -87,22 +88,47 @@ $chamados = $stmt->fetchAll();
 // e só aparece se esse cliente tiver algum setor cadastrado. Mesma ideia
 // (e mesmas subconsultas de insight) do painel espelho em cliente.php.
 $setoresPortal = [];
+$responsaveisPorSetorIdPortal = [];
 if (ClienteAuth::isMaster()) {
     $setoresPortal = $pdo->prepare('
         SELECT
             s.*,
-            sr.nome AS responsavel_nome, sr.email AS responsavel_email, sr.foto_perfil AS responsavel_foto,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id) AS chamados_total,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe")) AS chamados_pendentes,
             (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe") AND ch.prioridade IN ("alta","urgente")) AS chamados_urgentes,
             (SELECT AVG(TIMESTAMPDIFF(MINUTE, ch.criado_em, ch.fechado_em)) FROM chamados ch WHERE ch.setor_id = s.id AND ch.fechado_em IS NOT NULL) AS tempo_medio_min
         FROM setores s
-        LEFT JOIN setor_responsaveis sr ON sr.setor_id = s.id
         WHERE s.cliente_id = ? AND s.ativo = 1
         ORDER BY s.nome ASC
     ');
     $setoresPortal->execute([$clienteId]);
     $setoresPortal = $setoresPortal->fetchAll();
+
+    // Setor pode ter vários responsáveis -- agrupa por setor_id, mesma
+    // ideia de cliente.php. Master "participante" de um setor entra como
+    // um responsável virtual (sem id de setor_responsaveis).
+    if ($setoresPortal) {
+        $idsSetoresPortal = array_column($setoresPortal, 'id');
+        $placeholdersSetoresPortal = implode(',', array_fill(0, count($idsSetoresPortal), '?'));
+        $stmtRespPortal = $pdo->prepare("SELECT * FROM setor_responsaveis WHERE setor_id IN ($placeholdersSetoresPortal) ORDER BY nome ASC");
+        $stmtRespPortal->execute($idsSetoresPortal);
+        foreach ($stmtRespPortal->fetchAll() as $sr) {
+            $responsaveisPorSetorIdPortal[$sr['setor_id']][] = $sr;
+        }
+        $stmtClienteInfoPortal = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil FROM clientes WHERE id = ?');
+        $stmtClienteInfoPortal->execute([$clienteId]);
+        $clienteInfoPortal = $stmtClienteInfoPortal->fetch();
+        foreach ($setoresPortal as $s) {
+            if ($s['master_participa']) {
+                $responsaveisPorSetorIdPortal[$s['id']] ??= [];
+                array_unshift($responsaveisPorSetorIdPortal[$s['id']], [
+                    'nome' => $clienteInfoPortal['contato_nome'] ?: $clienteInfoPortal['nome'],
+                    'email' => $clienteInfoPortal['contato_email'],
+                    'foto_perfil' => resolver_avatar_por_email($pdo, $clienteInfoPortal['contato_email'], $clienteInfoPortal['foto_perfil']),
+                ]);
+            }
+        }
+    }
 }
 $chamadosSemSetorPortal = ClienteAuth::isMaster() ? count(array_filter($chamados, fn ($c) => $c['setor_id'] === null)) : 0;
 
@@ -136,9 +162,14 @@ require __DIR__ . '/../templates/portal_header.php';
             <div class="card-setor <?= (int) $s['chamados_urgentes'] > 0 ? 'setor-atencao' : '' ?>" data-setor-filtro="<?= $s['id'] ?>" role="button" tabindex="0">
                 <div class="card-setor-topo"><span class="fw-semibold"><?= e($s['nome']) ?></span></div>
                 <div class="card-setor-responsavel">
-                    <?php if ($s['responsavel_nome']): ?>
-                        <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
-                        <span><?= e($s['responsavel_nome']) ?></span>
+                    <?php $membrosSetorPortal = $responsaveisPorSetorIdPortal[$s['id']] ?? []; ?>
+                    <?php if ($membrosSetorPortal): ?>
+                        <div class="card-setor-responsavel-avatares">
+                            <?php foreach (array_slice($membrosSetorPortal, 0, 3) as $m): ?>
+                                <?= avatar_html($m['nome'], resolver_avatar_por_email($pdo, $m['email'], $m['foto_perfil']), 'cliente') ?>
+                            <?php endforeach; ?>
+                        </div>
+                        <span><?= e($membrosSetorPortal[0]['nome']) ?><?= count($membrosSetorPortal) > 1 ? ' e mais ' . (count($membrosSetorPortal) - 1) : '' ?></span>
                     <?php else: ?>
                         <span class="text-muted small"><i class="bi bi-person-x"></i> Sem responsável cadastrado</span>
                     <?php endif; ?>

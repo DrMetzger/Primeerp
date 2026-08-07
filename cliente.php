@@ -173,8 +173,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($nomeSetor === '') {
             flash_set('erro', 'Informe o nome do setor.');
         } else {
-            $pdo->prepare('UPDATE setores SET nome = ?, ativo = ? WHERE id = ? AND cliente_id = ?')
-                ->execute([$nomeSetor, isset($_POST['ativo']) ? 1 : 0, $setorId, $clienteId]);
+            // master_participa: o contato master do cliente também conta
+            // como responsável desse setor, sem precisar de um cadastro
+            // duplicado em setor_responsaveis com o mesmo e-mail dele.
+            $pdo->prepare('UPDATE setores SET nome = ?, ativo = ?, master_participa = ? WHERE id = ? AND cliente_id = ?')
+                ->execute([$nomeSetor, isset($_POST['ativo']) ? 1 : 0, isset($_POST['master_participa']) ? 1 : 0, $setorId, $clienteId]);
             flash_set('sucesso', 'Setor atualizado.');
         }
     }
@@ -193,7 +196,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($acao === 'salvar_responsavel_setor') {
+    // Setor pode ter VÁRIOS responsáveis -- por isso "adicionar" (sempre
+    // cria uma linha nova) e "atualizar" (edita uma linha específica, por
+    // id) são ações separadas, em vez do upsert único de antes.
+    if ($acao === 'adicionar_responsavel_setor') {
         $setorId = (int) $_POST['setor_id'];
         $confereSetor = $pdo->prepare('SELECT 1 FROM setores WHERE id = ? AND cliente_id = ?');
         $confereSetor->execute([$setorId, $clienteId]);
@@ -207,19 +213,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
-            $existente = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE setor_id = ?');
-            $existente->execute([$setorId]);
-            $responsavelId = $existente->fetchColumn();
 
             try {
-                if ($responsavelId) {
-                    $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=? WHERE id=?')
-                        ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $responsavelId]);
-                } else {
-                    $pdo->prepare('INSERT INTO setor_responsaveis (setor_id, nome, email, telefone, documento) VALUES (?, ?, ?, ?, ?)')
-                        ->execute([$setorId, $nomeResp, $emailResp, $telefoneResp, $documentoResp]);
-                    $responsavelId = (int) $pdo->lastInsertId();
-                }
+                $pdo->prepare('INSERT INTO setor_responsaveis (setor_id, nome, email, telefone, documento) VALUES (?, ?, ?, ?, ?)')
+                    ->execute([$setorId, $nomeResp, $emailResp, $telefoneResp, $documentoResp]);
+                $responsavelId = (int) $pdo->lastInsertId();
 
                 // Mesma pessoa que já é o contato master desse cliente,
                 // cadastrada também como responsável de um setor (mesmo
@@ -232,11 +230,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ->execute([$cliente['foto_perfil'], $cliente['foto_perfil_dados'], $responsavelId]);
                 }
 
-                flash_set('sucesso', 'Responsável do setor salvo.');
+                flash_set('sucesso', 'Responsável adicionado ao setor.');
+            } catch (\PDOException $e) {
+                flash_set('erro', 'Não foi possível adicionar (e-mail já usado por outro responsável de setor?).');
+            }
+        }
+    }
+
+    if ($acao === 'atualizar_responsavel_setor') {
+        $responsavelId = (int) $_POST['responsavel_id'];
+        $confereResp = $pdo->prepare('SELECT sr.id FROM setor_responsaveis sr JOIN setores s ON s.id = sr.setor_id WHERE sr.id = ? AND s.cliente_id = ?');
+        $confereResp->execute([$responsavelId, $clienteId]);
+        $nomeResp = trim($_POST['nome'] ?? '');
+        $emailResp = trim($_POST['email'] ?? '');
+
+        if (!$confereResp->fetchColumn()) {
+            flash_set('erro', 'Responsável não encontrado.');
+        } elseif ($nomeResp === '' || $emailResp === '') {
+            flash_set('erro', 'Preencha nome e e-mail do responsável.');
+        } else {
+            $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
+            $documentoResp = normalizar_documento($_POST['documento'] ?? '');
+            try {
+                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=? WHERE id=?')
+                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $responsavelId]);
+                flash_set('sucesso', 'Responsável atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro responsável de setor?).');
             }
         }
+    }
+
+    // Remove só ESSE responsável (não o setor inteiro) -- pedido do Kleber
+    // depois de passar a permitir mais de um por setor.
+    if ($acao === 'remover_responsavel_setor') {
+        $responsavelId = (int) $_POST['responsavel_id'];
+        $pdo->prepare('
+            DELETE sr FROM setor_responsaveis sr JOIN setores s ON s.id = sr.setor_id
+            WHERE sr.id = ? AND s.cliente_id = ?
+        ')->execute([$responsavelId, $clienteId]);
+        flash_set('sucesso', 'Responsável removido do setor.');
     }
 
     if ($acao === 'enviar_convite_setor') {
@@ -387,22 +420,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ?')->execute([$chamadoId]);
             flash_set('sucesso', 'Chamado sem setor vinculado.');
         } else {
-            $stmtSetorResp = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.id = ? AND s.cliente_id = ?');
-            $stmtSetorResp->execute([$novoSetorId, $clienteId]);
-            $responsavelSetor = $stmtSetorResp->fetch();
+            $stmtSetorAlvo = $pdo->prepare('SELECT id, nome, master_participa FROM setores WHERE id = ? AND cliente_id = ?');
+            $stmtSetorAlvo->execute([$novoSetorId, $clienteId]);
+            $setorAlvo = $stmtSetorAlvo->fetch();
 
-            if (!$responsavelSetor) {
-                flash_set('erro', 'Esse setor ainda não tem um responsável cadastrado -- cadastre em "Gerenciar setores" antes de atribuir chamados a ele.');
+            $stmtMembrosAlvo = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+            $stmtMembrosAlvo->execute([$novoSetorId]);
+            $membrosSetorAlvo = $stmtMembrosAlvo->fetchAll();
+
+            if (!$setorAlvo || (!$membrosSetorAlvo && !$setorAlvo['master_participa'])) {
+                flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- cadastre em "Gerenciar setores" antes de atribuir chamados a ele.');
             } else {
                 $pdo->prepare('UPDATE chamados SET setor_id = ? WHERE id = ?')->execute([$novoSetorId, $chamadoId]);
 
                 // Só avisa por e-mail se realmente MUDOU de setor (não
-                // dispara de novo se salvar o mesmo setor).
+                // dispara de novo se salvar o mesmo setor) -- avisa TODOS os
+                // responsáveis desse setor, não só um (pode ter vários).
                 if ($novoSetorId !== (int) $chamadoAlvo['setor_id']) {
-                    Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $responsavelSetor, $responsavelSetor['setor_nome']);
+                    foreach ($membrosSetorAlvo as $membro) {
+                        Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $membro, $setorAlvo['nome']);
+                    }
+                    if ($setorAlvo['master_participa'] && $cliente['contato_email']) {
+                        Notificacoes::chamadoAtribuidoSetor(
+                            ['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']],
+                            ['nome' => $cliente['contato_nome'] ?: $cliente['nome'], 'email' => $cliente['contato_email']],
+                            $setorAlvo['nome']
+                        );
+                    }
                 }
 
-                flash_set('sucesso', 'Chamado vinculado ao setor ' . $responsavelSetor['setor_nome'] . '.');
+                flash_set('sucesso', 'Chamado vinculado ao setor ' . $setorAlvo['nome'] . '.');
             }
         }
     }
@@ -475,28 +522,30 @@ if ($chamados) {
         }
     }
 
-    // Responsável ATUAL de cada setor desse cliente -- usado pra mostrar o
-    // avatar de quem respondeu/abriu pelo login de um SETOR (não master).
-    // Foto do master também passa pelo resolver (mesma pessoa pode estar
-    // cadastrada com o mesmo e-mail em mais de um lugar, ver helpers.php).
-    $responsavelPorSetorId = [];
-    $stmtRespSetores = $pdo->prepare('SELECT s.id AS setor_id, sr.nome, sr.email, sr.foto_perfil FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.cliente_id = ?');
-    $stmtRespSetores->execute([$clienteId]);
-    foreach ($stmtRespSetores->fetchAll() as $rs) {
-        $responsavelPorSetorId[$rs['setor_id']] = $rs;
+    // Qual responsável de setor EXATAMENTE abriu/respondeu -- não é mais "o
+    // responsável atual do setor" (deixou de bater desde que um setor pode
+    // ter vários responsáveis ao mesmo tempo). Foto do master também passa
+    // pelo resolver (mesma pessoa pode estar cadastrada com o mesmo e-mail
+    // em mais de um lugar, ver helpers.php).
+    $idsResponsaveisMencionados = array_unique(array_filter(array_merge(
+        array_column($chamados, 'aberto_por_setor_responsavel_id'),
+        $respostasPorChamado ? array_column(array_merge(...array_values($respostasPorChamado)), 'autor_setor_responsavel_id') : []
+    )));
+    $dadosPorResponsavelId = [];
+    if ($idsResponsaveisMencionados) {
+        $placeholdersResp = implode(',', array_fill(0, count($idsResponsaveisMencionados), '?'));
+        $stmtDadosResp = $pdo->prepare("SELECT id, nome, email, foto_perfil FROM setor_responsaveis WHERE id IN ($placeholdersResp)");
+        $stmtDadosResp->execute(array_values($idsResponsaveisMencionados));
+        foreach ($stmtDadosResp->fetchAll() as $sr) {
+            $dadosPorResponsavelId[$sr['id']] = ['nome' => $sr['nome'], 'foto' => resolver_avatar_por_email($pdo, $sr['email'], $sr['foto_perfil'])];
+        }
     }
     $fotoMaster = resolver_avatar_por_email($pdo, $cliente['contato_email'] ?? null, $cliente['foto_perfil'] ?? null);
 
     foreach ($chamados as $c) {
         $linhas = [];
 
-        // Ver comentário equivalente em portal/chamado.php: usar o
-        // responsável ATUAL do setor (não um "congelado" por mensagem) é uma
-        // simplificação aceitável, mesmo que o chamado tenha trocado de setor
-        // no meio da conversa.
-        $respSetor = $c['setor_id'] ? ($responsavelPorSetorId[$c['setor_id']] ?? null) : null;
-        $fotoSetor = $respSetor ? resolver_avatar_por_email($pdo, $respSetor['email'], $respSetor['foto_perfil']) : null;
-        $abertoPorSetor = $c['aberto_por_tipo'] === 'setor' && $respSetor;
+        $dadosAbertura = $c['aberto_por_tipo'] === 'setor' ? ($dadosPorResponsavelId[$c['aberto_por_setor_responsavel_id']] ?? null) : null;
 
         if ($c['aberto_por'] === 'equipe') {
             $autorTipo = 'equipe';
@@ -508,8 +557,8 @@ if ($chamados) {
             $foto = null;
         } else {
             $autorTipo = 'cliente';
-            $nomeAutor = $abertoPorSetor ? $respSetor['nome'] : ($cliente['contato_nome'] ?: $cliente['nome']);
-            $foto = $abertoPorSetor ? $fotoSetor : $fotoMaster;
+            $nomeAutor = $dadosAbertura['nome'] ?? ($cliente['contato_nome'] ?: $cliente['nome']);
+            $foto = $dadosAbertura['foto'] ?? $fotoMaster;
         }
 
         $linhas[] = [
@@ -522,7 +571,7 @@ if ($chamados) {
         ];
 
         foreach ($respostasPorChamado[$c['id']] ?? [] as $r) {
-            $respondeuPorSetor = $r['autor_cliente_tipo'] === 'setor' && $respSetor;
+            $dadosResposta = $r['autor_cliente_tipo'] === 'setor' ? ($dadosPorResponsavelId[$r['autor_setor_responsavel_id']] ?? null) : null;
             $linhas[] = [
                 'autor_tipo' => $r['autor_tipo'],
                 'autor_nome' => $r['autor_nome'],
@@ -533,7 +582,7 @@ if ($chamados) {
                 // nada, já que na prática quase toda resposta é de quem está/ficou
                 // responsável pelo chamado.
                 'foto' => $r['autor_tipo'] === 'cliente'
-                    ? ($respondeuPorSetor ? $fotoSetor : $fotoMaster)
+                    ? ($r['autor_cliente_tipo'] === 'setor' ? ($dadosResposta['foto'] ?? null) : $fotoMaster)
                     : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $c['responsavel_foto'] ?? null),
                 'mensagem' => $r['mensagem'],
                 'criado_em' => $r['criado_em'],
@@ -567,22 +616,48 @@ $usuarios = $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY 
 $setores = $pdo->prepare('
     SELECT
         s.*,
-        sr.id AS responsavel_id, sr.nome AS responsavel_nome, sr.email AS responsavel_email,
-        sr.telefone AS responsavel_telefone, sr.documento AS responsavel_documento,
-        sr.foto_perfil AS responsavel_foto, sr.portal_ativo AS responsavel_portal_ativo,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id) AS chamados_total,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe")) AS chamados_pendentes,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe") AND ch.prioridade IN ("alta","urgente")) AS chamados_urgentes,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status = "fechado") AS chamados_fechados,
         (SELECT AVG(TIMESTAMPDIFF(MINUTE, ch.criado_em, ch.fechado_em)) FROM chamados ch WHERE ch.setor_id = s.id AND ch.fechado_em IS NOT NULL) AS tempo_medio_min
     FROM setores s
-    LEFT JOIN setor_responsaveis sr ON sr.setor_id = s.id
     WHERE s.cliente_id = ?
     ORDER BY s.nome ASC
 ');
 $setores->execute([$clienteId]);
 $setores = $setores->fetchAll();
 $nomesSetoresPorId = array_column($setores, 'nome', 'id');
+
+// Responsáveis de cada setor, agrupados por setor_id -- um setor pode ter
+// VÁRIOS (pedido do Kleber, ex.: Financeiro com mais de uma pessoa), não é
+// mais upsert 1:1 como antes. Quando o setor tem master_participa=1, o
+// contato master também entra na lista (id null pra diferenciar de uma
+// linha real de setor_responsaveis -- ele não tem login separado, é o
+// mesmo login master de sempre só "marcado" como parte desse setor).
+$responsaveisPorSetorId = [];
+if ($setores) {
+    $idsSetores = array_column($setores, 'id');
+    $placeholdersSetores = implode(',', array_fill(0, count($idsSetores), '?'));
+    $stmtResponsaveis = $pdo->prepare("SELECT * FROM setor_responsaveis WHERE setor_id IN ($placeholdersSetores) ORDER BY nome ASC");
+    $stmtResponsaveis->execute($idsSetores);
+    foreach ($stmtResponsaveis->fetchAll() as $sr) {
+        $responsaveisPorSetorId[$sr['setor_id']][] = $sr;
+    }
+    foreach ($setores as $s) {
+        if ($s['master_participa']) {
+            $responsaveisPorSetorId[$s['id']] ??= [];
+            array_unshift($responsaveisPorSetorId[$s['id']], [
+                'id' => null,
+                'nome' => $cliente['contato_nome'] ?: $cliente['nome'],
+                'email' => $cliente['contato_email'],
+                'foto_perfil' => resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']),
+                'portal_ativo' => 1,
+                'eh_master' => true,
+            ]);
+        }
+    }
+}
 
 // Quantos chamados desse cliente não têm setor vinculado (ou porque foram
 // abertos antes dessa coluna existir, ou porque o cliente não usa setor pra
@@ -728,10 +803,14 @@ require __DIR__ . '/templates/header.php';
                             <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
                         </div>
                         <div class="card-setor-responsavel">
-                            <?php if ($s['responsavel_id']): ?>
-                                <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
-                                <span><?= e($s['responsavel_nome']) ?></span>
-                                <?php if (!$s['responsavel_portal_ativo']): ?><span class="text-muted small">(sem acesso ainda)</span><?php endif; ?>
+                            <?php $membrosSetor = $responsaveisPorSetorId[$s['id']] ?? []; ?>
+                            <?php if ($membrosSetor): ?>
+                                <div class="card-setor-responsavel-avatares">
+                                    <?php foreach (array_slice($membrosSetor, 0, 3) as $m): ?>
+                                        <?= avatar_html($m['nome'], resolver_avatar_por_email($pdo, $m['email'], $m['foto_perfil']), 'cliente') ?>
+                                    <?php endforeach; ?>
+                                </div>
+                                <span><?= e($membrosSetor[0]['nome']) ?><?= count($membrosSetor) > 1 ? ' e mais ' . (count($membrosSetor) - 1) : '' ?></span>
                             <?php else: ?>
                                 <span class="text-muted small"><i class="bi bi-person-x"></i> Sem responsável cadastrado</span>
                             <?php endif; ?>
@@ -798,8 +877,8 @@ require __DIR__ . '/templates/header.php';
                                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                                     <select name="setor_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
                                         <option value="" <?= !$c['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
-                                        <?php foreach ($setores as $s): ?>
-                                            <option value="<?= $s['id'] ?>" <?= (int) $c['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$s['responsavel_id'] ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$s['responsavel_id'] ? ' (sem responsável)' : '' ?></option>
+                                        <?php foreach ($setores as $s): $temResponsavel = $s['master_participa'] || !empty($responsaveisPorSetorId[$s['id']]); ?>
+                                            <option value="<?= $s['id'] ?>" <?= (int) $c['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$temResponsavel ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$temResponsavel ? ' (sem responsável)' : '' ?></option>
                                         <?php endforeach; ?>
                                     </select>
                                 </form>
@@ -1102,12 +1181,14 @@ require __DIR__ . '/templates/header.php';
             <p class="text-muted text-center py-4 mb-0"><i class="bi bi-diagram-3" style="font-size:2rem;"></i><br>Nenhum setor cadastrado ainda.</p>
         <?php endif; ?>
 
-        <?php foreach ($setores as $indiceSetor => $s): ?>
+        <?php foreach ($setores as $indiceSetor => $s): $membrosReais = $responsaveisPorSetorId[$s['id']] ?? []; $membrosReais = array_filter($membrosReais, fn ($m) => empty($m['eh_master'])); ?>
         <details class="setor-detalhe" <?= $indiceSetor === 0 ? 'open' : '' ?>>
             <summary>
                 <span class="fw-semibold"><?= e($s['nome']) ?></span>
                 <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
-                <span class="text-muted small">— <?= $s['responsavel_id'] ? e($s['responsavel_nome']) : 'sem responsável' ?></span>
+                <span class="text-muted small">
+                    — <?= count($membrosReais) ?> <?= count($membrosReais) === 1 ? 'responsável' : 'responsáveis' ?><?= $s['master_participa'] ? ' + master' : '' ?>
+                </span>
             </summary>
             <div class="setor-detalhe-corpo">
                 <form method="post" class="row g-2 align-items-end mb-3">
@@ -1121,79 +1202,109 @@ require __DIR__ . '/templates/header.php';
                         <label class="form-check-label" for="setorAtivo<?= $s['id'] ?>">Ativo</label>
                     </div>
                     <div class="col-md-3"><button type="submit" class="btn btn-sm btn-outline-dark w-100"><i class="bi bi-check2"></i> Salvar</button></div>
+                    <div class="col-12 form-check">
+                        <input type="checkbox" name="master_participa" id="setorMaster<?= $s['id'] ?>" class="form-check-input" value="1" <?= $s['master_participa'] ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="setorMaster<?= $s['id'] ?>">
+                            <?= e($cliente['contato_nome'] ?: $cliente['nome']) ?> (contato master) também é responsável desse setor
+                        </label>
+                    </div>
                 </form>
 
                 <hr>
-                <p class="text-muted small mb-2"><i class="bi bi-person-badge"></i> Responsável (login do setor no portal)</p>
+                <p class="text-muted small mb-2"><i class="bi bi-people"></i> Responsáveis (cada um com login próprio no portal, só desse setor)</p>
 
-                <?php if ($s['responsavel_id']): ?>
-                <div class="d-flex align-items-center gap-3 mb-3">
-                    <?= avatar_html($s['responsavel_nome'], resolver_avatar_por_email($pdo, $s['responsavel_email'], $s['responsavel_foto']), 'cliente') ?>
-                    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                <?php if (!$membrosReais): ?>
+                    <p class="text-muted small">Nenhum responsável cadastrado ainda<?= $s['master_participa'] ? ' (o master já cobre esse setor, mas fica à vontade pra adicionar mais alguém)' : '' ?>.</p>
+                <?php endif; ?>
+
+                <?php foreach ($membrosReais as $m): ?>
+                <div class="responsavel-setor-item mb-3">
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <?= avatar_html($m['nome'], resolver_avatar_por_email($pdo, $m['email'], $m['foto_perfil']), 'cliente') ?>
+                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="atualizar_avatar_setor_responsavel">
+                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="file" name="foto" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" required>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Enviar foto</button>
+                        </form>
+                    </div>
+                    <div class="galeria-avatares mb-2">
+                        <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                            <form method="post" class="d-inline">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="escolher_avatar_predefinido_setor_responsavel">
+                                <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                                <input type="hidden" name="aba_retorno" value="chamados">
+                                <input type="hidden" name="avatar" value="<?= $i ?>">
+                                <button type="submit" class="avatar-opcao" title="Usar este avatar">
+                                    <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                                </button>
+                            </form>
+                        <?php endfor; ?>
+                    </div>
+
+                    <form method="post" class="row g-2 mb-2">
                         <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="atualizar_avatar_setor_responsavel">
-                        <input type="hidden" name="responsavel_id" value="<?= $s['responsavel_id'] ?>">
+                        <input type="hidden" name="acao" value="atualizar_responsavel_setor">
                         <input type="hidden" name="aba_retorno" value="chamados">
-                        <input type="file" name="foto" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" required>
-                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Enviar foto</button>
+                        <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                        <div class="col-md-6"><label class="form-label">Nome *</label><input type="text" name="nome" class="form-control" value="<?= e($m['nome']) ?>" required></div>
+                        <div class="col-md-6"><label class="form-label">E-mail *</label><input type="email" name="email" class="form-control" value="<?= e($m['email']) ?>" required></div>
+                        <div class="col-md-6"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($m['telefone'])) ?>" placeholder="(00) 00000-0000"></div>
+                        <div class="col-md-6"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" value="<?= e($m['documento']) ?>" placeholder="Só números"></div>
+                        <div class="col-12"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar</button></div>
                     </form>
-                </div>
-                <p class="text-muted small mb-1">Ou escolha um avatar pronto:</p>
-                <div class="galeria-avatares mb-3">
-                    <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+
+                    <div class="d-flex flex-wrap gap-2">
                         <form method="post" class="d-inline">
                             <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="escolher_avatar_predefinido_setor_responsavel">
-                            <input type="hidden" name="responsavel_id" value="<?= $s['responsavel_id'] ?>">
+                            <input type="hidden" name="acao" value="enviar_convite_setor">
                             <input type="hidden" name="aba_retorno" value="chamados">
-                            <input type="hidden" name="avatar" value="<?= $i ?>">
-                            <button type="submit" class="avatar-opcao" title="Usar este avatar">
-                                <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
-                            </button>
+                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-send"></i> <?= $m['portal_ativo'] ? 'Reenviar convite' : 'Enviar convite' ?></button>
                         </form>
-                    <?php endfor; ?>
+                        <?php if ($m['portal_ativo']): ?>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual na hora. Confirma o reset?');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="resetar_senha_setor">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-key"></i> Resetar senha</button>
+                        </form>
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="desativar_portal_setor">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
+                        </form>
+                        <?php endif; ?>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Remover <?= e($m['nome']) ?> dos responsáveis desse setor?');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="remover_responsavel_setor">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Remover</button>
+                        </form>
+                    </div>
                 </div>
-                <?php endif; ?>
+                <hr>
+                <?php endforeach; ?>
 
+                <p class="text-muted small mb-1"><i class="bi bi-person-plus"></i> Adicionar mais um responsável a esse setor:</p>
                 <form method="post" class="row g-2 mb-3">
                     <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="salvar_responsavel_setor">
+                    <input type="hidden" name="acao" value="adicionar_responsavel_setor">
                     <input type="hidden" name="aba_retorno" value="chamados">
                     <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <div class="col-md-6"><label class="form-label">Nome *</label><input type="text" name="nome" class="form-control" value="<?= e($s['responsavel_nome']) ?>" required></div>
-                    <div class="col-md-6"><label class="form-label">E-mail *</label><input type="email" name="email" class="form-control" value="<?= e($s['responsavel_email']) ?>" required></div>
-                    <div class="col-md-6"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($s['responsavel_telefone'])) ?>" placeholder="(00) 00000-0000"></div>
-                    <div class="col-md-6"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" value="<?= e($s['responsavel_documento']) ?>" placeholder="Só números"></div>
-                    <div class="col-12"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar responsável</button></div>
+                    <div class="col-md-6"><label class="form-label">Nome *</label><input type="text" name="nome" class="form-control" required></div>
+                    <div class="col-md-6"><label class="form-label">E-mail *</label><input type="email" name="email" class="form-control" required></div>
+                    <div class="col-md-6"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" placeholder="(00) 00000-0000"></div>
+                    <div class="col-md-6"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" placeholder="Só números"></div>
+                    <div class="col-12"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-plus-lg"></i> Adicionar responsável</button></div>
                 </form>
-
-                <?php if ($s['responsavel_id']): ?>
-                <div class="d-flex flex-wrap gap-2 mb-3">
-                    <form method="post" class="d-inline">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="enviar_convite_setor">
-                        <input type="hidden" name="aba_retorno" value="chamados">
-                        <input type="hidden" name="responsavel_id" value="<?= $s['responsavel_id'] ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-send"></i> <?= $s['responsavel_portal_ativo'] ? 'Reenviar convite' : 'Enviar convite' ?></button>
-                    </form>
-                    <?php if ($s['responsavel_portal_ativo']): ?>
-                    <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual na hora. Confirma o reset?');">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="resetar_senha_setor">
-                        <input type="hidden" name="aba_retorno" value="chamados">
-                        <input type="hidden" name="responsavel_id" value="<?= $s['responsavel_id'] ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-key"></i> Resetar senha</button>
-                    </form>
-                    <form method="post" class="d-inline">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="desativar_portal_setor">
-                        <input type="hidden" name="aba_retorno" value="chamados">
-                        <input type="hidden" name="responsavel_id" value="<?= $s['responsavel_id'] ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
-                    </form>
-                    <?php endif; ?>
-                </div>
-                <?php endif; ?>
 
                 <hr>
                 <form method="post" onsubmit="return confirm('Excluir o setor &quot;<?= e($s['nome']) ?>&quot;? Os chamados dele continuam salvos, só ficam sem setor vinculado.');">

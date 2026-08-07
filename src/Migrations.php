@@ -260,6 +260,23 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Setor pode ter VÁRIOS responsáveis (não só 1) -- pedido do Kleber
+        // depois de setores como Financeiro precisarem de mais de uma
+        // pessoa. E o contato MASTER pode "participar" de um setor também,
+        // sem precisar de um cadastro duplicado com o mesmo e-mail dele só
+        // pra aparecer como responsável -- daí esse flag por setor, em vez
+        // de mais uma linha em setor_responsaveis.
+        $pdo->exec("ALTER TABLE setores ADD COLUMN IF NOT EXISTS master_participa TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Contato master do cliente também é responsável desse setor' AFTER ativo");
+
+        // Quem exatamente (qual responsável de setor) abriu/respondeu, pra
+        // mostrar o avatar certo no chat -- antes de ter mais de um
+        // responsável por setor, dava pra aproximar usando \"o responsável
+        // atual do setor\"; com vários, isso deixaria de bater. NULL = aberto
+        // pelo master, pela equipe, ou registro de antes dessa coluna
+        // existir (cai pro comportamento antigo).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS aberto_por_setor_responsavel_id INT NULL COMMENT 'Qual setor_responsaveis abriu, quando aberto_por_tipo=setor' AFTER aberto_por_tipo");
+        $pdo->exec("ALTER TABLE chamado_respostas ADD COLUMN IF NOT EXISTS autor_setor_responsavel_id INT NULL COMMENT 'Qual setor_responsaveis respondeu, quando autor_cliente_tipo=setor' AFTER autor_cliente_tipo");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS chamados (
                 id INT AUTO_INCREMENT PRIMARY KEY,

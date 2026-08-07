@@ -26,10 +26,11 @@ if (ClienteAuth::isMaster()) {
 }
 $chamado = $stmt->fetch();
 
-$stmtCliente = $pdo->prepare('SELECT foto_perfil, contato_email FROM clientes WHERE id = ?');
+$stmtCliente = $pdo->prepare('SELECT nome, foto_perfil, contato_nome, contato_email FROM clientes WHERE id = ?');
 $stmtCliente->execute([$clienteId]);
 $clienteInfo = $stmtCliente->fetch();
 $fotoPerfilCliente = resolver_avatar_por_email($pdo, $clienteInfo['contato_email'] ?? null, $clienteInfo['foto_perfil'] ?? null);
+$nomeMasterCliente = ($clienteInfo['contato_nome'] ?? '') ?: ($clienteInfo['nome'] ?? '');
 
 if (!$chamado) {
     http_response_code(404);
@@ -49,21 +50,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
         $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ? AND cliente_id = ?')->execute([$chamadoId, $clienteId]);
         flash_set('sucesso', 'Chamado sem setor vinculado.');
     } else {
-        $stmtSetorResp = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setores s JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.id = ? AND s.cliente_id = ?');
-        $stmtSetorResp->execute([$novoSetorId, $clienteId]);
-        $responsavelSetor = $stmtSetorResp->fetch();
+        $stmtSetorAlvoPortal = $pdo->prepare('SELECT id, nome, master_participa FROM setores WHERE id = ? AND cliente_id = ?');
+        $stmtSetorAlvoPortal->execute([$novoSetorId, $clienteId]);
+        $setorAlvoPortal = $stmtSetorAlvoPortal->fetch();
 
-        if (!$responsavelSetor) {
-            flash_set('erro', 'Esse setor ainda não tem um responsável cadastrado -- cadastre um antes de atribuir chamados a ele.');
+        $stmtMembrosAlvoPortal = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+        $stmtMembrosAlvoPortal->execute([$novoSetorId]);
+        $membrosAlvoPortal = $stmtMembrosAlvoPortal->fetchAll();
+
+        if (!$setorAlvoPortal || (!$membrosAlvoPortal && !$setorAlvoPortal['master_participa'])) {
+            flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- cadastre um antes de atribuir chamados a ele.');
         } else {
             $setorAntigoId = (int) $chamado['setor_id'];
             $pdo->prepare('UPDATE chamados SET setor_id = ? WHERE id = ? AND cliente_id = ?')->execute([$novoSetorId, $chamadoId, $clienteId]);
 
             if ($novoSetorId !== $setorAntigoId) {
-                Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $responsavelSetor, $responsavelSetor['setor_nome']);
+                foreach ($membrosAlvoPortal as $membro) {
+                    Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $membro, $setorAlvoPortal['nome']);
+                }
+                if ($setorAlvoPortal['master_participa'] && $clienteInfo['contato_email']) {
+                    Notificacoes::chamadoAtribuidoSetor(
+                        ['id' => $chamadoId, 'titulo' => $chamado['titulo']],
+                        ['nome' => $nomeMasterCliente, 'email' => $clienteInfo['contato_email']],
+                        $setorAlvoPortal['nome']
+                    );
+                }
             }
 
-            flash_set('sucesso', 'Chamado vinculado ao setor ' . $responsavelSetor['setor_nome'] . '.');
+            flash_set('sucesso', 'Chamado vinculado ao setor ' . $setorAlvoPortal['nome'] . '.');
         }
     }
 
@@ -92,8 +106,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
     $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
 
     if ($mensagem !== '' || $temAnexo) {
-        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_cliente_tipo, mensagem) VALUES (?, ?, ?, ?, ?)')
-            ->execute([$chamadoId, 'cliente', ClienteAuth::clienteNome(), ClienteAuth::isMaster() ? 'master' : 'setor', $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_cliente_tipo, autor_setor_responsavel_id, mensagem) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([
+                $chamadoId, 'cliente', ClienteAuth::clienteNome(),
+                ClienteAuth::isMaster() ? 'master' : 'setor',
+                ClienteAuth::isMaster() ? null : ClienteAuth::setorResponsavelId(),
+                $mensagem !== '' ? $mensagem : '(anexo enviado)',
+            ]);
         $respostaId = (int) $pdo->lastInsertId();
         // (Cliente não tem usuario_id de equipe -- autor_usuario_id fica NULL aqui, o que é correto.)
 
@@ -138,43 +157,44 @@ if ($idsAutoresEquipe) {
     }
 }
 
-// Responsável ATUAL do setor do chamado (se tiver) -- usado como autor das
-// mensagens de quem respondeu pelo login de SETOR (não master). É uma
-// aproximação: se o chamado trocou de setor no meio da conversa (ver
-// atribuir_setor_chamado), uma resposta antiga de um setor respondida antes
-// da troca passa a mostrar o responsável do setor ATUAL, não do de então --
-// caso raro, aceitável pelo ganho de simplicidade (não precisa guardar o
-// setor "congelado" em cada resposta).
-$responsavelSetorAtual = null;
-$fotoSetorAtual = null;
-if ($chamado['setor_id']) {
-    $stmtRespSetor = $pdo->prepare('SELECT nome, email, foto_perfil FROM setor_responsaveis WHERE setor_id = ?');
-    $stmtRespSetor->execute([$chamado['setor_id']]);
-    $responsavelSetorAtual = $stmtRespSetor->fetch() ?: null;
-    if ($responsavelSetorAtual) {
-        $fotoSetorAtual = resolver_avatar_por_email($pdo, $responsavelSetorAtual['email'], $responsavelSetorAtual['foto_perfil']);
+// Qual responsável de setor EXATAMENTE abriu/respondeu (não mais "o
+// responsável atual do setor" -- desde que um setor pode ter vários
+// responsáveis ao mesmo tempo, essa aproximação deixou de bater). Uma
+// resposta/abertura de antes dessas colunas existirem cai pro fallback
+// (letra genérica), já que não tem como saber quem foi.
+$idsResponsaveisMencionados = array_unique(array_filter(array_merge(
+    [$chamado['aberto_por_setor_responsavel_id']],
+    array_column($respostas, 'autor_setor_responsavel_id')
+)));
+$dadosPorResponsavelId = [];
+if ($idsResponsaveisMencionados) {
+    $placeholdersResp = implode(',', array_fill(0, count($idsResponsaveisMencionados), '?'));
+    $stmtDadosResp = $pdo->prepare("SELECT id, nome, email, foto_perfil FROM setor_responsaveis WHERE id IN ($placeholdersResp)");
+    $stmtDadosResp->execute(array_values($idsResponsaveisMencionados));
+    foreach ($stmtDadosResp->fetchAll() as $sr) {
+        $dadosPorResponsavelId[$sr['id']] = ['nome' => $sr['nome'], 'foto' => resolver_avatar_por_email($pdo, $sr['email'], $sr['foto_perfil'])];
     }
 }
 
 // Normaliza a mensagem de abertura + as respostas num único formato, igual
 // ao que já é feito em cliente.php -- antes a mensagem de abertura ficava
 // fora do chat, sem bolha, cor ou nome de contato.
-$abertoPorSetor = $chamado['aberto_por_tipo'] === 'setor' && $responsavelSetorAtual;
+$dadosAbertura = $chamado['aberto_por_tipo'] === 'setor' ? ($dadosPorResponsavelId[$chamado['aberto_por_setor_responsavel_id']] ?? null) : null;
 $linhasChat = [];
 $linhasChat[] = [
     'autor_tipo' => $chamado['aberto_por'] === 'equipe' ? 'equipe' : 'cliente',
     'autor_nome' => $chamado['aberto_por'] === 'equipe'
         ? ($chamado['responsavel_nome'] ?: 'Equipe PrimeERP')
-        : ($abertoPorSetor ? $responsavelSetorAtual['nome'] : ClienteAuth::clienteNome()),
+        : ($dadosAbertura['nome'] ?? $nomeMasterCliente),
     'foto' => $chamado['aberto_por'] === 'equipe'
         ? ($chamado['responsavel_foto'] ?? null)
-        : ($abertoPorSetor ? $fotoSetorAtual : $fotoPerfilCliente),
+        : ($dadosAbertura['foto'] ?? $fotoPerfilCliente),
     'mensagem' => $chamado['descricao'],
     'criado_em' => $chamado['criado_em'],
     'anexos' => $anexosPorLinha['abertura'] ?? [],
 ];
 foreach ($respostas as $r) {
-    $respondeuPorSetor = $r['autor_cliente_tipo'] === 'setor' && $responsavelSetorAtual;
+    $dadosResposta = $r['autor_cliente_tipo'] === 'setor' ? ($dadosPorResponsavelId[$r['autor_setor_responsavel_id']] ?? null) : null;
     $linhasChat[] = [
         'autor_tipo' => $r['autor_tipo'],
         'autor_nome' => $r['autor_nome'],
@@ -182,7 +202,7 @@ foreach ($respostas as $r) {
         // autor_usuario_id vinculado cai pra foto do responsável atual do
         // chamado, em vez de ficar sem foto nenhuma.
         'foto' => $r['autor_tipo'] === 'cliente'
-            ? ($respondeuPorSetor ? $fotoSetorAtual : $fotoPerfilCliente)
+            ? ($r['autor_cliente_tipo'] === 'setor' ? ($dadosResposta['foto'] ?? null) : $fotoPerfilCliente)
             : ($fotoPorUsuarioId[$r['autor_usuario_id']] ?? $chamado['responsavel_foto'] ?? null),
         'mensagem' => $r['mensagem'],
         'criado_em' => $r['criado_em'],
@@ -195,7 +215,13 @@ foreach ($respostas as $r) {
 // lugares se um dia precisar dela em mais de um ponto da página.
 $setoresPortal = [];
 if (ClienteAuth::isMaster()) {
-    $stmtSetoresPortal = $pdo->prepare('SELECT s.id, s.nome, sr.id AS responsavel_id FROM setores s LEFT JOIN setor_responsaveis sr ON sr.setor_id = s.id WHERE s.cliente_id = ? ORDER BY s.nome ASC');
+    $stmtSetoresPortal = $pdo->prepare('
+        SELECT s.id, s.nome, s.master_participa,
+            EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id) AS tem_responsavel
+        FROM setores s
+        WHERE s.cliente_id = ?
+        ORDER BY s.nome ASC
+    ');
     $stmtSetoresPortal->execute([$clienteId]);
     $setoresPortal = $stmtSetoresPortal->fetchAll();
 }
@@ -232,8 +258,8 @@ require __DIR__ . '/../templates/portal_header.php';
                     <input type="hidden" name="acao" value="atribuir_setor_chamado">
                     <select name="setor_id" class="form-select form-select-sm" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
                         <option value="" <?= !$chamado['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
-                        <?php foreach ($setoresPortal as $s): ?>
-                            <option value="<?= $s['id'] ?>" <?= (int) $chamado['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$s['responsavel_id'] ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$s['responsavel_id'] ? ' (sem responsável)' : '' ?></option>
+                        <?php foreach ($setoresPortal as $s): $temResponsavelPortal = $s['tem_responsavel'] || $s['master_participa']; ?>
+                            <option value="<?= $s['id'] ?>" <?= (int) $chamado['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$temResponsavelPortal ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$temResponsavelPortal ? ' (sem responsável)' : '' ?></option>
                         <?php endforeach; ?>
                     </select>
                 </form>
