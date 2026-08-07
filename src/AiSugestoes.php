@@ -10,7 +10,7 @@ namespace AdminPrime;
  */
 class AiSugestoes
 {
-    private const MODELO = 'gemini-2.5-flash';
+    private const MODELO = 'gemini-3-flash-preview';
 
     public static function configurada(): bool
     {
