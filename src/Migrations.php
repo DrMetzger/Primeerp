@@ -195,6 +195,13 @@ class Migrations
         // formatar_cnpj()).
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cnpj VARCHAR(20) NULL COMMENT 'CNPJ da empresa, só dígitos' AFTER nome");
 
+        // Perfil público da empresa, gerado pela IA (Gemini + busca do
+        // Google, ver AiSugestoes::pesquisarPerfilEmpresa()) -- guardado pra
+        // não precisar gastar outra chamada à API só pra reler o que já foi
+        // pesquisado antes (mesmo motivo de setor_sugestoes_ia).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_ia TEXT NULL COMMENT 'Resumo do perfil público da empresa, gerado por IA com busca' AFTER cnpj");
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_ia_gerado_em DATETIME NULL AFTER perfil_ia");
+
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS cliente_senha_tokens (
                 id INT AUTO_INCREMENT PRIMARY KEY,

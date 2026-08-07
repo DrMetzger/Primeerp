@@ -329,6 +329,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set($respostaSugestaoIa['sucesso'] ? 'sucesso' : 'erro', $respostaSugestaoIa['mensagem']);
     }
 
+    // --- Perfil público da empresa via IA + busca no Google --------------
+    // Diferente da sugestão por setor acima (que só lê dados JÁ
+    // CADASTRADOS): aqui a IA pesquisa na internet pelo nome/CNPJ da
+    // empresa. Pedido do Kleber depois de perguntar se a IA "não pode
+    // pesquisar sobre o cliente já que tem o CNPJ dela".
+    if ($acao === 'pesquisar_perfil_empresa') {
+        $ehAjaxPerfilEmpresa = ($_POST['ajax'] ?? '') === '1';
+        $resultadoPerfilEmpresa = AiSugestoes::pesquisarPerfilEmpresa($cliente['nome'], $cliente['cnpj']);
+
+        if ($resultadoPerfilEmpresa['ok']) {
+            $pdo->prepare('UPDATE clientes SET perfil_ia = ?, perfil_ia_gerado_em = NOW() WHERE id = ?')
+                ->execute([$resultadoPerfilEmpresa['texto'], $clienteId]);
+            $respostaPerfilEmpresa = [
+                'sucesso' => true,
+                'mensagem' => 'Perfil pesquisado.',
+                'perfil' => $resultadoPerfilEmpresa['texto'],
+                'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
+            ];
+        } else {
+            $respostaPerfilEmpresa = [
+                'sucesso' => false,
+                'mensagem' => 'Não foi possível pesquisar o perfil: ' . $resultadoPerfilEmpresa['erro'],
+                'perfil' => null,
+                'gerado_em' => null,
+            ];
+        }
+
+        if ($ehAjaxPerfilEmpresa) {
+            header('Content-Type: application/json');
+            echo json_encode($respostaPerfilEmpresa, JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        flash_set($respostaPerfilEmpresa['sucesso'] ? 'sucesso' : 'erro', $respostaPerfilEmpresa['mensagem']);
+    }
+
     if ($acao === 'upload_documento' && isset($_FILES['arquivo'])) {
         $erroUploadDocumento = null;
         $idDocumentoNovo = salvar_documento_upload(
@@ -1168,6 +1204,31 @@ require __DIR__ . '/templates/header.php';
                     </div>
                     <button type="submit" class="btn btn-dark mt-3">Salvar alterações</button>
                 </form>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <strong><i class="bi bi-globe"></i> Perfil público da empresa (IA)</strong>
+                    <form method="post" class="form-pesquisar-perfil-empresa">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="pesquisar_perfil_empresa">
+                        <input type="hidden" name="aba_retorno" value="visao-geral">
+                        <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $cliente['perfil_ia'] ? 'Pesquisar de novo' : 'Pesquisar com IA' ?></button>
+                    </form>
+                </div>
+                <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro.</p>
+                <div class="resultado-perfil-empresa" id="resultadoPerfilEmpresa">
+                    <?php if ($cliente['perfil_ia']): ?>
+                        <div class="card card-stat"><div class="card-body">
+                            <p class="text-muted small mb-2">Pesquisado em <?= e(formatar_data($cliente['perfil_ia_gerado_em'])) ?></p>
+                            <div style="white-space: pre-wrap;"><?= e($cliente['perfil_ia']) ?></div>
+                        </div></div>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Ainda não pesquisado.</p>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
 
@@ -2662,6 +2723,41 @@ document.addEventListener('DOMContentLoaded', function () {
                     var setorId = form.getAttribute('data-setor-id');
                     var alvo = document.getElementById('resultadoSugestaoIa' + setorId);
                     if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a sugestão: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                })
+                .finally(function () {
+                    escondercarregando();
+                });
+        });
+    });
+
+    document.querySelectorAll('.form-pesquisar-perfil-empresa').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            mostrarCarregando('Pesquisando perfil da empresa...', true);
+
+            var dados = new FormData(form);
+            dados.set('ajax', '1');
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (resp) { return resp.json(); })
+                .then(function (json) {
+                    var alvo = document.getElementById('resultadoPerfilEmpresa');
+                    if (!alvo) return;
+                    if (json.sucesso) {
+                        alvo.innerHTML = '<div class="card card-stat"><div class="card-body">'
+                            + '<p class="text-muted small mb-2">Pesquisado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
+                            + '<div style="white-space: pre-wrap;">' + escaparHtmlCalendario(json.perfil) + '</div>'
+                            + '</div></div>';
+                        var botao = form.querySelector('button[type="submit"]');
+                        if (botao) botao.innerHTML = '<i class="bi bi-stars"></i> Pesquisar de novo';
+                    } else {
+                        alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
+                    }
+                })
+                .catch(function (erro) {
+                    var alvo = document.getElementById('resultadoPerfilEmpresa');
+                    if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao pesquisar o perfil: ' + escaparHtmlCalendario(String(erro)) + '</div>';
                 })
                 .finally(function () {
                     escondercarregando();
