@@ -134,6 +134,26 @@ class ClienteAuth
         return $_SESSION['portal_setor_responsavel_id'] ?? null;
     }
 
+    /**
+     * Setor PADRÃO do master (clientes.setor_id, editado na aba Usuários do
+     * cliente) -- null se for login de setor, ou se o master ainda não tiver
+     * nenhum setor configurado. Não é uma restrição: o master continua
+     * vendo e podendo abrir chamado em QUALQUER setor da empresa, isso aqui
+     * só decide pra qual setor um chamado ABERTO POR ELE vai por padrão,
+     * quando ele não escolher outro explicitamente. SEMPRE busca no banco
+     * (mesmo motivo de clienteFoto()/podeAcessarForaDoHorario()).
+     */
+    public static function setorMasterId(): ?int
+    {
+        if (!self::isMaster()) {
+            return null;
+        }
+        $stmt = Database::connection()->prepare('SELECT setor_id FROM clientes WHERE id = ?');
+        $stmt->execute([self::clienteId()]);
+        $setorId = $stmt->fetchColumn();
+        return $setorId !== null ? (int) $setorId : null;
+    }
+
     /** Nome do setor logado (busca fresca -- pode ter sido renomeado), ou null se for o master. */
     public static function setorNome(): ?string
     {

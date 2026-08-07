@@ -294,13 +294,17 @@ require __DIR__ . '/../templates/portal_header.php';
                 </select>
             </div>
             <?php if ($setoresPortal): ?>
+            <?php $setorPadraoMasterNovoChamado = ClienteAuth::setorMasterId(); ?>
             <div class="mb-3"><label class="form-label">Setor</label>
                 <select name="setor_id" class="form-select">
-                    <option value="">Sem setor</option>
+                    <option value="" <?= !$setorPadraoMasterNovoChamado ? 'selected' : '' ?>>Sem setor</option>
                     <?php foreach ($setoresPortal as $s): ?>
-                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                        <option value="<?= $s['id'] ?>" <?= $setorPadraoMasterNovoChamado === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <?php if ($setorPadraoMasterNovoChamado): ?>
+                    <small class="text-muted">Já vem selecionado o seu setor padrão -- pode trocar pra abrir num outro setor, se for o caso.</small>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="4" required></textarea></div>

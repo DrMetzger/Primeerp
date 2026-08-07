@@ -122,11 +122,24 @@ class WhatsAppBot
             return;
         }
 
+        // Bateu direto com o telefone do MASTER (admin do cliente, vê e pode
+        // abrir chamado em QUALQUER setor, não só no dele) -- continua
+        // perguntando qual setor é o assunto, mas destaca o setor padrão
+        // dele (clientes.setor_id, ver aba Usuários) na lista, pra ele só
+        // confirmar com o número quando for esse o caso, sem perder a opção
+        // de escolher outro.
         $setoresDisponiveis = self::setoresDisponiveis($pdo, $clienteId);
         if ($setoresDisponiveis) {
             $dados['etapa'] = 'escolher_setor';
             self::atualizarConversa($pdo, $conversa['id'], $dados);
-            $lista = self::listarNumerado(array_column($setoresDisponiveis, 'nome'));
+            $stmtSetorPadraoMaster = $pdo->prepare('SELECT setor_id FROM clientes WHERE id = ?');
+            $stmtSetorPadraoMaster->execute([$clienteId]);
+            $setorPadraoMasterId = (int) $stmtSetorPadraoMaster->fetchColumn();
+            $nomesComPadrao = array_map(
+                fn ($s) => $s['nome'] . ((int) $s['id'] === $setorPadraoMasterId ? ' (seu padrão)' : ''),
+                $setoresDisponiveis
+            );
+            $lista = self::listarNumerado($nomesComPadrao);
             WhatsAppApi::enviarTexto($conversa['telefone'], "Encontrei seu cadastro: {$nomeCliente}. Qual setor é o assunto?\n\n$lista");
             return;
         }
