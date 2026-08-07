@@ -1215,10 +1215,13 @@ require __DIR__ . '/templates/header.php';
                         <?= csrf_field() ?>
                         <input type="hidden" name="acao" value="pesquisar_perfil_empresa">
                         <input type="hidden" name="aba_retorno" value="visao-geral">
-                        <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $cliente['perfil_ia'] ? 'Pesquisar de novo' : 'Pesquisar com IA' ?></button>
+                        <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configuradaBusca() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $cliente['perfil_ia'] ? 'Pesquisar de novo' : 'Pesquisar com IA' ?></button>
                     </form>
                 </div>
-                <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro.</p>
+                <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro. Usa uma chave/projeto separado da análise interna de chamados/KPIs, de propósito (essa busca depende de faturamento ativado no Google Cloud; a análise interna continua sempre gratuita).</p>
+                <?php if (!AiSugestoes::configuradaBusca()): ?>
+                    <p class="text-muted small">Busca por IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto novo, com faturamento ativado no Google Cloud pra liberar a ferramenta de busca.</p>
+                <?php endif; ?>
                 <div class="resultado-perfil-empresa" id="resultadoPerfilEmpresa">
                     <?php if ($cliente['perfil_ia']): ?>
                         <div class="card card-stat"><div class="card-body">

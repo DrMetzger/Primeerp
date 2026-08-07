@@ -95,8 +95,21 @@ define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELE
 // -- usa a API do Google Gemini (plano gratuito, pedido do Kleber pra não
 // gerar custo). Chave real só em produção (mesmo padrão do DB_PASS/SMTP_PASS
 // acima) -- em local fica em branco de propósito, pra não gastar cota
-// gerando sugestão de verdade só testando a tela.
+// gerando sugestão de verdade só testando a tela. Essa chave SÓ é usada pra
+// analisar dados JÁ CADASTRADOS (chamados/KPIs) -- nunca chama a ferramenta
+// de busca do Google, então continua 100% dentro do plano gratuito.
 define('GEMINI_API_KEY', getenv('ADMINPRIME_GEMINI_API_KEY') ?: ($isLocal ? '' : 'AQ.Ab8RN6LMT65gzPC8BDs0oFobulw8Gh0iKis5sVzHSwrozb8EeA'));
+
+// Chave SEPARADA (projeto Google Cloud diferente da de cima, de propósito)
+// só pra pesquisa de perfil público da empresa via busca do Google --
+// ativar faturamento nessa API KEY/projeto pra liberar a cota da ferramenta
+// google_search REMOVE o plano gratuito do projeto inteiro (toda chamada
+// passa a ser cobrada, mesmo dentro da cota que seria gratuita). Por isso
+// tem que ser uma chave/projeto à parte: o faturamento fica isolado só
+// aqui, sem arriscar cobrar a análise interna de chamados/KPIs (que
+// continua de graça na chave de cima). Em branco até o Kleber criar essa
+// segunda chave depois do Petronilho liberar o faturamento.
+define('GEMINI_API_KEY_BUSCA', getenv('ADMINPRIME_GEMINI_API_KEY_BUSCA') ?: '');
 
 // Token usado por cron_lembretes_treinamento.php quando o cron job é
 // disparado por URL (em vez de comando CLI) -- sem ele, qualquer um que

@@ -7,6 +7,15 @@ namespace AdminPrime;
  * direto com a API do Google Gemini (plano gratuito, pedido do Kleber pra
  * não gerar custo nenhum), mesmo espírito do WhatsAppApi: enquanto
  * GEMINI_API_KEY não estiver configurada, só avisa em vez de quebrar a tela.
+ *
+ * DUAS CHAVES DE PROPÓSITO -- não é redundância, é isolamento de custo:
+ * GEMINI_API_KEY (análise de chamados/KPIs já cadastrados) nunca chama
+ * ferramenta de busca, então continua sempre dentro do plano gratuito.
+ * GEMINI_API_KEY_BUSCA (pesquisarPerfilEmpresa(), busca na internet) usa um
+ * projeto Google Cloud SEPARADO, porque ativar faturamento pra liberar a
+ * cota da ferramenta google_search remove o plano gratuito do projeto
+ * INTEIRO (toda chamada passa a ser cobrada) -- se fosse a mesma chave, a
+ * análise interna que já funciona de graça passaria a custar também.
  */
 class AiSugestoes
 {
@@ -17,13 +26,20 @@ class AiSugestoes
         return defined('GEMINI_API_KEY') && GEMINI_API_KEY !== '';
     }
 
+    public static function configuradaBusca(): bool
+    {
+        return defined('GEMINI_API_KEY_BUSCA') && GEMINI_API_KEY_BUSCA !== '';
+    }
+
     /**
      * $prompt já vem pronto (contexto do setor montado por quem chamou --
      * cliente.php sabe os dados, essa classe só sabe falar com a API).
      * $ferramentas é a lista de "tools" do Gemini (ex.: [['google_search' =>
      * (object) []]] pra deixar o modelo pesquisar na internet antes de
      * responder -- ver pesquisarPerfilEmpresa() abaixo); vazio por padrão
-     * (só gera texto a partir do próprio prompt, sem buscar nada).
+     * (só gera texto a partir do próprio prompt, sem buscar nada). $chave é
+     * qual GEMINI_API_KEY* usar -- sempre a de análise interna por padrão;
+     * pesquisarPerfilEmpresa() é o único caller que passa a de busca.
      * Retorna sempre um array ['ok' => bool, 'texto' => ?string, 'erro' =>
      * ?string] -- diferente da versão anterior (que só devolvia null em
      * qualquer falha), pra dar pra mostrar NA TELA o motivo real quando o
@@ -31,13 +47,14 @@ class AiSugestoes
      * modelo indisponível, etc.), sem precisar ir atrás de log de servidor
      * pra descobrir por quê.
      */
-    public static function gerar(string $prompt, array $ferramentas = []): array
+    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null): array
     {
-        if (!self::configurada()) {
-            return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada (ADMINPRIME_GEMINI_API_KEY).'];
+        $chave ??= defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '';
+        if ($chave === '') {
+            return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada.'];
         }
 
-        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . GEMINI_API_KEY;
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . $chave;
 
         $corpo = ['contents' => [['parts' => [['text' => $prompt]]]]];
         if ($ferramentas) {
@@ -98,11 +115,15 @@ class AiSugestoes
      */
     public static function pesquisarPerfilEmpresa(string $nomeEmpresa, ?string $cnpj): array
     {
+        if (!self::configuradaBusca()) {
+            return ['ok' => false, 'texto' => null, 'erro' => 'Busca por IA não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto separado com faturamento ativado pra liberar a ferramenta de busca do Google.'];
+        }
+
         $prompt = 'Pesquise informações públicas sobre a empresa brasileira "' . $nomeEmpresa . '"'
             . ($cnpj ? " (CNPJ {$cnpj})" : ' (não tenho o CNPJ, use o nome e o bom senso pra achar a empresa certa -- se houver mais de uma empresa com nome parecido, diga isso explicitamente em vez de chutar uma)')
             . '. Responda em português, em tópicos curtos: ramo de atividade, porte, situação cadastral (ativa/inapta/baixada), cidade/UF da sede, e ano de fundação se encontrar. '
             . 'Se não achar informação confiável, diga isso claramente em vez de inventar.';
 
-        return self::gerar($prompt, [['google_search' => (object) []]]);
+        return self::gerar($prompt, [['google_search' => (object) []]], GEMINI_API_KEY_BUSCA);
     }
 }
