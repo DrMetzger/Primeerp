@@ -65,6 +65,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'KPI registrado.');
     }
 
+    // Calcula 4 KPIs padrão (abertos, resolvidos, urgentes, tempo médio)
+    // direto dos CHAMADOS do setor no mês escolhido -- pra quem não sabe
+    // que número digitar todo mês (pedido do Kleber). Faz upsert: se já
+    // existe um KPI com esse nome nesse mês, atualiza em vez de duplicar,
+    // e preserva a meta cadastrada manualmente (busca a meta mais recente
+    // já definida pra aquele KPI/setor, senão o valor calculado sobrescreve
+    // um número mas nunca inventa uma meta que ninguém definiu).
+    if ($acao === 'calcular_kpis_automaticos') {
+        $setorIdCalculo = (int) $_POST['setor_id'];
+        $periodoCalculo = $_POST['periodo'] . '-01';
+        $inicioPeriodo = $periodoCalculo . ' 00:00:00';
+        $fimPeriodo = date('Y-m-t 23:59:59', strtotime($periodoCalculo));
+
+        $stmtCalculo = $pdo->prepare('
+            SELECT
+                COUNT(*) AS total_abertos,
+                SUM(CASE WHEN prioridade IN ("alta", "urgente") THEN 1 ELSE 0 END) AS total_urgentes,
+                (SELECT COUNT(*) FROM chamados WHERE setor_id = ? AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS total_resolvidos,
+                (SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) FROM chamados WHERE setor_id = ? AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS tempo_medio_min
+            FROM chamados
+            WHERE setor_id = ? AND cliente_id = ? AND criado_em BETWEEN ? AND ?
+        ');
+        $stmtCalculo->execute([
+            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
+            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
+            $setorIdCalculo, $clienteId, $inicioPeriodo, $fimPeriodo,
+        ]);
+        $resultadoCalculo = $stmtCalculo->fetch();
+
+        $kpisAutomaticos = [
+            ['Chamados abertos', (int) $resultadoCalculo['total_abertos'], 'chamados'],
+            ['Chamados urgentes/alta prioridade', (int) $resultadoCalculo['total_urgentes'], 'chamados'],
+            ['Chamados resolvidos', (int) $resultadoCalculo['total_resolvidos'], 'chamados'],
+            ['Tempo médio de atendimento', $resultadoCalculo['tempo_medio_min'] !== null ? round((float) $resultadoCalculo['tempo_medio_min'], 2) : 0, 'min'],
+        ];
+
+        foreach ($kpisAutomaticos as [$nomeKpiAuto, $valorKpiAuto, $unidadeKpiAuto]) {
+            $stmtMetaAnterior = $pdo->prepare('SELECT meta FROM kpis WHERE setor_id = ? AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1');
+            $stmtMetaAnterior->execute([$setorIdCalculo, $nomeKpiAuto]);
+            $metaAnteriorKpi = $stmtMetaAnterior->fetchColumn();
+            $metaAnteriorKpi = $metaAnteriorKpi !== false ? $metaAnteriorKpi : null;
+
+            $stmtKpiExistente = $pdo->prepare('SELECT id FROM kpis WHERE setor_id = ? AND nome_kpi = ? AND periodo = ?');
+            $stmtKpiExistente->execute([$setorIdCalculo, $nomeKpiAuto, $periodoCalculo]);
+            $idKpiExistente = $stmtKpiExistente->fetchColumn();
+
+            if ($idKpiExistente) {
+                $pdo->prepare('UPDATE kpis SET valor = ?, unidade = ?, meta = COALESCE(meta, ?), observacoes = ? WHERE id = ?')
+                    ->execute([$valorKpiAuto, $unidadeKpiAuto, $metaAnteriorKpi, 'Calculado automaticamente a partir dos chamados.', $idKpiExistente]);
+            } else {
+                $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdCalculo, $nomeKpiAuto, $valorKpiAuto, $metaAnteriorKpi, $unidadeKpiAuto, $periodoCalculo, 'Calculado automaticamente a partir dos chamados.']);
+            }
+        }
+
+        flash_set('sucesso', '4 KPIs calculados automaticamente a partir dos chamados desse setor.');
+    }
+
     if ($acao === 'criar_treinamento') {
         $setorIdTreinamentoNovo = $_POST['setor_id'] ?: null;
         $tipoTreinamentoNovo = $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento';
@@ -1794,7 +1852,21 @@ require __DIR__ . '/templates/header.php';
 
                     <!-- Métricas -->
                     <div class="tab-pane" id="setorMetricas<?= $idSetorAtual ?>">
-                        <button type="button" class="btn btn-sm btn-dark mb-3 botao-novo-kpi-setor" data-setor-id="<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Registrar métrica</button>
+                        <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+                            <button type="button" class="btn btn-sm btn-dark botao-novo-kpi-setor" data-setor-id="<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Registrar métrica</button>
+                            <form method="post" class="d-flex gap-2 align-items-end">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="calcular_kpis_automaticos">
+                                <input type="hidden" name="aba_retorno" value="setores">
+                                <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                                <div>
+                                    <label class="form-label small mb-1">Calcular a partir dos chamados</label>
+                                    <input type="month" name="periodo" class="form-control form-control-sm" value="<?= date('Y-m') ?>" required>
+                                </div>
+                                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Calcular automaticamente</button>
+                            </form>
+                        </div>
+                        <p class="text-muted small">O cálculo automático usa os chamados desse setor no mês escolhido: quantos abriram, quantos foram resolvidos, quantos eram urgente/alta prioridade e o tempo médio de atendimento. Se já existir um KPI com o mesmo nome nesse mês, ele é atualizado (não duplica); uma meta cadastrada manualmente antes é preservada.</p>
                         <?php if ($kpisSetor): ?>
                         <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
