@@ -157,6 +157,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Acesso ao portal desativado.');
     }
 
+    // Avatar do MASTER -- mesmas funções já usadas pelo próprio cliente em
+    // portal/perfil.php, chamadas agora pelo lado da equipe (o Kleber pode
+    // trocar a foto do contato sem precisar pedir pro cliente entrar no
+    // portal só pra isso).
+    if ($acao === 'atualizar_avatar_master') {
+        $erroFotoMaster = processar_upload_foto_cliente($pdo, $clienteId);
+        flash_set($erroFotoMaster ? 'erro' : 'sucesso', $erroFotoMaster ?? 'Foto atualizada.');
+    }
+
+    if ($acao === 'escolher_avatar_predefinido_master') {
+        $indiceAvatarMaster = (int) ($_POST['avatar'] ?? 0);
+        if (definir_avatar_predefinido_cliente($pdo, $clienteId, $indiceAvatarMaster)) {
+            flash_set('sucesso', 'Avatar atualizado.');
+        }
+    }
+
     if ($acao === 'criar_chamado_equipe') {
         $categoriaNovoChamado = trim($_POST['categoria'] ?? '');
         if (trim($_POST['titulo'] ?? '') === '' || trim($_POST['descricao'] ?? '') === '' || $categoriaNovoChamado === '') {
@@ -834,6 +850,36 @@ require __DIR__ . '/templates/header.php';
                     </div>
                     <button type="submit" class="btn btn-dark mt-3">Salvar alterações</button>
                 </form>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <strong class="d-block mb-3">Foto do contato (avatar)</strong>
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?>
+                    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="atualizar_avatar_master">
+                        <input type="hidden" name="aba_retorno" value="visao-geral">
+                        <input type="file" name="foto" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" required>
+                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Enviar foto</button>
+                    </form>
+                </div>
+                <p class="text-muted small mb-1">Ou escolha um avatar pronto:</p>
+                <div class="galeria-avatares">
+                    <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="escolher_avatar_predefinido_master">
+                            <input type="hidden" name="aba_retorno" value="visao-geral">
+                            <input type="hidden" name="avatar" value="<?= $i ?>">
+                            <button type="submit" class="avatar-opcao" title="Usar este avatar">
+                                <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                            </button>
+                        </form>
+                    <?php endfor; ?>
+                </div>
             </div>
         </div>
 
