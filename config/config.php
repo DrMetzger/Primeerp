@@ -76,12 +76,12 @@ define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr
 
 // WhatsApp Business Platform (API oficial da Meta, direto -- sem BSP) -- bot
 // de menu guiado que abre chamado pelo WhatsApp (ver webhook_whatsapp.php,
-// src/WhatsAppBot.php, src/WhatsAppApi.php). Fica tudo em branco até o
-// Kleber terminar de configurar a conta/número na Meta; enquanto isso,
-// WhatsAppApi só registra em log em vez de chamar a API de verdade (mesmo
-// esquema do e-mail/SMTP em ambiente local).
-define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: '');
-define('WHATSAPP_PHONE_NUMBER_ID', getenv('ADMINPRIME_WHATSAPP_PHONE_NUMBER_ID') ?: '');
+// src/WhatsAppBot.php, src/WhatsAppApi.php). Número real "Prime HUB" (+55 17
+// 99205-5505) configurado em produção em 08/2026; em local fica em branco de
+// propósito (mesmo esquema do e-mail/SMTP), pra não mandar mensagem de
+// verdade só testando a tela -- WhatsAppApi só registra em log nesse caso.
+define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: ($isLocal ? '' : 'EAAOsbTpGbqABSEORJEYEaApYJCd3xwwU2HbF1GahdcjCj3ud6XRM2IcnsbYPlM0UULInZB0OPDm2MyMx1oO51jZCiWFQExiiJ2MnxnAWnhWDZA5rnIOb3V5MV0g6szAs7P5auxaQ5epbTuwqSv27WYey8VGXVQJa5usgzqiZAc1ArO6sZAUQuyJwbq9jjKgZDZD'));
+define('WHATSAPP_PHONE_NUMBER_ID', getenv('ADMINPRIME_WHATSAPP_PHONE_NUMBER_ID') ?: ($isLocal ? '' : '1251785564679814'));
 define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: '');
 // Token que a própria Meta usa pra confirmar o webhook na primeira vez
 // (Configuração > Webhook, no painel do app) -- é a gente que inventa essa
