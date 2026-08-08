@@ -306,6 +306,7 @@ class Migrations
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 telefone VARCHAR(20) NOT NULL UNIQUE COMMENT 'wa_id da Meta -- só dígitos, com DDI',
                 nome_perfil VARCHAR(150) NULL COMMENT 'Nome do perfil do WhatsApp de quem está mandando mensagem',
+                nome_pessoa VARCHAR(150) NULL COMMENT 'Nome CADASTRADO da pessoa (setor_responsaveis.nome ou clientes.contato_nome), quando identificada pelo telefone -- mais confiável que nome_perfil pra chamar a pessoa pelo nome',
                 cliente_id INT NULL,
                 setor_id INT NULL,
                 setor_responsavel_id INT NULL COMMENT 'Preenchido só quando o telefone bate com o de um responsável de setor específico (não o master)',
@@ -553,6 +554,18 @@ class Migrations
         // (aba Usuários), não mais num checkbox dentro de cada setor. Sem FK
         // de banco de propósito (mesmo padrão de chamados.setor_id acima).
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor único do contato master, ver setores -- substitui setores.master_participa' AFTER contato_documento");
+
+        // Bloqueio de acesso ao BOT DO WHATSAPP, pessoa por pessoa -- pedido
+        // do Kleber pra poder impedir alguém específico (master ou
+        // responsável de setor) de abrir chamado por lá, sem precisar
+        // desativar o cadastro inteiro (portal_ativo continua servindo pro
+        // portal web). Gerenciado na aba Usuários (cliente.php).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado_whatsapp TINYINT(1) NOT NULL DEFAULT 0 AFTER portal_ativo");
+        $pdo->exec("ALTER TABLE setor_responsaveis ADD COLUMN IF NOT EXISTS bloqueado_whatsapp TINYINT(1) NOT NULL DEFAULT 0 AFTER portal_ativo");
+        // Tabela whatsapp_conversas já existia antes de nome_pessoa nascer no
+        // CREATE TABLE acima -- garante a coluna também via ALTER, mesmo
+        // padrão de toda evolução de tabela já existente neste arquivo.
+        $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS nome_pessoa VARCHAR(150) NULL AFTER nome_perfil");
 
         // Treinamento passa a poder ser de um SETOR específico (não só do
         // cliente todo), e ganha os campos pra virar também "reunião" (tipo,

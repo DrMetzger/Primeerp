@@ -152,18 +152,21 @@ define('QUANTIDADE_AVATARES_PREDEFINIDOS', 24);
 // Categorias de chamado -- mesma lista de área que já existia no HESK (o
 // sistema de chamados antigo), pra manter a mesma linguagem que os clientes
 // já conhecem em vez de inventar uma nova.
+// Exatamente 10 categorias de propósito -- é o limite máximo de linhas de
+// uma lista interativa do WhatsApp (ver WhatsAppBot::etapaTitulo()), pedido
+// do Kleber pra categoria também virar botão/lista em vez de numerado por
+// texto. "Estoque/Custos" e "PCP" viraram uma categoria só, "Integrações"
+// saiu (usar "Geral" ou "Desenvolvimento" nesses casos).
 define('CATEGORIAS_CHAMADO', [
     'Geral',
     'Compras',
-    'Estoque/Custos',
+    'Estoque/Custos/PCP',
     'Faturamento',
     'Financeiro',
-    'PCP',
     'Gestão de Pessoal',
     'Ponto Eletrônico',
     'Fiscal',
     'Contabilidade',
-    'Integrações',
     'Desenvolvimento',
 ]);
 

@@ -72,6 +72,16 @@ foreach ($payload['entry'] ?? [] as $entry) {
             try {
                 if ($mensagem['type'] === 'text') {
                     WhatsAppBot::processarTexto($pdo, $telefone, $nomePerfil, $mensagem['text']['body'] ?? '');
+                } elseif ($mensagem['type'] === 'interactive') {
+                    // Clique em botão ou item de lista (ver WhatsAppApi::
+                    // enviarBotoes()/enviarLista()) -- trata o "id" do que
+                    // foi clicado exatamente como se a pessoa tivesse
+                    // digitado esse texto (WhatsAppBot não faz distinção).
+                    $interativo = $mensagem['interactive'] ?? [];
+                    $resposta = $interativo['button_reply'] ?? $interativo['list_reply'] ?? null;
+                    if ($resposta && isset($resposta['id'])) {
+                        WhatsAppBot::processarTexto($pdo, $telefone, $nomePerfil, $resposta['id']);
+                    }
                 } elseif (in_array($mensagem['type'], ['image', 'document'], true)) {
                     $midia = $mensagem[$mensagem['type']];
                     WhatsAppBot::processarMidia($pdo, $telefone, $nomePerfil, $midia['id'], $midia['mime_type'] ?? 'application/octet-stream', $midia['filename'] ?? null);

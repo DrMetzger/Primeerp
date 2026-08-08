@@ -611,6 +611,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Usuário removido.');
     }
 
+    // Bloqueia/libera uma PESSOA específica de abrir chamado pelo bot do
+    // WhatsApp -- não mexe no acesso dela ao portal (portal_ativo), são
+    // coisas independentes. responsavel_id vazio = é o contato master
+    // (clientes.bloqueado_whatsapp), senão é um setor_responsaveis.
+    if ($acao === 'alternar_bloqueio_whatsapp') {
+        $responsavelId = $_POST['responsavel_id'] !== '' ? (int) $_POST['responsavel_id'] : null;
+        if ($responsavelId) {
+            $pdo->prepare('UPDATE setor_responsaveis SET bloqueado_whatsapp = NOT bloqueado_whatsapp WHERE id = ? AND cliente_id = ?')
+                ->execute([$responsavelId, $clienteId]);
+        } else {
+            $pdo->prepare('UPDATE clientes SET bloqueado_whatsapp = NOT bloqueado_whatsapp WHERE id = ?')
+                ->execute([$clienteId]);
+        }
+        flash_set('sucesso', 'Acesso ao WhatsApp atualizado.');
+    }
+
     // Vincula (ou desvincula, se setor_id vier vazio) um usuário JÁ
     // cadastrado a um setor específico -- é isso que "Gerenciar setores"
     // usa pra buscar/relacionar em vez de cadastrar uma pessoa nova.
@@ -2066,7 +2082,7 @@ require __DIR__ . '/templates/header.php';
             <div class="card-body p-0">
                 <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th></th></tr></thead>
+                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th>WhatsApp</th><th></th></tr></thead>
                     <tbody>
                         <tr>
                             <td><?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?></td>
@@ -2087,6 +2103,17 @@ require __DIR__ . '/templates/header.php';
                                 </form>
                             </td>
                             <td><span class="badge bg-<?= $cliente['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $cliente['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
+                            <td>
+                                <form method="post" class="d-inline" onsubmit="return confirm('<?= $cliente['bloqueado_whatsapp'] ? 'Liberar' : 'Bloquear' ?> o acesso do master a abrir chamado pelo WhatsApp?');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="alternar_bloqueio_whatsapp">
+                                    <input type="hidden" name="aba_retorno" value="usuarios">
+                                    <input type="hidden" name="responsavel_id" value="">
+                                    <button type="submit" class="btn btn-sm <?= $cliente['bloqueado_whatsapp'] ? 'btn-outline-danger' : 'btn-outline-success' ?>" title="<?= $cliente['bloqueado_whatsapp'] ? 'Bloqueado -- clique pra liberar' : 'Liberado -- clique pra bloquear' ?>">
+                                        <i class="bi <?= $cliente['bloqueado_whatsapp'] ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i> <?= $cliente['bloqueado_whatsapp'] ? 'Bloqueado' : 'Liberado' ?>
+                                    </button>
+                                </form>
+                            </td>
                             <td class="text-muted small">Editar em "Visão geral"</td>
                         </tr>
                         <?php foreach ($usuariosCliente as $uc): ?>
@@ -2110,6 +2137,17 @@ require __DIR__ . '/templates/header.php';
                                 </form>
                             </td>
                             <td><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
+                            <td onclick="event.stopPropagation()">
+                                <form method="post" class="d-inline" onsubmit="return confirm('<?= $uc['bloqueado_whatsapp'] ? 'Liberar' : 'Bloquear' ?> o acesso de <?= e($uc['nome']) ?> a abrir chamado pelo WhatsApp?');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="alternar_bloqueio_whatsapp">
+                                    <input type="hidden" name="aba_retorno" value="usuarios">
+                                    <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
+                                    <button type="submit" class="btn btn-sm <?= $uc['bloqueado_whatsapp'] ? 'btn-outline-danger' : 'btn-outline-success' ?>" title="<?= $uc['bloqueado_whatsapp'] ? 'Bloqueado -- clique pra liberar' : 'Liberado -- clique pra bloquear' ?>">
+                                        <i class="bi <?= $uc['bloqueado_whatsapp'] ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i> <?= $uc['bloqueado_whatsapp'] ? 'Bloqueado' : 'Liberado' ?>
+                                    </button>
+                                </form>
+                            </td>
                             <td class="text-end" onclick="event.stopPropagation()">
                                 <div class="d-flex flex-wrap gap-1 justify-content-end">
                                     <form method="post" class="d-inline">
@@ -2147,7 +2185,7 @@ require __DIR__ . '/templates/header.php';
                         </tr>
                         <?php endforeach; ?>
                         <?php if (empty($usuariosCliente)): ?>
-                            <tr><td colspan="7" class="text-muted text-center py-3">Nenhum outro usuário cadastrado ainda -- só o master.</td></tr>
+                            <tr><td colspan="8" class="text-muted text-center py-3">Nenhum outro usuário cadastrado ainda -- só o master.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

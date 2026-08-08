@@ -34,6 +34,71 @@ class WhatsAppApi
     }
 
     /**
+     * Mensagem com botões de resposta rápida (a pessoa toca em vez de
+     * digitar) -- limite da própria Meta: no máximo 3 botões, título de até
+     * 20 caracteres cada. Cada botão tem um $id que volta no webhook quando
+     * clicado (ver webhook_whatsapp.php), e WhatsAppBot trata esse id
+     * exatamente como se fosse o texto digitado (mesmo "sim"/"não"/número).
+     * $botoes = [['id' => 'sim', 'titulo' => '✅ Sim, abrir'], ...]
+     */
+    public static function enviarBotoes(string $telefoneDestino, string $corpo, array $botoes): bool
+    {
+        if (!self::configurada()) {
+            error_log('WhatsApp (não configurado ainda) -- botões pra ' . $telefoneDestino . ': ' . $corpo);
+            return false;
+        }
+
+        return self::chamarGraphApi(WHATSAPP_PHONE_NUMBER_ID . '/messages', [
+            'messaging_product' => 'whatsapp',
+            'to' => $telefoneDestino,
+            'type' => 'interactive',
+            'interactive' => [
+                'type' => 'button',
+                'body' => ['text' => $corpo],
+                'action' => [
+                    'buttons' => array_map(fn ($b) => [
+                        'type' => 'reply',
+                        'reply' => ['id' => $b['id'], 'title' => mb_substr($b['titulo'], 0, 20)],
+                    ], $botoes),
+                ],
+            ],
+        ]) !== null;
+    }
+
+    /**
+     * Mensagem com lista de opções (menu que abre ao tocar num botão) --
+     * usada quando são mais de 3 opções (limite dos botões acima), até no
+     * máximo 10 linhas no total (limite da Meta). $linhas = [['id' => '1',
+     * 'titulo' => '🟢 Baixa'], ...], mesma ideia de id do enviarBotoes().
+     */
+    public static function enviarLista(string $telefoneDestino, string $corpo, string $tituloBotao, array $linhas): bool
+    {
+        if (!self::configurada()) {
+            error_log('WhatsApp (não configurado ainda) -- lista pra ' . $telefoneDestino . ': ' . $corpo);
+            return false;
+        }
+
+        return self::chamarGraphApi(WHATSAPP_PHONE_NUMBER_ID . '/messages', [
+            'messaging_product' => 'whatsapp',
+            'to' => $telefoneDestino,
+            'type' => 'interactive',
+            'interactive' => [
+                'type' => 'list',
+                'body' => ['text' => $corpo],
+                'action' => [
+                    'button' => mb_substr($tituloBotao, 0, 20),
+                    'sections' => [[
+                        'rows' => array_map(fn ($l) => [
+                            'id' => $l['id'],
+                            'title' => mb_substr($l['titulo'], 0, 24),
+                        ], $linhas),
+                    ]],
+                ],
+            ],
+        ]) !== null;
+    }
+
+    /**
      * Baixa uma mídia recebida (print/arquivo) -- a Meta manda só o ID no
      * webhook, é preciso pedir a URL de download separado (ela expira
      * rápido) e então baixar os bytes de fato.
