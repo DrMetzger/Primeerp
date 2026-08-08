@@ -89,7 +89,7 @@ define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: ($isLo
 define('WHATSAPP_VERIFY_TOKEN', getenv('ADMINPRIME_WHATSAPP_VERIFY_TOKEN') ?: 'primehub-verify-token');
 // Número (só dígitos, com DDI 55) que recebe o aviso de "novo chamado
 // aberto pelo WhatsApp" -- o celular pessoal do Kleber.
-define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: '');
+define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: ($isLocal ? '' : '5517981368201'));
 
 // IA de sugestões de melhoria por setor (aba Setores, ver src/AiSugestoes.php)
 // -- usa a API do Google Gemini (plano gratuito, pedido do Kleber pra não
