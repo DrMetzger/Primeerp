@@ -21,10 +21,21 @@ class WhatsAppBot
 {
     private const PRIORIDADES = ['baixa' => 'Baixa', 'media' => 'Média', 'alta' => 'Alta', 'urgente' => 'Urgente'];
 
+    // Anti-spam: depois de tantas tentativas de identificação sem sucesso
+    // numa mesma conversa, o número fica sem resposta do bot por um tempo
+    // (ver etapaIdentificacaoManual()) -- evita alguém sem cadastro nenhum
+    // ficar mandando lixo indefinidamente e o bot sempre respondendo.
+    private const MAX_TENTATIVAS_IDENTIFICACAO = 3;
+    private const MINUTOS_BLOQUEIO_SPAM = 30;
+
     public static function processarTexto(PDO $pdo, string $telefone, string $nomePerfil, string $texto): void
     {
         $texto = trim($texto);
         $conversa = self::obterOuCriarConversa($pdo, $telefone, $nomePerfil);
+
+        if (self::estaTemporariamenteBloqueado($conversa)) {
+            return;
+        }
 
         if (self::ehComandoCancelar($texto)) {
             self::excluirConversa($pdo, $conversa['id']);
@@ -35,6 +46,8 @@ class WhatsAppBot
         match ($conversa['etapa']) {
             'identificando' => self::etapaIdentificar($pdo, $conversa),
             'aguardando_identificacao_manual' => self::etapaIdentificacaoManual($pdo, $conversa, $texto),
+            'continuar_ou_novo' => self::etapaContinuarOuNovo($pdo, $conversa, $texto),
+            'mensagem_continuar' => self::etapaMensagemContinuar($pdo, $conversa, $texto),
             'escolher_setor' => self::etapaEscolherSetor($pdo, $conversa, $texto),
             'titulo' => self::etapaTitulo($pdo, $conversa, $texto),
             'categoria' => self::etapaCategoria($pdo, $conversa, $texto),
@@ -49,6 +62,10 @@ class WhatsAppBot
     public static function processarMidia(PDO $pdo, string $telefone, string $nomePerfil, string $mediaId, string $mimeType, ?string $nomeArquivo): void
     {
         $conversa = self::obterOuCriarConversa($pdo, $telefone, $nomePerfil);
+
+        if (self::estaTemporariamenteBloqueado($conversa)) {
+            return;
+        }
 
         if ($conversa['etapa'] !== 'anexos') {
             // Mídia chegando fora da hora certa (ex.: antes de identificar o
@@ -131,6 +148,19 @@ class WhatsAppBot
         $dados = ['cliente_id' => $clienteId, 'setor_responsavel_id' => $setorResponsavelId, 'nome_pessoa' => $nomePessoa];
         $saudacao = $nomePessoa ? ('Oi, ' . self::primeiroNome($nomePessoa) . '! 👋 ') : '👋 ';
 
+        $chamadoAberto = self::chamadoAbertoParaIdentidade($pdo, $clienteId, $setorResponsavelId);
+        if ($chamadoAberto) {
+            $dados['setor_id'] = $setorId;
+            $dados['chamado_continuar_id'] = $chamadoAberto['id'];
+            $dados['etapa'] = 'continuar_ou_novo';
+            self::atualizarConversa($pdo, $conversa['id'], $dados);
+            WhatsAppApi::enviarBotoes($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}*. Vi que você já tem o chamado *#{$chamadoAberto['id']} - {$chamadoAberto['titulo']}* em aberto. Essa mensagem é sobre ele ou é um assunto novo?", [
+                ['id' => 'continuar', 'titulo' => '📌 Mesmo assunto'],
+                ['id' => 'novo', 'titulo' => '🆕 Assunto novo'],
+            ]);
+            return;
+        }
+
         if ($setorResponsavelId) {
             // Bateu com o telefone de um responsável de setor específico --
             // igual ao login de setor no portal, já nasce vinculado a esse
@@ -180,13 +210,105 @@ class WhatsAppBot
             return;
         }
 
-        // Não achou (ou achou mais de um, ambíguo) -- essa é uma limitação
-        // conhecida da v1: não existe ainda uma fila de triagem pra chamado
-        // sem cliente identificado (só o e-mail/WhatsApp avisando a equipe
-        // pra tratar manualmente por fora do sistema).
-        Notificacoes::whatsapp(null, "⚠️ WhatsApp: {$conversa['nome_perfil']} ({$conversa['telefone']}) tentou abrir chamado mas eu não consegui identificar a empresa (\"$texto\"). Precisa de triagem manual.");
-        WhatsAppApi::enviarTexto($conversa['telefone'], '😕 Não consegui confirmar seu cadastro por aqui, mas já avisei nossa equipe -- alguém vai te chamar em breve. 🙂');
+        // Não achou (ou achou mais de um, ambíguo) -- em vez de já avisar a
+        // equipe e desistir na primeira tentativa, deixa a pessoa tentar de
+        // novo até MAX_TENTATIVAS_IDENTIFICACAO vezes. Só depois disso (ou
+        // se ela nunca souber o nome certo da empresa) é que trava
+        // temporariamente e avisa o time -- evita spam de aviso pra time por
+        // gente que só errou a digitação.
+        $tentativas = (int) $conversa['tentativas_identificacao'] + 1;
+
+        if ($tentativas >= self::MAX_TENTATIVAS_IDENTIFICACAO) {
+            $bloqueadoAte = date('Y-m-d H:i:s', time() + self::MINUTOS_BLOQUEIO_SPAM * 60);
+            self::atualizarConversa($pdo, $conversa['id'], ['tentativas_identificacao' => 0, 'bloqueado_ate' => $bloqueadoAte]);
+            Notificacoes::whatsapp(null, "🚫 WhatsApp: {$conversa['nome_perfil']} ({$conversa['telefone']}) excedeu tentativas de identificação (última tentativa: \"$texto\") e ficou bloqueado temporariamente.");
+            WhatsAppApi::enviarTexto($conversa['telefone'], '🚫 Muitas tentativas sem conseguir confirmar seu cadastro. Aguarde um pouco e tente de novo, ou fale com a PrimeERP por outro canal.');
+            return;
+        }
+
+        self::atualizarConversa($pdo, $conversa['id'], ['tentativas_identificacao' => $tentativas]);
+        WhatsAppApi::enviarTexto($conversa['telefone'], '😕 Não encontrei nenhuma empresa com esse nome. Pode digitar de novo, com o nome completo da empresa?');
+    }
+
+    private static function etapaContinuarOuNovo(PDO $pdo, array $conversa, string $texto): void
+    {
+        if (self::ehResposta($texto, ['novo', 'assunto novo', 'outro'])) {
+            self::iniciarNovoAssunto($pdo, $conversa);
+            return;
+        }
+        if (self::ehResposta($texto, ['continuar', 'mesmo assunto', 'mesmo'])) {
+            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'mensagem_continuar']);
+            WhatsAppApi::enviarTexto($conversa['telefone'], '✍️ Manda sua mensagem que eu registro no chamado.');
+            return;
+        }
+        WhatsAppApi::enviarBotoes($conversa['telefone'], 'Toca num dos botões: é sobre o chamado já aberto ou é um assunto novo?', [
+            ['id' => 'continuar', 'titulo' => '📌 Mesmo assunto'],
+            ['id' => 'novo', 'titulo' => '🆕 Assunto novo'],
+        ]);
+    }
+
+    private static function etapaMensagemContinuar(PDO $pdo, array $conversa, string $texto): void
+    {
+        if ($texto === '' || self::pareceSaudacaoOuMuitoCurto($texto)) {
+            WhatsAppApi::enviarTexto($conversa['telefone'], '🤔 Pode escrever a mensagem que quer registrar no chamado?');
+            return;
+        }
+
+        $chamadoId = (int) $conversa['chamado_continuar_id'];
+        $stmtChamado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+        $stmtChamado->execute([$chamadoId]);
+        $chamado = $stmtChamado->fetch();
+
+        if (!$chamado) {
+            self::excluirConversa($pdo, $conversa['id']);
+            WhatsAppApi::enviarTexto($conversa['telefone'], '😕 Não encontrei mais esse chamado. Manda "oi" de novo pra começar um atendimento novo.');
+            return;
+        }
+
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_cliente_tipo, autor_setor_responsavel_id, mensagem) VALUES (?, "cliente", ?, ?, ?, ?)')
+            ->execute([
+                $chamadoId,
+                $conversa['nome_pessoa'] ?: $conversa['nome_perfil'],
+                $conversa['setor_responsavel_id'] ? 'setor' : 'master',
+                $conversa['setor_responsavel_id'],
+                $texto,
+            ]);
+        recalcular_status_chamado($pdo, $chamadoId);
+
+        $stmtCliente = $pdo->prepare('SELECT nome FROM clientes WHERE id = ?');
+        $stmtCliente->execute([$chamado['cliente_id']]);
+        $nomeCliente = (string) $stmtCliente->fetchColumn();
+        Notificacoes::mensagemWhatsappChamado($chamado, $nomeCliente, $texto);
+
         self::excluirConversa($pdo, $conversa['id']);
+        WhatsAppApi::enviarTexto($conversa['telefone'], "✅ Registrado no chamado #{$chamadoId}. Nossa equipe vai ver sua mensagem e responder por aqui.");
+    }
+
+    /** Retoma o fluxo normal de abertura de chamado, sem repetir "encontrei seu cadastro" (já dito antes). */
+    private static function iniciarNovoAssunto(PDO $pdo, array $conversa): void
+    {
+        $setorResponsavelId = $conversa['setor_responsavel_id'] ? (int) $conversa['setor_responsavel_id'] : null;
+        $clienteId = (int) $conversa['cliente_id'];
+
+        if ($setorResponsavelId) {
+            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
+            WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
+            return;
+        }
+
+        $setoresDisponiveis = self::setoresDisponiveis($pdo, $clienteId);
+        if ($setoresDisponiveis) {
+            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]);
+            $linhas = [];
+            foreach (array_values($setoresDisponiveis) as $i => $s) {
+                $linhas[] = ['id' => (string) ($i + 1), 'titulo' => $s['nome']];
+            }
+            WhatsAppApi::enviarLista($conversa['telefone'], '🗂️ Beleza, novo assunto. Qual setor é o assunto?', 'Escolher setor', $linhas);
+            return;
+        }
+
+        self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
+        WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
     }
 
     private static function etapaEscolherSetor(PDO $pdo, array $conversa, string $texto): void
@@ -309,8 +431,8 @@ class WhatsAppBot
 
         $stmt = $pdo->prepare('
             INSERT INTO chamados
-                (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, aberto_por_setor_responsavel_id, origem_canal, setor_id)
-            VALUES (?, ?, ?, ?, ?, "cliente", ?, ?, "whatsapp", ?)
+                (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, aberto_por_setor_responsavel_id, origem_canal, setor_id, telefone_whatsapp)
+            VALUES (?, ?, ?, ?, ?, "cliente", ?, ?, "whatsapp", ?, ?)
         ');
         $stmt->execute([
             $conversa['cliente_id'],
@@ -321,6 +443,7 @@ class WhatsAppBot
             $conversa['setor_responsavel_id'] ? 'setor' : 'master',
             $conversa['setor_responsavel_id'],
             $conversa['setor_id'],
+            $conversa['telefone'],
         ]);
         $chamadoId = (int) $pdo->lastInsertId();
 
@@ -393,6 +516,20 @@ class WhatsAppBot
         return null;
     }
 
+    /** Chamado ainda aberto (não fechado) dessa mesma identidade -- master do cliente ou responsável de setor específico. */
+    private static function chamadoAbertoParaIdentidade(PDO $pdo, int $clienteId, ?int $setorResponsavelId): ?array
+    {
+        if ($setorResponsavelId) {
+            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE aberto_por_setor_responsavel_id = ? AND status != 'fechado' ORDER BY criado_em DESC LIMIT 1");
+            $stmt->execute([$setorResponsavelId]);
+        } else {
+            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE cliente_id = ? AND aberto_por_tipo = 'master' AND status != 'fechado' ORDER BY criado_em DESC LIMIT 1");
+            $stmt->execute([$clienteId]);
+        }
+        $chamado = $stmt->fetch();
+        return $chamado ?: null;
+    }
+
     /** Setores com pelo menos 1 responsável relacionado ou que sejam o setor do master. */
     private static function setoresDisponiveis(PDO $pdo, int $clienteId): array
     {
@@ -446,6 +583,17 @@ class WhatsAppBot
     private static function ehComandoCancelar(string $texto): bool
     {
         return in_array(mb_strtolower($texto), ['cancelar', 'cancela', 'reiniciar'], true);
+    }
+
+    /**
+     * Bloqueio temporário por anti-spam (ver MAX_TENTATIVAS_IDENTIFICACAO em
+     * etapaIdentificacaoManual()) -- fica em silêncio total enquanto durar,
+     * sem nem responder "você está bloqueado", porque isso também seria
+     * abusável por quem só quer fazer o bot gastar cota de envio de mensagem.
+     */
+    private static function estaTemporariamenteBloqueado(array $conversa): bool
+    {
+        return $conversa['bloqueado_ate'] && strtotime($conversa['bloqueado_ate']) > time();
     }
 
     /**

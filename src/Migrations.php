@@ -567,6 +567,24 @@ class Migrations
         // padrão de toda evolução de tabela já existente neste arquivo.
         $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS nome_pessoa VARCHAR(150) NULL AFTER nome_perfil");
 
+        // Telefone de quem abriu o chamado PELO BOT -- guardado no próprio
+        // chamado (não só na conversa, que é apagada ao criar o chamado)
+        // pra dar pra responder de volta no mesmo WhatsApp depois (ver
+        // Notificacoes::novaRespostaEquipe()).
+        $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS telefone_whatsapp VARCHAR(20) NULL COMMENT 'wa_id de quem abriu esse chamado pelo bot do WhatsApp' AFTER origem_canal");
+
+        // Continuidade de atendimento -- quando a pessoa já tem chamado
+        // aberto, o bot pergunta se é sobre ele ou um assunto novo antes de
+        // sair pedindo categoria/prioridade de novo (chamado_continuar_id
+        // guarda qual chamado está em jogo enquanto ela decide/escreve).
+        $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS chamado_continuar_id INT NULL AFTER setor_id");
+
+        // Anti-spam: número que erra a identificação (nome de empresa) demais
+        // vezes fica temporariamente sem resposta do bot -- ver
+        // WhatsAppBot::etapaIdentificacaoManual().
+        $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS tentativas_identificacao INT NOT NULL DEFAULT 0 AFTER nome_pessoa");
+        $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS bloqueado_ate DATETIME NULL AFTER tentativas_identificacao");
+
         // Treinamento passa a poder ser de um SETOR específico (não só do
         // cliente todo), e ganha os campos pra virar também "reunião" (tipo,
         // horário e link de call) -- pedido do Kleber pra ter uma agenda

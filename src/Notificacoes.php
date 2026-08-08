@@ -108,22 +108,54 @@ class Notificacoes
 
     public static function novaRespostaEquipe(array $chamado, array $cliente): void
     {
-        if (!$cliente['contato_email']) {
-            return;
+        // E-mail e WhatsApp são INDEPENDENTES aqui de propósito -- antes essa
+        // função saía (return) se não tivesse e-mail, o que também cancelava
+        // o WhatsApp por engano. Chamado aberto pelo bot tem
+        // telefone_whatsapp preenchido (ver WhatsAppBot::criarChamado()),
+        // então a resposta da equipe continua no MESMO canal por onde o
+        // chamado foi aberto, em vez de só por e-mail.
+        if ($cliente['contato_email']) {
+            $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
+            // Pela PESSOA (contato/key user), não pela empresa -- "Olá,
+            // GEOMAQ" é impessoal (mesmo ajuste feito na tela de criar senha
+            // e no portal).
+            $nomeSaudacao = $cliente['contato_nome'] ?: $cliente['nome'];
+
+            $corpo = "
+                <p>Olá, " . e($nomeSaudacao) . ".</p>
+                <p>Você recebeu uma nova resposta no chamado <strong>" . e($chamado['titulo']) . "</strong>.</p>
+                <p><a href=\"$link\">Ver resposta no portal</a></p>
+            ";
+
+            Mailer::enviar($cliente['contato_email'], "Nova resposta no seu chamado: {$chamado['titulo']}", $corpo);
         }
 
-        $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
-        // Pela PESSOA (contato/key user), não pela empresa -- "Olá, GEOMAQ"
-        // é impessoal (mesmo ajuste feito na tela de criar senha e no portal).
-        $nomeSaudacao = $cliente['contato_nome'] ?: $cliente['nome'];
+        if (!empty($chamado['telefone_whatsapp'])) {
+            WhatsAppApi::enviarTexto($chamado['telefone_whatsapp'], "💬 Você recebeu uma nova resposta no chamado *#{$chamado['id']} - {$chamado['titulo']}*. Pode responder aqui mesmo pra continuar.");
+        }
+    }
+
+    /**
+     * Cliente mandou uma mensagem NOVA (não é abertura de chamado) pelo
+     * WhatsApp num chamado que já existia -- ver
+     * WhatsAppBot::etapaMensagemContinuar(). Mesmo padrão de e-mail +
+     * WhatsApp pra equipe de novoChamado().
+     */
+    public static function mensagemWhatsappChamado(array $chamado, string $nomeCliente, string $mensagem): void
+    {
+        $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $chamado['cliente_id'] . '#chamados');
 
         $corpo = "
-            <p>Olá, " . e($nomeSaudacao) . ".</p>
-            <p>Você recebeu uma nova resposta no chamado <strong>" . e($chamado['titulo']) . "</strong>.</p>
-            <p><a href=\"$link\">Ver resposta no portal</a></p>
+            <p>Nova mensagem via WhatsApp no chamado <strong>" . e($chamado['titulo']) . "</strong>, de <strong>" . e($nomeCliente) . "</strong>.</p>
+            <p><strong>Mensagem:</strong><br>" . nl2br(e($mensagem)) . "</p>
+            <p><a href=\"$link\">Ver no Prime Hub</a></p>
         ";
 
-        Mailer::enviar($cliente['contato_email'], "Nova resposta no seu chamado: {$chamado['titulo']}", $corpo);
+        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+            Mailer::enviar($emailEquipe, "Nova mensagem (WhatsApp) no chamado #{$chamado['id']}: {$chamado['titulo']}", $corpo);
+        }
+
+        self::whatsapp(null, "💬 Nova mensagem via WhatsApp no chamado #{$chamado['id']} ({$chamado['titulo']}), de {$nomeCliente}: \"{$mensagem}\"");
     }
 
     /**
