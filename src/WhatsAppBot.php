@@ -186,8 +186,12 @@ class WhatsAppBot
 
     private static function etapaTitulo(PDO $pdo, array $conversa, string $texto): void
     {
-        if ($texto === '') {
-            WhatsAppApi::enviarTexto($conversa['telefone'], 'Manda um resumo rápido do que está acontecendo, por favor.');
+        if ($texto === '' || self::pareceSaudacaoOuMuitoCurto($texto)) {
+            // Pega gente que ainda está só "cumprimentando" o atendimento (ou
+            // que respondeu de qualquer jeito sem reparar na pergunta) --
+            // sem essa checagem, "oi" virava o título do chamado de verdade
+            // (aconteceu no primeiro teste real, ver histórico).
+            WhatsAppApi::enviarTexto($conversa['telefone'], 'Isso parece só uma saudação. Me conta rapidinho qual é o problema -- isso vai virar o título do chamado:');
             return;
         }
 
@@ -226,8 +230,8 @@ class WhatsAppBot
 
     private static function etapaDescricao(PDO $pdo, array $conversa, string $texto): void
     {
-        if ($texto === '') {
-            WhatsAppApi::enviarTexto($conversa['telefone'], 'Pode escrever com suas palavras mesmo, só preciso de uma descrição.');
+        if ($texto === '' || self::pareceSaudacaoOuMuitoCurto($texto)) {
+            WhatsAppApi::enviarTexto($conversa['telefone'], 'Preciso de uma descrição um pouco melhor do problema, pode escrever com suas palavras mesmo.');
             return;
         }
 
@@ -411,6 +415,27 @@ class WhatsAppBot
     private static function ehComandoCancelar(string $texto): bool
     {
         return in_array(mb_strtolower($texto), ['cancelar', 'cancela', 'reiniciar'], true);
+    }
+
+    /**
+     * Filtra saudação solta ("oi", "bom dia"...) ou resposta curta demais pra
+     * virar título/descrição de chamado -- sem isso, uma saudação digitada
+     * na hora errada (ex.: repetindo o "oi" inicial sem reparar que já
+     * virou outra pergunta) vira literalmente o título do chamado.
+     */
+    private static function pareceSaudacaoOuMuitoCurto(string $texto): bool
+    {
+        $normalizado = mb_strtolower(trim($texto), 'UTF-8');
+        if (mb_strlen($normalizado, 'UTF-8') < 4) {
+            return true;
+        }
+
+        $saudacoes = [
+            'oi', 'ola', 'olá', 'opa', 'eae', 'e ai', 'e aí', 'oii', 'oie',
+            'bom dia', 'boa tarde', 'boa noite', 'tudo bem', 'tudo bom',
+            'blz', 'beleza', 'hello', 'hi', 'alo', 'alô',
+        ];
+        return in_array($normalizado, $saudacoes, true);
     }
 
     private static function ehResposta(string $texto, array $opcoes): bool
