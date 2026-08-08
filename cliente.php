@@ -65,6 +65,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'KPI registrado.');
     }
 
+    if ($acao === 'editar_kpi') {
+        $stmt = $pdo->prepare('UPDATE kpis SET setor_id = ?, nome_kpi = ?, valor = ?, meta = ?, unidade = ?, periodo = ?, observacoes = ? WHERE id = ? AND cliente_id = ?');
+        $stmt->execute([
+            $_POST['setor_id'] ?: null,
+            trim($_POST['nome_kpi']),
+            str_replace(',', '.', $_POST['valor']),
+            $_POST['meta'] !== '' ? str_replace(',', '.', $_POST['meta']) : null,
+            trim($_POST['unidade']) ?: null,
+            $_POST['periodo'] . '-01',
+            trim($_POST['observacoes']) ?: null,
+            (int) $_POST['kpi_id'],
+            $clienteId,
+        ]);
+        flash_set('sucesso', 'KPI atualizado.');
+    }
+
+    if ($acao === 'excluir_kpi') {
+        $pdo->prepare('DELETE FROM kpis WHERE id = ? AND cliente_id = ?')
+            ->execute([(int) $_POST['kpi_id'], $clienteId]);
+        flash_set('sucesso', 'KPI removido.');
+    }
+
     // Calcula 4 KPIs padrão (abertos, resolvidos, urgentes, tempo médio)
     // direto dos CHAMADOS do setor no mês escolhido -- pra quem não sabe
     // que número digitar todo mês (pedido do Kleber). Faz upsert: se já
@@ -1600,7 +1622,7 @@ require __DIR__ . '/templates/header.php';
                 <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead>
-                    <tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th></tr>
+                    <tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th><th></th></tr>
                     </thead>
                     <tbody>
                     <?php foreach ($kpisGerais as $k): ?>
@@ -1615,10 +1637,18 @@ require __DIR__ . '/templates/header.php';
                                 <?php else: ?>-<?php endif; ?>
                             </td>
                             <td class="text-muted small"><?= e($k['observacoes']) ?></td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"
+                                    data-id="<?= $k['id'] ?>" data-nome="<?= e($k['nome_kpi']) ?>" data-valor="<?= e($k['valor']) ?>"
+                                    data-meta="<?= e($k['meta'] ?? '') ?>" data-unidade="<?= e($k['unidade']) ?>"
+                                    data-periodo="<?= date('Y-m', strtotime($k['periodo'])) ?>" data-setor-id="<?= $k['setor_id'] ?? '' ?>"
+                                    data-observacoes="<?= e($k['observacoes']) ?>" data-aba-retorno="kpis"
+                                ><i class="bi bi-pencil"></i></button>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if (empty($kpisGerais)): ?>
-                        <tr><td colspan="5" class="text-muted text-center py-3">Nenhum KPI geral registrado ainda.</td></tr>
+                        <tr><td colspan="6" class="text-muted text-center py-3">Nenhum KPI geral registrado ainda.</td></tr>
                     <?php endif; ?>
                     </tbody>
                 </table>
@@ -1953,7 +1983,7 @@ require __DIR__ . '/templates/header.php';
                         <?php if ($kpisSetor): ?>
                         <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
-                            <thead><tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th></tr></thead>
+                            <thead><tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th><th></th></tr></thead>
                             <tbody>
                             <?php foreach ($kpisSetor as $k): ?>
                                 <tr>
@@ -1967,6 +1997,14 @@ require __DIR__ . '/templates/header.php';
                                         <?php else: ?>-<?php endif; ?>
                                     </td>
                                     <td class="text-muted small"><?= e($k['observacoes']) ?></td>
+                                    <td class="text-end">
+                                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"
+                                            data-id="<?= $k['id'] ?>" data-nome="<?= e($k['nome_kpi']) ?>" data-valor="<?= e($k['valor']) ?>"
+                                            data-meta="<?= e($k['meta'] ?? '') ?>" data-unidade="<?= e($k['unidade']) ?>"
+                                            data-periodo="<?= date('Y-m', strtotime($k['periodo'])) ?>" data-setor-id="<?= $k['setor_id'] ?? '' ?>"
+                                            data-observacoes="<?= e($k['observacoes']) ?>" data-aba-retorno="setores"
+                                        ><i class="bi bi-pencil"></i></button>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                             </tbody>
@@ -2240,6 +2278,52 @@ require __DIR__ . '/templates/header.php';
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
             <button type="submit" class="btn btn-dark">Registrar</button>
         </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar KPI -->
+<div class="modal fade" id="modalEditarKpi" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="formEditarKpi">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="editar_kpi">
+        <input type="hidden" name="aba_retorno" id="editarKpiAbaRetorno" value="kpis">
+        <input type="hidden" name="kpi_id" id="editarKpiId">
+        <div class="modal-header"><h5 class="modal-title">Editar KPI</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3"><label class="form-label">Nome do KPI *</label><input type="text" name="nome_kpi" id="editarKpiNome" class="form-control" required></div>
+            <div class="row g-2">
+                <div class="col-4"><label class="form-label">Valor *</label><input type="text" name="valor" id="editarKpiValor" class="form-control" required></div>
+                <div class="col-4"><label class="form-label">Meta</label><input type="text" name="meta" id="editarKpiMeta" class="form-control"></div>
+                <div class="col-4"><label class="form-label">Unidade</label><input type="text" name="unidade" id="editarKpiUnidade" class="form-control"></div>
+            </div>
+            <div class="mb-3 mt-2"><label class="form-label">Período (mês/ano) *</label><input type="month" name="periodo" id="editarKpiPeriodo" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Setor</label>
+                <select name="setor_id" id="editarKpiSetor" class="form-select">
+                    <option value="">Geral (todo o cliente)</option>
+                    <?php foreach ($setores as $s): ?>
+                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="mb-3"><label class="form-label">Observações</label><input type="text" name="observacoes" id="editarKpiObservacoes" class="form-control"></div>
+        </div>
+        <div class="modal-footer justify-content-between">
+            <button type="button" class="btn btn-outline-danger botao-excluir-kpi"><i class="bi bi-trash"></i> Excluir</button>
+            <div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-dark">Salvar</button>
+            </div>
+        </div>
+      </form>
+      <form method="post" id="formExcluirKpi" class="d-none">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="excluir_kpi">
+        <input type="hidden" name="aba_retorno" id="excluirKpiAbaRetorno" value="kpis">
+        <input type="hidden" name="kpi_id" id="excluirKpiId">
       </form>
     </div>
   </div>
@@ -2831,6 +2915,31 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelector('.botao-excluir-treinamento').addEventListener('click', function () {
         if (!confirm('Excluir este treinamento/reunião? Essa ação não pode ser desfeita.')) return;
         document.getElementById('formExcluirTreinamento').submit();
+    });
+
+    // Editar/excluir KPI -- mesma ideia do treinamento: os dados já vêm nos
+    // data-* do botão (preenchidos pelo PHP), sem precisar buscar no
+    // servidor pra abrir o modal.
+    document.querySelectorAll('.botao-editar-kpi').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            document.getElementById('editarKpiId').value = botao.getAttribute('data-id');
+            document.getElementById('editarKpiAbaRetorno').value = botao.getAttribute('data-aba-retorno') || 'kpis';
+            document.getElementById('editarKpiNome').value = botao.getAttribute('data-nome') || '';
+            document.getElementById('editarKpiValor').value = botao.getAttribute('data-valor') || '';
+            document.getElementById('editarKpiMeta').value = botao.getAttribute('data-meta') || '';
+            document.getElementById('editarKpiUnidade').value = botao.getAttribute('data-unidade') || '';
+            document.getElementById('editarKpiPeriodo').value = botao.getAttribute('data-periodo') || '';
+            document.getElementById('editarKpiSetor').value = botao.getAttribute('data-setor-id') || '';
+            document.getElementById('editarKpiObservacoes').value = botao.getAttribute('data-observacoes') || '';
+            document.getElementById('excluirKpiId').value = botao.getAttribute('data-id');
+            document.getElementById('excluirKpiAbaRetorno').value = botao.getAttribute('data-aba-retorno') || 'kpis';
+            PrimeUI.openModal(document.getElementById('modalEditarKpi'));
+        });
+    });
+
+    document.querySelector('.botao-excluir-kpi').addEventListener('click', function () {
+        if (!confirm('Excluir esse KPI? Essa ação não pode ser desfeita.')) return;
+        document.getElementById('formExcluirKpi').submit();
     });
 
     document.querySelectorAll('.calendario-mensal').forEach(function (container) {
