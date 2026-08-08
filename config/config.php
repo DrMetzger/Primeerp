@@ -82,7 +82,7 @@ define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr
 // verdade só testando a tela -- WhatsAppApi só registra em log nesse caso.
 define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: ($isLocal ? '' : 'EAAOsbTpGbqABSEORJEYEaApYJCd3xwwU2HbF1GahdcjCj3ud6XRM2IcnsbYPlM0UULInZB0OPDm2MyMx1oO51jZCiWFQExiiJ2MnxnAWnhWDZA5rnIOb3V5MV0g6szAs7P5auxaQ5epbTuwqSv27WYey8VGXVQJa5usgzqiZAc1ArO6sZAUQuyJwbq9jjKgZDZD'));
 define('WHATSAPP_PHONE_NUMBER_ID', getenv('ADMINPRIME_WHATSAPP_PHONE_NUMBER_ID') ?: ($isLocal ? '' : '1251785564679814'));
-define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: '');
+define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: ($isLocal ? '' : '1efbe8ba157800e0444bdeeae139d71a'));
 // Token que a própria Meta usa pra confirmar o webhook na primeira vez
 // (Configuração > Webhook, no painel do app) -- é a gente que inventa essa
 // senha, não vem da Meta.
