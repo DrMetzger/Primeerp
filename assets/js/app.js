@@ -205,6 +205,48 @@
         }
     });
 
+    // ------------------------------------------------------- Lightbox de anexo
+    // Clicar numa miniatura de imagem (chat de chamado -- ver
+    // render_anexo_item_html() em helpers.php) abre ela em tela grande sem
+    // baixar nada, em vez de forçar download só pra ver o que é (pedido do
+    // Kleber: "abrir imagem por imagem é foda"). Criado uma única vez e
+    // reaproveitado -- não precisa alterar nenhum template de página.
+    var lightboxEl = null;
+    function garantirLightbox() {
+        if (lightboxEl) return lightboxEl;
+        lightboxEl = document.createElement('div');
+        lightboxEl.className = 'lightbox-anexo';
+        lightboxEl.innerHTML = '<button type="button" class="lightbox-anexo-fechar" aria-label="Fechar">&times;</button>'
+            + '<img alt="">'
+            + '<div class="lightbox-anexo-legenda"></div>';
+        document.body.appendChild(lightboxEl);
+        return lightboxEl;
+    }
+
+    function fecharLightbox() {
+        if (lightboxEl) lightboxEl.classList.remove('show');
+    }
+
+    document.addEventListener('click', function (e) {
+        var abrir = e.target.closest('.botao-abrir-lightbox');
+        if (abrir) {
+            e.preventDefault();
+            var el = garantirLightbox();
+            el.querySelector('img').src = abrir.getAttribute('data-lightbox-src') || '';
+            el.querySelector('.lightbox-anexo-legenda').textContent = abrir.getAttribute('data-lightbox-legenda') || '';
+            el.classList.add('show');
+            return;
+        }
+
+        if (lightboxEl && (e.target === lightboxEl || e.target.closest('.lightbox-anexo-fechar'))) {
+            fecharLightbox();
+        }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') fecharLightbox();
+    });
+
     // API mínima exposta pra scripts inline de cada página (ex.: ativar a
     // aba certa com base no hash da URL).
     window.PrimeUI = {

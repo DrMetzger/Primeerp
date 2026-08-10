@@ -935,14 +935,34 @@ function render_anexos_html(array $anexos): string
 
     $html = '<div class="chat-anexos">';
     foreach ($anexos as $a) {
-        $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
-        $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
-        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
-            . '<i class="bi ' . $icone . '"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
+        $html .= render_anexo_item_html($a, 'anexo-link');
     }
     $html .= '</div>';
 
     return $html;
+}
+
+/**
+ * Um anexo (imagem ou documento) de chamado -- imagem mostra a MINIATURA de
+ * verdade (clique abre em tela grande via lightbox, sem baixar nada, ver
+ * .botao-abrir-lightbox em app.js) em vez de só nome+ícone, que obrigava
+ * abrir arquivo por arquivo pra saber o que era (comparado pelo Kleber com
+ * o mesmo problema no WhatsApp). Documento (PDF etc.) continua como link
+ * de nome+ícone, que baixa/abre numa aba normal.
+ */
+function render_anexo_item_html(array $a, string $classeExtra): string
+{
+    $url = e(url('download_anexo_chamado.php?id=' . $a['id']));
+    $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
+    $ehImagem = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
+
+    if ($ehImagem) {
+        return '<a href="' . $url . '" class="' . $classeExtra . ' anexo-link-imagem botao-abrir-lightbox" data-lightbox-src="' . $url . '" data-lightbox-legenda="' . e($a['arquivo_nome_original']) . '" title="' . e($a['arquivo_nome_original']) . '">'
+            . '<img src="' . $url . '" class="anexo-thumb" alt="' . e($a['arquivo_nome_original']) . '" loading="lazy"></a>';
+    }
+
+    return '<a href="' . $url . '" class="' . $classeExtra . '" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
+        . '<i class="bi bi-file-earmark-pdf"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
 }
 
 /**
@@ -968,10 +988,7 @@ function render_resumo_anexos_chamado(array $anexosPorLinha): string
     $html .= '<div class="resumo-anexos-titulo"><i class="bi bi-paperclip"></i> Documentos deste chamado (' . count($todos) . ')</div>';
     $html .= '<div class="chat-anexos">';
     foreach ($todos as $a) {
-        $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
-        $icone = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true) ? 'bi-image' : 'bi-file-earmark-pdf';
-        $html .= '<a href="' . e(url('download_anexo_chamado.php?id=' . $a['id'])) . '" class="anexo-link anexo-link-resumo" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
-            . '<i class="bi ' . $icone . '"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
+        $html .= render_anexo_item_html($a, 'anexo-link anexo-link-resumo');
     }
     $html .= '</div></div>';
 
