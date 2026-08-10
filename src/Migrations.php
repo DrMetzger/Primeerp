@@ -610,6 +610,24 @@ class Migrations
         // cima do novo horário.
         $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS lembrete_enviado_em DATETIME NULL AFTER link_reuniao");
 
+        // Quem deve ser avisado (e-mail + WhatsApp) de cada treinamento/
+        // reunião -- por padrão ninguém do lado do cliente é avisado (só a
+        // equipe interna, ver Notificacoes::novoTreinamento()/lembreteTreinamento());
+        // isso aqui é pra marcar pessoas ESPECÍFICAS do cliente (contato
+        // master e/ou responsáveis de setor) que também devem receber o
+        // aviso de criação e o lembrete de 5min antes.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS treinamento_destinatarios (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                treinamento_id INT NOT NULL,
+                tipo ENUM('master','setor_responsavel') NOT NULL,
+                setor_responsavel_id INT NULL COMMENT 'Só quando tipo=setor_responsavel',
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (treinamento_id) REFERENCES treinamentos(id) ON DELETE CASCADE,
+                FOREIGN KEY (setor_responsavel_id) REFERENCES setor_responsaveis(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Aba "Setores" (substitui as antigas abas Documentos/Treinamentos,
         // que agora vivem DENTRO de cada setor): documento e KPI passam a
         // poder ser de um setor específico, ou NULL = geral do cliente

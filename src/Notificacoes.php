@@ -29,11 +29,11 @@ class Notificacoes
 
     /**
      * Avisa a equipe (NOTIFICACAO_EMAILS_EQUIPE, hoje Kleber e Petronilho)
-     * quando um treinamento ou reunião é agendado pra um cliente -- só por
-     * e-mail por enquanto (o WhatsApp ainda não está liberado pela Meta,
-     * pedido explícito do Kleber pra não tentar mandar por lá até isso sair).
+     * por e-mail, e também as pessoas do CLIENTE marcadas em
+     * treinamento_destinatarios (e-mail + WhatsApp, ver destinatariosTreinamento())
+     * quando um treinamento ou reunião é agendado.
      */
-    public static function novoTreinamento(array $treinamento, string $nomeCliente, ?string $nomeSetor): void
+    public static function novoTreinamento(\PDO $pdo, array $treinamento, string $nomeCliente, ?string $nomeSetor): void
     {
         $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $treinamento['cliente_id'] . '#setores');
         $ehReuniao = $treinamento['tipo'] === 'reuniao';
@@ -51,14 +51,25 @@ class Notificacoes
         foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
             Mailer::enviar($emailEquipe, $assunto, $corpo);
         }
+
+        $textoWhatsapp = ($ehReuniao ? '📅 Reunião agendada' : '📅 Treinamento agendado') . ": *{$treinamento['titulo']}*, {$quando}." . ($treinamento['link_reuniao'] ? " Link: {$treinamento['link_reuniao']}" : '');
+        foreach (self::destinatariosTreinamento($pdo, (int) $treinamento['id']) as $pessoa) {
+            if ($pessoa['email']) {
+                Mailer::enviar($pessoa['email'], $assunto, $corpo);
+            }
+            if ($pessoa['telefone']) {
+                WhatsAppApi::enviarTexto($pessoa['telefone'], $textoWhatsapp);
+            }
+        }
     }
 
     /**
      * Lembrete de "falta pouco" -- disparado pelo cron_lembretes_treinamento.php
-     * uns 5 minutos antes do horário marcado. Só e-mail por enquanto, mesmo
-     * motivo de novoTreinamento() (WhatsApp ainda não liberado pela Meta).
+     * uns 5 minutos antes do horário marcado. Time interno recebe só e-mail
+     * (como sempre); as pessoas do cliente marcadas em treinamento_destinatarios
+     * (aba Setores, ao criar/editar o treinamento) recebem e-mail E WhatsApp.
      */
-    public static function lembreteTreinamento(array $treinamento, string $nomeCliente, ?string $nomeSetor): void
+    public static function lembreteTreinamento(\PDO $pdo, array $treinamento, string $nomeCliente, ?string $nomeSetor): void
     {
         $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $treinamento['cliente_id'] . '#setores');
         $ehReuniao = $treinamento['tipo'] === 'reuniao';
@@ -75,6 +86,48 @@ class Notificacoes
         foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
             Mailer::enviar($emailEquipe, $assunto, $corpo);
         }
+
+        $textoWhatsapp = '⏰ *' . ($ehReuniao ? 'Reunião' : 'Treinamento') . "* começa em poucos minutos (às {$hora}): *{$treinamento['titulo']}*." . ($treinamento['link_reuniao'] ? " Link: {$treinamento['link_reuniao']}" : '');
+        foreach (self::destinatariosTreinamento($pdo, (int) $treinamento['id']) as $pessoa) {
+            if ($pessoa['email']) {
+                Mailer::enviar($pessoa['email'], $assunto, $corpo);
+            }
+            if ($pessoa['telefone']) {
+                WhatsAppApi::enviarTexto($pessoa['telefone'], $textoWhatsapp);
+            }
+        }
+    }
+
+    /**
+     * Pessoas do CLIENTE marcadas pra receber aviso desse treinamento/reunião
+     * (treinamento_destinatarios, escolhido no modal de criar/editar em
+     * cliente.php) -- resolve pro nome/e-mail/telefone de cada uma. tipo=
+     * 'master' vira o contato master do cliente; 'setor_responsavel' busca
+     * o responsável específico pelo id.
+     */
+    private static function destinatariosTreinamento(\PDO $pdo, int $treinamentoId): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT d.tipo,
+                   COALESCE(c.contato_nome, c.nome) AS nome_master, c.contato_email AS email_master, c.contato_telefone AS telefone_master,
+                   sr.nome AS nome_responsavel, sr.email AS email_responsavel, sr.telefone AS telefone_responsavel
+            FROM treinamento_destinatarios d
+            JOIN treinamentos t ON t.id = d.treinamento_id
+            JOIN clientes c ON c.id = t.cliente_id
+            LEFT JOIN setor_responsaveis sr ON sr.id = d.setor_responsavel_id
+            WHERE d.treinamento_id = ?
+        ");
+        $stmt->execute([$treinamentoId]);
+
+        $pessoas = [];
+        foreach ($stmt->fetchAll() as $linha) {
+            if ($linha['tipo'] === 'master') {
+                $pessoas[] = ['nome' => $linha['nome_master'], 'email' => $linha['email_master'], 'telefone' => $linha['telefone_master']];
+            } else {
+                $pessoas[] = ['nome' => $linha['nome_responsavel'], 'email' => $linha['email_responsavel'], 'telefone' => $linha['telefone_responsavel']];
+            }
+        }
+        return $pessoas;
     }
 
     /**

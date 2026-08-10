@@ -1,7 +1,8 @@
 <?php
 /**
  * Cron job -- dispara o lembrete "em 5 min" de treinamentos/reuniões
- * (Notificacoes::lembreteTreinamento(), só e-mail por enquanto).
+ * (Notificacoes::lembreteTreinamento(): e-mail pra equipe interna sempre, e
+ * e-mail + WhatsApp pras pessoas do cliente marcadas em treinamento_destinatarios).
  *
  * Pensado pra rodar a cada minuto (ou a cada poucos minutos) via Cron Job do
  * Hostinger. Como o intervalo mínimo do cron varia por plano, a janela de
@@ -48,7 +49,7 @@ $treinamentos = $stmt->fetchAll();
 $enviados = 0;
 foreach ($treinamentos as $t) {
     try {
-        Notificacoes::lembreteTreinamento($t, $t['cliente_nome'], $t['setor_nome']);
+        Notificacoes::lembreteTreinamento($pdo, $t, $t['cliente_nome'], $t['setor_nome']);
         $pdo->prepare('UPDATE treinamentos SET lembrete_enviado_em = NOW() WHERE id = ?')->execute([$t['id']]);
         $enviados++;
     } catch (\Throwable $e) {

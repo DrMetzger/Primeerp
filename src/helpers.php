@@ -720,6 +720,40 @@ function badge_status_chamado_portal(string $status): string
 }
 
 /**
+ * Substitui quem deve ser avisado (e-mail + WhatsApp) de um treinamento/
+ * reunião -- $destinatariosPost vem do checkbox <input name="destinatarios[]">
+ * do modal em cliente.php, com valores "master" ou "responsavel_<id>". Valida
+ * que cada responsavel_id realmente pertence a esse cliente antes de salvar,
+ * pra não deixar alguém marcar o id de outra empresa via POST manipulado.
+ */
+function salvar_destinatarios_treinamento(\PDO $pdo, int $treinamentoId, array $destinatariosPost, int $clienteId): void
+{
+    $pdo->prepare('DELETE FROM treinamento_destinatarios WHERE treinamento_id = ?')->execute([$treinamentoId]);
+
+    $idsResponsaveisValidos = array_column(
+        (function () use ($pdo, $clienteId) {
+            $stmt = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE cliente_id = ?');
+            $stmt->execute([$clienteId]);
+            return $stmt->fetchAll();
+        })(),
+        'id'
+    );
+    $idsResponsaveisValidos = array_map('intval', $idsResponsaveisValidos);
+
+    $stmt = $pdo->prepare('INSERT INTO treinamento_destinatarios (treinamento_id, tipo, setor_responsavel_id) VALUES (?, ?, ?)');
+    foreach ($destinatariosPost as $valor) {
+        if ($valor === 'master') {
+            $stmt->execute([$treinamentoId, 'master', null]);
+        } elseif (str_starts_with($valor, 'responsavel_')) {
+            $responsavelId = (int) substr($valor, strlen('responsavel_'));
+            if (in_array($responsavelId, $idsResponsaveisValidos, true)) {
+                $stmt->execute([$treinamentoId, 'setor_responsavel', $responsavelId]);
+            }
+        }
+    }
+}
+
+/**
  * Recalcula o status de um chamado a partir de quem respondeu por último --
  * nunca deve ser setado à mão (exceto o fechamento manual). Chamar sempre
  * depois de inserir uma nova linha em chamado_respostas, e também ao

@@ -172,16 +172,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             trim($_POST['link_reuniao'] ?? '') ?: null,
             $_POST['responsavel_id'] ?: null,
         ]);
+        $treinamentoIdNovo = (int) $pdo->lastInsertId();
+        salvar_destinatarios_treinamento($pdo, $treinamentoIdNovo, $_POST['destinatarios'] ?? [], $clienteId);
 
-        // Avisa a equipe (Kleber/Petronilho) por e-mail -- WhatsApp ainda não
-        // está liberado pela Meta, ver Notificacoes::novoTreinamento().
+        // Avisa a equipe (Kleber/Petronilho) por e-mail, e as pessoas do
+        // cliente marcadas em "destinatarios" por e-mail + WhatsApp.
         $nomeSetorTreinamentoNovo = null;
         if ($setorIdTreinamentoNovo) {
             $stmtNomeSetor = $pdo->prepare('SELECT nome FROM setores WHERE id = ? AND cliente_id = ?');
             $stmtNomeSetor->execute([$setorIdTreinamentoNovo, $clienteId]);
             $nomeSetorTreinamentoNovo = $stmtNomeSetor->fetchColumn() ?: null;
         }
-        Notificacoes::novoTreinamento([
+        Notificacoes::novoTreinamento($pdo, [
+            'id' => $treinamentoIdNovo,
             'cliente_id' => $clienteId,
             'titulo' => $tituloTreinamentoNovo,
             'tipo' => $tipoTreinamentoNovo,
@@ -227,6 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $treinamentoIdEditar,
             $clienteId,
         ]);
+        salvar_destinatarios_treinamento($pdo, $treinamentoIdEditar, $_POST['destinatarios'] ?? [], $clienteId);
         flash_set('sucesso', 'Treinamento/reunião atualizado.');
     }
 
@@ -1048,6 +1052,23 @@ $treinamentos = $pdo->prepare('
 ');
 $treinamentos->execute([$clienteId]);
 $treinamentos = $treinamentos->fetchAll();
+
+// Quem está marcado pra receber aviso (e-mail+WhatsApp) de cada treinamento
+// -- carrega tudo de uma vez e agrupa por treinamento_id, pra não fazer uma
+// query por linha do calendário.
+$destinatariosPorTreinamentoId = [];
+if ($treinamentos) {
+    $stmtDestinatarios = $pdo->prepare('
+        SELECT treinamento_id, tipo, setor_responsavel_id
+        FROM treinamento_destinatarios
+        WHERE treinamento_id IN (' . implode(',', array_fill(0, count($treinamentos), '?')) . ')
+    ');
+    $stmtDestinatarios->execute(array_column($treinamentos, 'id'));
+    foreach ($stmtDestinatarios->fetchAll() as $d) {
+        $destinatariosPorTreinamentoId[$d['treinamento_id']][] = $d['tipo'] === 'master' ? 'master' : ('responsavel_' . $d['setor_responsavel_id']);
+    }
+}
+
 $treinamentosPorSetorId = [];
 $treinamentosGerais = [];
 foreach ($treinamentos as $t) {
@@ -1073,6 +1094,7 @@ $mapearEventosCalendario = fn (array $lista) => array_map(fn ($t) => [
     'status' => $t['status'],
     'setor_id' => $t['setor_id'],
     'responsavel_id' => $t['responsavel_id'],
+    'destinatarios' => $destinatariosPorTreinamentoId[$t['id']] ?? [],
 ], $lista);
 
 $usuarios = $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll();
@@ -2429,6 +2451,20 @@ require __DIR__ . '/templates/header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="col-12">
+                    <label class="form-label">Avisar por e-mail e WhatsApp (5min antes)</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="destinatarios[]" value="master" id="novoTreinamentoDestMaster">
+                        <label class="form-check-label" for="novoTreinamentoDestMaster">📌 <?= e($cliente['contato_nome'] ?: $cliente['nome']) ?> <span class="text-muted small">(contato master)</span></label>
+                    </div>
+                    <?php foreach ($usuariosCliente as $uc): ?>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="destinatarios[]" value="responsavel_<?= $uc['id'] ?>" id="novoTreinamentoDest<?= $uc['id'] ?>">
+                        <label class="form-check-label" for="novoTreinamentoDest<?= $uc['id'] ?>"><?= e($uc['nome']) ?><?= $uc['telefone'] ? '' : ' <span class="text-muted small">(sem telefone -- só e-mail)</span>' ?></label>
+                    </div>
+                    <?php endforeach; ?>
+                    <div class="form-text">Cada pessoa marcada recebe e-mail e, se tiver telefone cadastrado, também WhatsApp.</div>
+                </div>
             </div>
         </div>
         <div class="modal-footer">
@@ -2491,6 +2527,20 @@ require __DIR__ . '/templates/header.php';
                         <option value="<?= $u['id'] ?>"><?= e($u['nome']) ?></option>
                     <?php endforeach; ?>
                 </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Avisar por e-mail e WhatsApp (5min antes)</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="destinatarios[]" value="master" id="editarTreinamentoDestMaster">
+                    <label class="form-check-label" for="editarTreinamentoDestMaster">📌 <?= e($cliente['contato_nome'] ?: $cliente['nome']) ?> <span class="text-muted small">(contato master)</span></label>
+                </div>
+                <?php foreach ($usuariosCliente as $uc): ?>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="destinatarios[]" value="responsavel_<?= $uc['id'] ?>" id="editarTreinamentoDest<?= $uc['id'] ?>">
+                    <label class="form-check-label" for="editarTreinamentoDest<?= $uc['id'] ?>"><?= e($uc['nome']) ?><?= $uc['telefone'] ? '' : ' <span class="text-muted small">(sem telefone -- só e-mail)</span>' ?></label>
+                </div>
+                <?php endforeach; ?>
+                <div class="form-text">Cada pessoa marcada recebe e-mail e, se tiver telefone cadastrado, também WhatsApp.</div>
             </div>
         </div>
         <div class="modal-footer justify-content-between">
@@ -2966,6 +3016,10 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarTreinamentoLink').value = evento.link_reuniao || '';
         document.getElementById('editarTreinamentoStatus').value = evento.status || 'planejado';
         document.getElementById('editarTreinamentoResponsavel').value = evento.responsavel_id || '';
+        var destinatariosMarcados = evento.destinatarios || [];
+        document.querySelectorAll('#modalEditarTreinamento input[name="destinatarios[]"]').forEach(function (chk) {
+            chk.checked = destinatariosMarcados.indexOf(chk.value) !== -1;
+        });
         document.getElementById('excluirTreinamentoId').value = evento.id;
         PrimeUI.openModal(document.getElementById('modalEditarTreinamento'));
     }
