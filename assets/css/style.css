@@ -21,6 +21,10 @@
     --ph-danger-bg: #fee2e2;
     --ph-info: #1d4ed8;
     --ph-info-bg: #dbeafe;
+    --ph-orange: #c2410c;
+    --ph-orange-bg: #ffedd5;
+    --ph-yellow: #a16207;
+    --ph-yellow-bg: #fef9c3;
     --ph-neutral: #52525b;
     --ph-neutral-bg: #f4f4f5;
     --ph-surface: #ffffff;
@@ -237,6 +241,44 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
     border-color: var(--ph-border);
     color: var(--ph-neutral);
 }
+
+/* Botões outline coloridos (azul/laranja/vermelho/amarelo) -- faltavam no
+   sistema (só existia o outline-dark índigo), então botões com essas
+   classes ficavam sem estilo nenhum. Mesmo padrão visual do
+   .btn-outline-dark: transparente com borda colorida, preenche com a cor
+   sólida no hover. */
+.btn-outline-primary {
+    background-color: transparent;
+    border-color: var(--ph-info);
+    color: var(--ph-info);
+}
+.btn-outline-primary:hover { background-color: var(--ph-info); color: #fff; }
+
+.btn-outline-orange {
+    background-color: transparent;
+    border-color: var(--ph-orange);
+    color: var(--ph-orange);
+}
+.btn-outline-orange:hover { background-color: var(--ph-orange); color: #fff; }
+
+.btn-outline-danger {
+    background-color: transparent;
+    border-color: var(--ph-danger);
+    color: var(--ph-danger);
+}
+.btn-outline-danger:hover { background-color: var(--ph-danger); color: #fff; }
+
+.btn-outline-warning {
+    background-color: transparent;
+    border-color: var(--ph-yellow);
+    color: var(--ph-yellow);
+}
+.btn-outline-warning:hover { background-color: var(--ph-yellow); color: #fff; }
+
+/* Tamanho padrão pra botões de ação em linha de tabela (Convite/Resetar/
+   Bloquear/Editar) -- antes cada um tinha uma largura diferente porque só
+   o texto definia o tamanho, ficava desalinhado. */
+.btn-acao-linha { min-width: 92px; justify-content: center; }
 
 .btn-group { display: inline-flex; }
 .btn-group .btn { border-radius: var(--ph-radius-sm); }

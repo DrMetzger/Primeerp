@@ -78,12 +78,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
             $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+            $indiceAvatarNovoPortal = (int) ($_POST['avatar'] ?? 0);
+            $avatarNovoPortal = ($indiceAvatarNovoPortal >= 1 && $indiceAvatarNovoPortal <= QUANTIDADE_AVATARES_PREDEFINIDOS)
+                ? 'assets/img/avatares/avatar-' . $indiceAvatarNovoPortal . '.svg'
+                : null;
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento) VALUES (?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovoPortal]);
                 flash_set('sucesso', 'Usuário cadastrado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível cadastrar (e-mail já usado por outro usuário desse cliente?).');
+            }
+        }
+    }
+
+    // Foto de perfil de uma pessoa já cadastrada -- upload de imagem própria
+    // ou escolha de um avatar pronto. Sempre confere que a pessoa é desse
+    // MESMO cliente antes (diferente da tela admin, aqui não pode confiar
+    // que quem manda o responsavel_id é de confiança).
+    if ($acao === 'atualizar_avatar_usuario_portal') {
+        $responsavelId = (int) $_POST['responsavel_id'];
+        $confereResp = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE id = ? AND cliente_id = ?');
+        $confereResp->execute([$responsavelId, $clienteId]);
+        if (!$confereResp->fetchColumn()) {
+            flash_set('erro', 'Usuário não encontrado.');
+        } else {
+            $erroFotoPortal = processar_upload_foto_setor_responsavel($pdo, $responsavelId);
+            flash_set($erroFotoPortal ? 'erro' : 'sucesso', $erroFotoPortal ?? 'Foto atualizada.');
+        }
+    }
+
+    if ($acao === 'escolher_avatar_predefinido_usuario_portal') {
+        $responsavelId = (int) $_POST['responsavel_id'];
+        $confereResp = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE id = ? AND cliente_id = ?');
+        $confereResp->execute([$responsavelId, $clienteId]);
+        if (!$confereResp->fetchColumn()) {
+            flash_set('erro', 'Usuário não encontrado.');
+        } else {
+            $indicePortal = (int) ($_POST['avatar'] ?? 0);
+            if (definir_avatar_predefinido_setor_responsavel($pdo, $responsavelId, $indicePortal)) {
+                flash_set('sucesso', 'Avatar atualizado.');
             }
         }
     }
@@ -257,6 +291,17 @@ require __DIR__ . '/../templates/portal_header.php';
                 <form method="post" class="row g-2">
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="criar_usuario_cliente">
+                    <input type="hidden" name="avatar" id="novoUsuarioPortalAvatar" value="1">
+                    <div class="col-12">
+                        <label class="form-label">Avatar (pode trocar depois)</label>
+                        <div class="galeria-avatares mb-2" id="galeriaAvatarNovoUsuarioPortal">
+                            <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                                <button type="button" class="avatar-opcao <?= $i === 1 ? 'active' : '' ?>" data-avatar="<?= $i ?>" title="Usar este avatar">
+                                    <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                                </button>
+                            <?php endfor; ?>
+                        </div>
+                    </div>
                     <div class="col-md-4"><input type="text" name="nome" class="form-control" placeholder="Nome *" required></div>
                     <div class="col-md-4"><input type="email" name="email" class="form-control" placeholder="E-mail *" required></div>
                     <div class="col-md-4"><input type="text" name="telefone" class="form-control input-telefone" placeholder="Telefone (WhatsApp) *" required></div>
@@ -309,23 +354,23 @@ require __DIR__ . '/../templates/portal_header.php';
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="enviar_convite_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $uc['setor_id'] ? 'Enviar convite de acesso' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i> Convite</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary btn-acao-linha" title="<?= $uc['setor_id'] ? 'Enviar convite de acesso' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i> Convite</button>
                                     </form>
                                     <?php if ($uc['portal_ativo']): ?>
                                     <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual de <?= e($uc['nome']) ?>. Confirma?');">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="resetar_senha_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="Resetar senha"><i class="bi bi-key"></i> Resetar</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-orange btn-acao-linha" title="Resetar senha"><i class="bi bi-key"></i> Resetar</button>
                                     </form>
                                     <form method="post" class="d-inline">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="desativar_portal_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Desativar acesso ao portal"><i class="bi bi-slash-circle"></i> Bloquear</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-danger btn-acao-linha" title="Desativar acesso ao portal"><i class="bi bi-slash-circle"></i> Bloquear</button>
                                     </form>
                                     <?php endif; ?>
-                                    <button type="button" class="btn btn-sm btn-outline-dark botao-editar-usuario-portal" data-usuario='<?= e(json_encode($ucComAvatar, JSON_UNESCAPED_UNICODE)) ?>' title="Editar"><i class="bi bi-pencil"></i> Editar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-warning btn-acao-linha botao-editar-usuario-portal" data-usuario='<?= e(json_encode($ucComAvatar, JSON_UNESCAPED_UNICODE)) ?>' title="Editar"><i class="bi bi-pencil"></i> Editar</button>
                                 </div>
                             </td>
                         </tr>
@@ -343,35 +388,59 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <!-- Modal Editar usuário -->
 <div class="modal fade" id="modalEditarUsuarioPortal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
-      <form method="post">
-        <?= csrf_field() ?>
-        <input type="hidden" name="acao" value="editar_usuario_cliente">
-        <input type="hidden" name="responsavel_id" id="editarUsuarioPortalId">
-        <div class="modal-header"><h5 class="modal-title">Editar usuário</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
+      <div class="modal-header"><h5 class="modal-title">Editar usuário</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
             <div class="text-center mb-3">
                 <div class="perfil-avatar d-inline-block" id="editarUsuarioPortalAvatar"></div>
             </div>
-            <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" id="editarUsuarioPortalNome" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioPortalEmail" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">Telefone (WhatsApp) *</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone" required></div>
-            <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" id="editarUsuarioPortalDocumento" class="form-control"></div>
-            <div class="mb-3"><label class="form-label">Setor</label>
-                <select name="setor_id" id="editarUsuarioPortalSetor" class="form-select">
-                    <option value="">Sem setor</option>
-                    <?php foreach ($setores as $s): ?>
-                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
-                    <?php endforeach; ?>
-                </select>
+
+            <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-2">
+                <?= csrf_field() ?>
+                <input type="hidden" name="acao" value="atualizar_avatar_usuario_portal">
+                <input type="hidden" name="responsavel_id" class="editar-usuario-portal-id-campo">
+                <div class="col"><input type="file" name="foto" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp" required></div>
+                <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Enviar foto</button></div>
+            </form>
+
+            <p class="text-muted small mb-1">Ou escolha um avatar pronto:</p>
+            <div class="galeria-avatares mb-4">
+                <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
+                    <form method="post" class="d-inline">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="escolher_avatar_predefinido_usuario_portal">
+                        <input type="hidden" name="responsavel_id" class="editar-usuario-portal-id-campo">
+                        <input type="hidden" name="avatar" value="<?= $i ?>">
+                        <button type="submit" class="avatar-opcao" title="Usar este avatar">
+                            <img src="<?= asset_url('assets/img/avatares/avatar-' . $i . '.svg') ?>" alt="Avatar <?= $i ?>">
+                        </button>
+                    </form>
+                <?php endfor; ?>
             </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-dark">Salvar</button>
-        </div>
-      </form>
+
+            <form method="post">
+                <?= csrf_field() ?>
+                <input type="hidden" name="acao" value="editar_usuario_cliente">
+                <input type="hidden" name="responsavel_id" id="editarUsuarioPortalId">
+                <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" id="editarUsuarioPortalNome" class="form-control" required></div>
+                <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioPortalEmail" class="form-control" required></div>
+                <div class="mb-3"><label class="form-label">Telefone (WhatsApp) *</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone" required></div>
+                <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" id="editarUsuarioPortalDocumento" class="form-control"></div>
+                <div class="mb-3"><label class="form-label">Setor</label>
+                    <select name="setor_id" id="editarUsuarioPortalSetor" class="form-select">
+                        <option value="">Sem setor</option>
+                        <?php foreach ($setores as $s): ?>
+                            <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="modal-footer px-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-dark">Salvar</button>
+                </div>
+            </form>
+      </div>
     </div>
   </div>
 </div>
@@ -387,9 +456,23 @@ document.querySelectorAll('.botao-editar-usuario-portal').forEach(function (bota
         document.getElementById('editarUsuarioPortalDocumento').value = dados.documento || '';
         document.getElementById('editarUsuarioPortalSetor').value = dados.setor_id || '';
         document.getElementById('editarUsuarioPortalAvatar').innerHTML = dados.avatar_html || '';
+        document.querySelectorAll('.editar-usuario-portal-id-campo').forEach(function (campo) { campo.value = dados.id; });
         PrimeUI.openModal(document.getElementById('modalEditarUsuarioPortal'));
     });
 });
+
+// Seletor de avatar no cadastro de NOVO usuário -- escolhe um avatar pronto
+// já na criação (antes só dava pra trocar depois de editar).
+var galeriaAvatarNovoPortal = document.getElementById('galeriaAvatarNovoUsuarioPortal');
+if (galeriaAvatarNovoPortal) {
+    galeriaAvatarNovoPortal.querySelectorAll('.avatar-opcao').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            document.getElementById('novoUsuarioPortalAvatar').value = botao.getAttribute('data-avatar');
+            galeriaAvatarNovoPortal.querySelectorAll('.avatar-opcao').forEach(function (b) { b.classList.remove('active'); });
+            botao.classList.add('active');
+        });
+    });
+}
 
 // Seletor de ícone de setor -- clicar num ícone marca ele como escolhido
 // (visualmente) e preenche o input escondido que vai no form de criar/
