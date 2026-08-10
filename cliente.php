@@ -590,10 +590,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Documentos anexados na aba Implantação (gerais + de cada
                 // etapa) -- manda o CONTEÚDO real pro Gemini (não só nome/
-                // contagem), pra sugestão ser específica desse cliente.
-                $stmtDocsImplantacaoIa = $pdo->prepare("SELECT titulo, arquivo_nome_original, arquivo_tamanho, dados FROM documentos WHERE cliente_id = ? AND categoria = 'Implantação' ORDER BY criado_em ASC");
-                $stmtDocsImplantacaoIa->execute([$clienteId]);
-                $docsImplantacaoIa = $stmtDocsImplantacaoIa->fetchAll();
+                // contagem), pra sugestão ser específica desse cliente. Só
+                // os que o usuário marcou no modal de seleção (ver
+                // modalDocsSugestaoImplantacao) -- "IN (...)" garante que só
+                // pega documento que realmente é dessa implantação/cliente,
+                // mesmo que o POST venha com um id de outro cliente.
+                $idsDocsSelecionadosImplantacaoIa = array_map('intval', $_POST['documentos_selecionados'] ?? []);
+                $docsImplantacaoIa = [];
+                if ($idsDocsSelecionadosImplantacaoIa) {
+                    $placeholdersDocsIa = implode(',', array_fill(0, count($idsDocsSelecionadosImplantacaoIa), '?'));
+                    $stmtDocsImplantacaoIa = $pdo->prepare("SELECT titulo, arquivo_nome_original, arquivo_tamanho, dados FROM documentos WHERE cliente_id = ? AND categoria = 'Implantação' AND id IN ($placeholdersDocsIa) ORDER BY criado_em ASC");
+                    $stmtDocsImplantacaoIa->execute(array_merge([$clienteId], $idsDocsSelecionadosImplantacaoIa));
+                    $docsImplantacaoIa = $stmtDocsImplantacaoIa->fetchAll();
+                }
 
                 $mimesAceitosImplantacaoIa = [
                     'pdf' => 'application/pdf',
@@ -663,6 +672,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if ($nomesIgnoradosImplantacaoIa) {
                     $promptImplantacao .= '- Não foi possível ler o conteúdo de: ' . implode(', ', $nomesIgnoradosImplantacaoIa) . " (formato não suportado ou lote de anexos grande demais) -- considere só o nome desses arquivos.\n";
+                }
+
+                // Comentário/ajuste que o responsável da PrimeERP escreveu
+                // no modal antes de gerar (ver modalDocsSugestaoImplantacao)
+                // -- opcional, só entra no prompt se a pessoa escreveu algo.
+                $comentarioImplantacaoIa = trim((string) ($_POST['comentario_ia'] ?? ''));
+                if ($comentarioImplantacaoIa !== '') {
+                    $promptImplantacao .= "\nComentário/ajuste do responsável da PrimeERP pra essa geração (siga isso com atenção, é mais importante que o resto do contexto): \"{$comentarioImplantacaoIa}\"\n";
                 }
 
                 $promptImplantacao .= "\nSe faltar alguma informação importante pra dar uma resposta específica (em vez de genérica), ou se você tiver alguma dúvida real sobre esse cliente, liste isso primeiro, num bloco curto no topo da resposta com o título \"❓ Pontos a confirmar antes de aplicar isso:\" -- só inclua esse bloco se for realmente necessário, não invente dúvida à toa.";
@@ -1416,6 +1433,12 @@ foreach ($documentos as $doc) {
     }
 }
 
+// Todos os anexos da Implantação (gerais + de qualquer etapa), pra listar
+// no modal de seleção antes de gerar sugestão com IA (ver
+// modalDocsSugestaoImplantacao) -- o usuário escolhe quais desses a IA vai
+// ler naquela geração específica, em vez de mandar sempre todos.
+$todosDocumentosImplantacaoIa = array_values(array_filter($documentos, fn ($d) => $d['categoria'] === 'Implantação'));
+
 $etapasImplantacao = $pdo->prepare('SELECT * FROM implantacao_etapas WHERE cliente_id = ? ORDER BY ordem ASC, id ASC');
 $etapasImplantacao->execute([$clienteId]);
 $etapasImplantacao = $etapasImplantacao->fetchAll();
@@ -2062,6 +2085,47 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+
+        <!-- Antes de gerar qualquer sugestão, mostra quais documentos a IA
+             vai ler (o usuário pode destacar/desmarcar) e deixa escrever um
+             comentário/ajuste -- os 7 botões "Gerar" acima todos abrem esse
+             mesmo modal, só muda qual tipo de sugestão fica pendente. -->
+        <div class="modal fade" id="modalDocsSugestaoImplantacao" tabindex="-1">
+          <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-stars"></i> Gerar sugestão com IA</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <p class="text-muted small">Escolha quais documentos a IA deve ler pra essa sugestão, e deixe um comentário/ajuste se quiser (opcional).</p>
+                <?php if ($todosDocumentosImplantacaoIa): ?>
+                <div class="mb-3">
+                    <?php foreach ($todosDocumentosImplantacaoIa as $docModalIa): ?>
+                    <div class="form-check">
+                        <input class="form-check-input checkbox-doc-implantacao-ia" type="checkbox" value="<?= (int) $docModalIa['id'] ?>" id="docImplantacaoIa<?= (int) $docModalIa['id'] ?>" checked>
+                        <label class="form-check-label" for="docImplantacaoIa<?= (int) $docModalIa['id'] ?>">
+                            <i class="bi bi-file-earmark"></i> <?= e($docModalIa['arquivo_nome_original']) ?>
+                            <?php if ($docModalIa['titulo'] && $docModalIa['titulo'] !== $docModalIa['arquivo_nome_original']): ?><span class="text-muted small">(<?= e($docModalIa['titulo']) ?>)</span><?php endif; ?>
+                        </label>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php else: ?>
+                    <p class="text-muted small">Nenhum documento anexado ainda nessa implantação -- a sugestão vai ser gerada só com os dados já cadastrados (setores, etapas, usuários).</p>
+                <?php endif; ?>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Comentário / ajuste pra IA (opcional)</label>
+                    <textarea class="form-control form-control-sm" id="comentarioDocsImplantacaoIa" rows="3" placeholder="Ex.: focar mais no módulo Financeiro, ou considerar que o cliente já usa outro ERP hoje..."></textarea>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-dark" id="botaoConfirmarGerarImplantacaoIa"><i class="bi bi-stars"></i> Gerar sugestão</button>
+              </div>
+            </div>
+          </div>
         </div>
     </div>
 
@@ -3661,13 +3725,49 @@ document.addEventListener('DOMContentLoaded', function () {
             });
     }
 
+    // Os 7 botões "Gerar" (um por tipo de sugestão) todos abrem o MESMO
+    // modal de seleção de documentos/comentário antes de mandar pra IA --
+    // só guarda em formImplantacaoIaPendente qual form (tipo) foi clicado,
+    // pra saber em qual continuar depois que a pessoa confirmar no modal.
+    var formImplantacaoIaPendente = null;
     document.querySelectorAll('.form-gerar-sugestao-implantacao').forEach(function (form) {
         form.addEventListener('submit', function (e) {
             e.preventDefault();
             e.stopPropagation();
-            gerarSugestaoImplantacao(form, false);
+            formImplantacaoIaPendente = form;
+            var campoComentario = document.getElementById('comentarioDocsImplantacaoIa');
+            if (campoComentario) campoComentario.value = '';
+            PrimeUI.openModal(document.getElementById('modalDocsSugestaoImplantacao'));
         });
     });
+
+    var botaoConfirmarDocsImplantacaoIa = document.getElementById('botaoConfirmarGerarImplantacaoIa');
+    if (botaoConfirmarDocsImplantacaoIa) {
+        botaoConfirmarDocsImplantacaoIa.addEventListener('click', function () {
+            if (!formImplantacaoIaPendente) return;
+
+            // Tira campo antigo (se essa mesma form já foi usada antes,
+            // numa geração anterior) antes de adicionar os de agora.
+            formImplantacaoIaPendente.querySelectorAll('input[name="documentos_selecionados[]"], input[name="comentario_ia"]').forEach(function (el) { el.remove(); });
+
+            document.querySelectorAll('.checkbox-doc-implantacao-ia:checked').forEach(function (chk) {
+                var campoDoc = document.createElement('input');
+                campoDoc.type = 'hidden';
+                campoDoc.name = 'documentos_selecionados[]';
+                campoDoc.value = chk.value;
+                formImplantacaoIaPendente.appendChild(campoDoc);
+            });
+
+            var campoComentario = document.createElement('input');
+            campoComentario.type = 'hidden';
+            campoComentario.name = 'comentario_ia';
+            campoComentario.value = document.getElementById('comentarioDocsImplantacaoIa').value;
+            formImplantacaoIaPendente.appendChild(campoComentario);
+
+            PrimeUI.closeModal(document.getElementById('modalDocsSugestaoImplantacao'));
+            gerarSugestaoImplantacao(formImplantacaoIaPendente, false);
+        });
+    }
 
     // Delegado no document porque o botão "Exportar PDF" também é criado
     // dinamicamente depois de gerar uma sugestão nova (innerHTML acima).
