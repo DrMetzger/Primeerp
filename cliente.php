@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             apenas_digitos($_POST['cnpj'] ?? ''),
@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             trim($_POST['contato_email']) ?: null,
             apenas_digitos($_POST['contato_telefone'] ?? ''),
             normalizar_documento($_POST['contato_documento'] ?? ''),
+            $_POST['responsavel_interno_id'] ?: null,
             trim($_POST['observacoes']) ?: null,
             isset($_POST['acesso_fora_horario']) ? 1 : 0,
             $clienteId,
@@ -1264,6 +1265,16 @@ require __DIR__ . '/templates/header.php';
                         <div class="col-md-6">
                             <label class="form-label">CPF ou RG do contato *</label>
                             <input type="text" name="contato_documento" class="form-control" required value="<?= e($cliente['contato_documento']) ?>" placeholder="Só números (RG pode terminar em X)">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Responsável interno (equipe)</label>
+                            <select name="responsavel_interno_id" class="form-select">
+                                <option value="">-</option>
+                                <?php foreach ($usuarios as $u): ?>
+                                    <option value="<?= $u['id'] ?>" <?= (int) $cliente['responsavel_interno_id'] === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['nome']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Quem da Prime acompanha essa conta -- útil sobretudo enquanto ainda não há um contato do cliente cadastrado.</div>
                         </div>
                         <div class="col-12">
                             <label class="form-label">Observações</label>

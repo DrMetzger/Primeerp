@@ -589,6 +589,13 @@ class Migrations
         // em config.php) -- clientes com atendimento crítico fora do horário
         // normal podem ganhar liberação especial aqui (aba Usuários).
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp_liberacao_horario TINYINT(1) NOT NULL DEFAULT 0 AFTER bloqueado_whatsapp");
+
+        // Quando o cliente ainda não tem ninguém indicado como contato
+        // master (contato_nome/email/telefone em branco), alguém da equipe
+        // (Kleber ou Petronilho, tipicamente) pode se atribuir como
+        // "responsável interno" por essa conta, pra ficar claro quem
+        // acompanha esse cliente enquanto não há um contato de verdade.
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_interno_id INT NULL COMMENT 'usuarios.id -- admin da Prime responsável por essa conta, usado sobretudo quando ainda não há contato_nome definido' AFTER contato_documento");
         // Evita mandar o aviso de "fora do horário" em toda mensagem se a
         // pessoa insistir escrevendo várias vezes fora do expediente.
         $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS aviso_horario_enviado_em DATETIME NULL AFTER bloqueado_ate");
