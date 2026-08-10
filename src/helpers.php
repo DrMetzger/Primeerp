@@ -195,6 +195,30 @@ function resolver_avatar_por_email(\PDO $pdo, ?string $email, ?string $fotoPropr
 }
 
 /**
+ * Quem de fato abriu/é o dono do chamado -- pra notificação de resposta
+ * (e qualquer outra) chamar a PESSOA certa pelo nome e mandar pro
+ * telefone/e-mail dela, não sempre o contato master da empresa. Se foi
+ * aberto por um responsável de setor específico (chamados.aberto_por_tipo
+ * = 'setor'), resolve pra esse responsável; senão cai no contato master.
+ */
+function resolver_pessoa_do_chamado(\PDO $pdo, array $chamado, array $cliente): array
+{
+    if (($chamado['aberto_por_tipo'] ?? '') === 'setor' && !empty($chamado['aberto_por_setor_responsavel_id'])) {
+        $stmt = $pdo->prepare('SELECT nome, email, telefone FROM setor_responsaveis WHERE id = ?');
+        $stmt->execute([$chamado['aberto_por_setor_responsavel_id']]);
+        if ($pessoa = $stmt->fetch()) {
+            return $pessoa;
+        }
+    }
+
+    return [
+        'nome' => $cliente['contato_nome'] ?: $cliente['nome'],
+        'email' => $cliente['contato_email'],
+        'telefone' => $cliente['contato_telefone'] ?: ($chamado['telefone_whatsapp'] ?? null),
+    ];
+}
+
+/**
  * Guarda telefone só com os dígitos no banco (sem máscara) -- importante
  * pra integração futura com WhatsApp Cloud API, que precisa do número
  * "cru". A máscara é só visual, aplicada na hora de exibir/preencher campo

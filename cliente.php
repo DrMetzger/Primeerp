@@ -8,6 +8,7 @@ use AdminPrime\Database;
 use AdminPrime\Notificacoes;
 use AdminPrime\PdfExport;
 use AdminPrime\TempAccess;
+use AdminPrime\WhatsAppBot;
 
 Auth::requireLogin();
 
@@ -969,16 +970,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
 
         if ($mensagem !== '' || $temAnexo) {
+            $nomeResponsavel = Auth::userName();
             $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
-                ->execute([$chamadoId, Auth::userName(), Auth::userId(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+                ->execute([$chamadoId, $nomeResponsavel, Auth::userId(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
             $respostaId = (int) $pdo->lastInsertId();
 
             $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'equipe');
             recalcular_status_chamado($pdo, $chamadoId);
 
+            $stmtAnexosResposta = $pdo->prepare('SELECT id, arquivo_nome_original FROM chamado_anexos WHERE resposta_id = ?');
+            $stmtAnexosResposta->execute([$respostaId]);
+            $anexosResposta = $stmtAnexosResposta->fetchAll();
+
             $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
             $chamadoAtualizado->execute([$chamadoId]);
-            Notificacoes::novaRespostaEquipe($chamadoAtualizado->fetch(), $cliente);
+            $chamadoAtualizado = $chamadoAtualizado->fetch();
+
+            // Avisa a PESSOA certa (quem abriu -- pode ser um responsável de
+            // setor específico, não sempre o contato master) com o texto da
+            // resposta e os anexos, e pergunta no zap o que ela quer fazer
+            // agora (encerrar/responder/nada) -- pedido do Kleber.
+            $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
+            Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
+            if ($pessoaChamado['telefone']) {
+                WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
+            }
 
             flash_set('sucesso', $errosAnexo ? 'Resposta enviada, mas: ' . implode(' ', $errosAnexo) : 'Resposta enviada ao cliente.');
         }

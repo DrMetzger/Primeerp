@@ -57,6 +57,7 @@ class WhatsAppBot
             'aguardando_identificacao_manual' => self::etapaIdentificacaoManual($pdo, $conversa, $texto),
             'escolher_chamado' => self::etapaEscolherChamado($pdo, $conversa, $texto),
             'mensagem_continuar' => self::etapaMensagemContinuar($pdo, $conversa, $texto),
+            'aguardando_acao_resposta' => self::etapaAcaoPosResposta($pdo, $conversa, $texto),
             'escolher_setor' => self::etapaEscolherSetor($pdo, $conversa, $texto),
             'titulo' => self::etapaTitulo($pdo, $conversa, $texto),
             'categoria' => self::etapaCategoria($pdo, $conversa, $texto),
@@ -313,6 +314,62 @@ class WhatsAppBot
 
         self::excluirConversa($pdo, $conversa['id']);
         WhatsAppApi::enviarTexto($conversa['telefone'], "✅ Registrado no chamado #{$chamadoId}. Nossa equipe vai ver sua mensagem e responder por aqui.");
+    }
+
+    private const BOTOES_ACAO_POS_RESPOSTA = [
+        ['id' => 'encerrar_chamado', 'titulo' => '✅ Encerrar'],
+        ['id' => 'responder_chamado', 'titulo' => '💬 Responder'],
+        ['id' => 'nenhuma_acao', 'titulo' => '🕓 Nenhuma agora'],
+    ];
+
+    /**
+     * Chamado pelo cliente.php depois que a EQUIPE responde um chamado --
+     * pedido do Kleber pra, além de avisar a resposta (ver
+     * Notificacoes::novaRespostaEquipe(), que já mandou o texto/anexo),
+     * perguntar no mesmo fio o que a pessoa quer fazer agora. Reaproveita a
+     * conversa/etapa do bot -- se ela responder "responder", cai direto no
+     * fluxo mensagem_continuar já existente (reaproveita chamado_continuar_id).
+     */
+    public static function prepararConversaPosResposta(PDO $pdo, array $chamado, string $telefone): void
+    {
+        if ($telefone === '') {
+            return;
+        }
+
+        $conversa = self::obterOuCriarConversa($pdo, $telefone, '');
+        self::atualizarConversa($pdo, $conversa['id'], [
+            'etapa' => 'aguardando_acao_resposta',
+            'chamado_continuar_id' => $chamado['id'],
+        ]);
+        WhatsAppApi::enviarBotoes($telefone, '👉 O que você deseja fazer agora com esse chamado?', self::BOTOES_ACAO_POS_RESPOSTA);
+    }
+
+    private static function etapaAcaoPosResposta(PDO $pdo, array $conversa, string $texto): void
+    {
+        $chamadoId = (int) $conversa['chamado_continuar_id'];
+
+        if ($texto === 'encerrar_chamado') {
+            $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoId]);
+            self::excluirConversa($pdo, $conversa['id']);
+            WhatsAppApi::enviarTexto($conversa['telefone'], "✅ Chamado #{$chamadoId} encerrado. Se precisar de mais alguma coisa, é só mandar mensagem por aqui. 🙂");
+            return;
+        }
+
+        if ($texto === 'responder_chamado') {
+            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'mensagem_continuar']);
+            WhatsAppApi::enviarTexto($conversa['telefone'], "✍️ Pode mandar sua mensagem que eu registro no chamado #{$chamadoId}.");
+            return;
+        }
+
+        if ($texto === 'nenhuma_acao') {
+            self::excluirConversa($pdo, $conversa['id']);
+            WhatsAppApi::enviarTexto($conversa['telefone'], '👍 Tudo bem, fico por aqui. Quando quiser encerrar ou responder esse chamado, é só me chamar de novo.');
+            return;
+        }
+
+        // Não reconheceu (digitou em vez de tocar no botão, por exemplo) --
+        // repete a pergunta em vez de travar a conversa.
+        WhatsAppApi::enviarBotoes($conversa['telefone'], '🤔 Não entendi. Toca numa das opções:', self::BOTOES_ACAO_POS_RESPOSTA);
     }
 
     /** Retoma o fluxo normal de abertura de chamado, sem repetir "encontrei seu cadastro" (já dito antes). */

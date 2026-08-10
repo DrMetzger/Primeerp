@@ -207,32 +207,42 @@ class Notificacoes
         self::whatsapp(null, "Novo chamado público de {$nomeExibicao}: {$chamado['titulo']}");
     }
 
-    public static function novaRespostaEquipe(array $chamado, array $cliente): void
+    /**
+     * $pessoa é quem de fato deve ser avisado (ver
+     * resolver_pessoa_do_chamado() em helpers.php) -- pode ser o contato
+     * master ou um responsável de setor específico, dependendo de quem
+     * abriu o chamado. $nomeResponsavel é quem da EQUIPE respondeu
+     * (Auth::userName()) e $anexos é a lista de chamado_anexos dessa
+     * resposta (id + arquivo_nome_original), se tiver.
+     *
+     * E-mail e WhatsApp são INDEPENDENTES aqui de propósito -- antes essa
+     * função saía (return) se não tivesse e-mail, o que também cancelava
+     * o WhatsApp por engano.
+     */
+    public static function novaRespostaEquipe(array $chamado, array $pessoa, string $nomeResponsavel, string $mensagem, array $anexos = []): void
     {
-        // E-mail e WhatsApp são INDEPENDENTES aqui de propósito -- antes essa
-        // função saía (return) se não tivesse e-mail, o que também cancelava
-        // o WhatsApp por engano. Chamado aberto pelo bot tem
-        // telefone_whatsapp preenchido (ver WhatsAppBot::criarChamado()),
-        // então a resposta da equipe continua no MESMO canal por onde o
-        // chamado foi aberto, em vez de só por e-mail.
-        if ($cliente['contato_email']) {
+        $mensagemExibida = $mensagem !== '' ? $mensagem : '(sem texto -- só anexo)';
+
+        if ($pessoa['email']) {
             $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
-            // Pela PESSOA (contato/key user), não pela empresa -- "Olá,
-            // GEOMAQ" é impessoal (mesmo ajuste feito na tela de criar senha
-            // e no portal).
-            $nomeSaudacao = $cliente['contato_nome'] ?: $cliente['nome'];
 
             $corpo = "
-                <p>Olá, " . e($nomeSaudacao) . ".</p>
-                <p>Você recebeu uma nova resposta no chamado <strong>" . e($chamado['titulo']) . "</strong>.</p>
-                <p><a href=\"$link\">Ver resposta no portal</a></p>
+                <p>Olá, " . e($pessoa['nome']) . ".</p>
+                <p>Seu chamado <strong>" . e($chamado['titulo']) . "</strong> foi respondido por <strong>" . e($nomeResponsavel) . "</strong>:</p>
+                <p style=\"white-space:pre-wrap;\">" . nl2br(e($mensagemExibida)) . "</p>"
+                . ($anexos ? '<p>📎 Anexo(s): ' . implode(', ', array_map(fn ($a) => e($a['arquivo_nome_original']), $anexos)) . '</p>' : '') . "
+                <p><a href=\"$link\">Ver e responder no portal</a></p>
             ";
 
-            Mailer::enviar($cliente['contato_email'], "Nova resposta no seu chamado: {$chamado['titulo']}", $corpo);
+            Mailer::enviar($pessoa['email'], "Seu chamado foi respondido: {$chamado['titulo']}", $corpo);
         }
 
-        if (!empty($chamado['telefone_whatsapp'])) {
-            WhatsAppApi::enviarTexto($chamado['telefone_whatsapp'], "💬 Você recebeu uma nova resposta no chamado *#{$chamado['id']} - {$chamado['titulo']}*. Pode responder aqui mesmo pra continuar.");
+        if ($pessoa['telefone']) {
+            $texto = "💬 " . $pessoa['nome'] . ", seu chamado *#{$chamado['id']} - {$chamado['titulo']}* foi respondido por *{$nomeResponsavel}*:\n\n{$mensagemExibida}";
+            if ($anexos) {
+                $texto .= "\n\n📎 Anexo(s): " . implode(', ', array_map(fn ($a) => $a['arquivo_nome_original'], $anexos)) . ' -- acesse pelo portal pra ver/baixar.';
+            }
+            WhatsAppApi::enviarTexto($pessoa['telefone'], $texto);
         }
     }
 
