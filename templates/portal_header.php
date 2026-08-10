@@ -25,6 +25,9 @@ use AdminPrime\ClienteAuth;
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
+        <?php if (ClienteAuth::isMaster()): ?>
+        <li class="nav-item"><a class="nav-link" href="<?= url('portal/equipe.php') ?>"><i class="bi bi-diagram-3"></i> Setores e Usuários</a></li>
+        <?php endif; ?>
       </ul>
       <!-- "Meu Perfil" como item de menu separado foi removido -- o
            avatar+nome aqui do lado já é um link pro perfil, ter os dois

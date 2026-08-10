@@ -237,6 +237,20 @@ class ClienteAuth
     }
 
     /**
+     * Telas de gestão (Setores/Usuários do próprio cliente, ver
+     * portal/equipe.php) são só do MASTER -- um responsável de setor
+     * logado nunca deveria conseguir cadastrar setor ou outro usuário.
+     * Chamar depois de requireLogin(), no topo da página.
+     */
+    public static function exigirMaster(): void
+    {
+        if (!self::isMaster()) {
+            header('Location: ' . APP_BASE_PATH . '/portal/chamados.php');
+            exit;
+        }
+    }
+
+    /**
      * Portal do cliente só funciona em horário comercial (ver config.php) --
      * inclusive pra quem já está logado (não é só bloquear o login). Se
      * abrir uma página fora do horário, mostra um aviso simples e para a
