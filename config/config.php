@@ -90,6 +90,11 @@ define('WHATSAPP_VERIFY_TOKEN', getenv('ADMINPRIME_WHATSAPP_VERIFY_TOKEN') ?: 'p
 // Número (só dígitos, com DDI 55) que recebe o aviso de "novo chamado
 // aberto pelo WhatsApp" -- o celular pessoal do Kleber.
 define('WHATSAPP_NOTIFICAR_TELEFONE', getenv('ADMINPRIME_WHATSAPP_NOTIFICAR_TELEFONE') ?: ($isLocal ? '' : '5517981368201'));
+// Horário de funcionamento do bot (seg-sex, hora local America/Sao_Paulo já
+// setada abaixo) -- fora disso o bot só avisa o horário e não abre chamado,
+// a menos que o cliente tenha "liberação especial" (clientes.whatsapp_liberacao_horario).
+define('WHATSAPP_HORARIO_COMERCIAL_INICIO', 8);
+define('WHATSAPP_HORARIO_COMERCIAL_FIM', 18);
 
 // IA de sugestões de melhoria por setor (aba Setores, ver src/AiSugestoes.php)
 // -- usa a API do Google Gemini (plano gratuito, pedido do Kleber pra não

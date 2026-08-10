@@ -585,6 +585,14 @@ class Migrations
         $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS tentativas_identificacao INT NOT NULL DEFAULT 0 AFTER nome_pessoa");
         $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS bloqueado_ate DATETIME NULL AFTER tentativas_identificacao");
 
+        // Horário de funcionamento do bot (ver WHATSAPP_HORARIO_COMERCIAL_*
+        // em config.php) -- clientes com atendimento crítico fora do horário
+        // normal podem ganhar liberação especial aqui (aba Usuários).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp_liberacao_horario TINYINT(1) NOT NULL DEFAULT 0 AFTER bloqueado_whatsapp");
+        // Evita mandar o aviso de "fora do horário" em toda mensagem se a
+        // pessoa insistir escrevendo várias vezes fora do expediente.
+        $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS aviso_horario_enviado_em DATETIME NULL AFTER bloqueado_ate");
+
         // Treinamento passa a poder ser de um SETOR específico (não só do
         // cliente todo), e ganha os campos pra virar também "reunião" (tipo,
         // horário e link de call) -- pedido do Kleber pra ter uma agenda

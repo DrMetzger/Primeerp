@@ -28,12 +28,21 @@ class WhatsAppBot
     private const MAX_TENTATIVAS_IDENTIFICACAO = 3;
     private const MINUTOS_BLOQUEIO_SPAM = 30;
 
+    // Não repete o aviso de "fora do horário" pra mesma pessoa insistindo
+    // várias vezes seguidas dentro da mesma janela fora do expediente.
+    private const HORAS_ENTRE_AVISOS_HORARIO = 3;
+
     public static function processarTexto(PDO $pdo, string $telefone, string $nomePerfil, string $texto): void
     {
         $texto = trim($texto);
         $conversa = self::obterOuCriarConversa($pdo, $telefone, $nomePerfil);
 
         if (self::estaTemporariamenteBloqueado($conversa)) {
+            return;
+        }
+
+        if (self::foraDoHorarioComercial() && !self::clienteTemLiberacaoHorario($pdo, $conversa)) {
+            self::avisarForaDoHorario($pdo, $conversa);
             return;
         }
 
@@ -46,7 +55,7 @@ class WhatsAppBot
         match ($conversa['etapa']) {
             'identificando' => self::etapaIdentificar($pdo, $conversa),
             'aguardando_identificacao_manual' => self::etapaIdentificacaoManual($pdo, $conversa, $texto),
-            'continuar_ou_novo' => self::etapaContinuarOuNovo($pdo, $conversa, $texto),
+            'escolher_chamado' => self::etapaEscolherChamado($pdo, $conversa, $texto),
             'mensagem_continuar' => self::etapaMensagemContinuar($pdo, $conversa, $texto),
             'escolher_setor' => self::etapaEscolherSetor($pdo, $conversa, $texto),
             'titulo' => self::etapaTitulo($pdo, $conversa, $texto),
@@ -64,6 +73,11 @@ class WhatsAppBot
         $conversa = self::obterOuCriarConversa($pdo, $telefone, $nomePerfil);
 
         if (self::estaTemporariamenteBloqueado($conversa)) {
+            return;
+        }
+
+        if (self::foraDoHorarioComercial() && !self::clienteTemLiberacaoHorario($pdo, $conversa)) {
+            self::avisarForaDoHorario($pdo, $conversa);
             return;
         }
 
@@ -148,16 +162,15 @@ class WhatsAppBot
         $dados = ['cliente_id' => $clienteId, 'setor_responsavel_id' => $setorResponsavelId, 'nome_pessoa' => $nomePessoa];
         $saudacao = $nomePessoa ? ('Oi, ' . self::primeiroNome($nomePessoa) . '! 👋 ') : '👋 ';
 
-        $chamadoAberto = self::chamadoAbertoParaIdentidade($pdo, $clienteId, $setorResponsavelId);
-        if ($chamadoAberto) {
+        $chamadosAbertos = self::chamadosAbertosParaIdentidade($pdo, $clienteId, $setorResponsavelId);
+        if ($chamadosAbertos) {
             $dados['setor_id'] = $setorId;
-            $dados['chamado_continuar_id'] = $chamadoAberto['id'];
-            $dados['etapa'] = 'continuar_ou_novo';
+            $dados['chamado_continuar_id'] = null;
+            $dados['etapa'] = 'escolher_chamado';
             self::atualizarConversa($pdo, $conversa['id'], $dados);
-            WhatsAppApi::enviarBotoes($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}*. Vi que você já tem o chamado *#{$chamadoAberto['id']} - {$chamadoAberto['titulo']}* em aberto. Essa mensagem é sobre ele ou é um assunto novo?", [
-                ['id' => 'continuar', 'titulo' => '📌 Mesmo assunto'],
-                ['id' => 'novo', 'titulo' => '🆕 Assunto novo'],
-            ]);
+            $qtd = count($chamadosAbertos);
+            $resumoAbertos = $qtd === 1 ? 'Vi que você já tem 1 chamado em aberto.' : "Vi que você já tem {$qtd} chamados em aberto.";
+            WhatsAppApi::enviarLista($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}*. {$resumoAbertos} É sobre algum deles ou é um assunto novo?", 'Escolher', self::linhasChamadosAbertos($chamadosAbertos));
             return;
         }
 
@@ -230,21 +243,39 @@ class WhatsAppBot
         WhatsAppApi::enviarTexto($conversa['telefone'], '😕 Não encontrei nenhuma empresa com esse nome. Pode digitar de novo, com o nome completo da empresa?');
     }
 
-    private static function etapaContinuarOuNovo(PDO $pdo, array $conversa, string $texto): void
+    private static function etapaEscolherChamado(PDO $pdo, array $conversa, string $texto): void
     {
-        if (self::ehResposta($texto, ['novo', 'assunto novo', 'outro'])) {
+        if (self::ehResposta($texto, ['novo', 'assunto novo', 'outro', 'novo chamado'])) {
             self::iniciarNovoAssunto($pdo, $conversa);
             return;
         }
-        if (self::ehResposta($texto, ['continuar', 'mesmo assunto', 'mesmo'])) {
-            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'mensagem_continuar']);
-            WhatsAppApi::enviarTexto($conversa['telefone'], '✍️ Manda sua mensagem que eu registro no chamado.');
+
+        $clienteId = (int) $conversa['cliente_id'];
+        $setorResponsavelId = $conversa['setor_responsavel_id'] ? (int) $conversa['setor_responsavel_id'] : null;
+        $chamadosAbertos = self::chamadosAbertosParaIdentidade($pdo, $clienteId, $setorResponsavelId);
+
+        $chamadoEscolhidoId = str_starts_with($texto, 'chamado_') ? (int) substr($texto, strlen('chamado_')) : null;
+        $chamadoEscolhido = null;
+        foreach ($chamadosAbertos as $c) {
+            if ((int) $c['id'] === $chamadoEscolhidoId) {
+                $chamadoEscolhido = $c;
+                break;
+            }
+        }
+
+        if (!$chamadoEscolhido) {
+            if (!$chamadosAbertos) {
+                // Chamado(s) que existiam foram fechados nesse meio tempo --
+                // não tem mais nada pra "continuar", segue direto pro fluxo normal.
+                self::iniciarNovoAssunto($pdo, $conversa);
+                return;
+            }
+            WhatsAppApi::enviarLista($conversa['telefone'], '🤔 Não entendi. Toca numa das opções: é sobre algum chamado já aberto, ou é um assunto novo?', 'Escolher', self::linhasChamadosAbertos($chamadosAbertos));
             return;
         }
-        WhatsAppApi::enviarBotoes($conversa['telefone'], 'Toca num dos botões: é sobre o chamado já aberto ou é um assunto novo?', [
-            ['id' => 'continuar', 'titulo' => '📌 Mesmo assunto'],
-            ['id' => 'novo', 'titulo' => '🆕 Assunto novo'],
-        ]);
+
+        self::atualizarConversa($pdo, $conversa['id'], ['chamado_continuar_id' => $chamadoEscolhido['id'], 'etapa' => 'mensagem_continuar']);
+        WhatsAppApi::enviarTexto($conversa['telefone'], "✍️ Certo, chamado #{$chamadoEscolhido['id']}. Manda sua mensagem que eu registro por lá.");
     }
 
     private static function etapaMensagemContinuar(PDO $pdo, array $conversa, string $texto): void
@@ -516,18 +547,35 @@ class WhatsAppBot
         return null;
     }
 
-    /** Chamado ainda aberto (não fechado) dessa mesma identidade -- master do cliente ou responsável de setor específico. */
-    private static function chamadoAbertoParaIdentidade(PDO $pdo, int $clienteId, ?int $setorResponsavelId): ?array
+    // Lista tem no máximo 10 linhas (limite da Meta); reserva 1 pra "novo
+    // chamado", então no máximo 9 chamados abertos aparecem na listinha.
+    private const MAX_CHAMADOS_ABERTOS_NA_LISTA = 9;
+
+    /** Chamados ainda abertos (não fechados) dessa mesma identidade -- master do cliente ou responsável de setor específico. */
+    private static function chamadosAbertosParaIdentidade(PDO $pdo, int $clienteId, ?int $setorResponsavelId): array
     {
         if ($setorResponsavelId) {
-            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE aberto_por_setor_responsavel_id = ? AND status != 'fechado' ORDER BY criado_em DESC LIMIT 1");
+            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE aberto_por_setor_responsavel_id = ? AND status != 'fechado' ORDER BY criado_em DESC LIMIT " . self::MAX_CHAMADOS_ABERTOS_NA_LISTA);
             $stmt->execute([$setorResponsavelId]);
         } else {
-            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE cliente_id = ? AND aberto_por_tipo = 'master' AND status != 'fechado' ORDER BY criado_em DESC LIMIT 1");
+            $stmt = $pdo->prepare("SELECT id, titulo FROM chamados WHERE cliente_id = ? AND aberto_por_tipo = 'master' AND status != 'fechado' ORDER BY criado_em DESC LIMIT " . self::MAX_CHAMADOS_ABERTOS_NA_LISTA);
             $stmt->execute([$clienteId]);
         }
-        $chamado = $stmt->fetch();
-        return $chamado ?: null;
+        return $stmt->fetchAll();
+    }
+
+    private static function linhasChamadosAbertos(array $chamadosAbertos): array
+    {
+        $linhas = [];
+        foreach ($chamadosAbertos as $chamado) {
+            $linhas[] = [
+                'id' => 'chamado_' . $chamado['id'],
+                'titulo' => '#' . $chamado['id'],
+                'descricao' => $chamado['titulo'],
+            ];
+        }
+        $linhas[] = ['id' => 'novo', 'titulo' => '🆕 Novo chamado', 'descricao' => 'Assunto diferente dos de cima'];
+        return $linhas;
     }
 
     /** Setores com pelo menos 1 responsável relacionado ou que sejam o setor do master. */
@@ -594,6 +642,51 @@ class WhatsAppBot
     private static function estaTemporariamenteBloqueado(array $conversa): bool
     {
         return $conversa['bloqueado_ate'] && strtotime($conversa['bloqueado_ate']) > time();
+    }
+
+    /** Fora de seg-sex das WHATSAPP_HORARIO_COMERCIAL_INICIO às _FIM (horário local, ver date_default_timezone_set em config.php). */
+    private static function foraDoHorarioComercial(?\DateTimeImmutable $agora = null): bool
+    {
+        $agora ??= new \DateTimeImmutable('now');
+        if ((int) $agora->format('N') >= 6) {
+            return true; // sábado (6) ou domingo (7)
+        }
+        $hora = (int) $agora->format('G');
+        return $hora < WHATSAPP_HORARIO_COMERCIAL_INICIO || $hora >= WHATSAPP_HORARIO_COMERCIAL_FIM;
+    }
+
+    /**
+     * Liberação especial (aba Usuários, clientes.whatsapp_liberacao_horario)
+     * pra funcionar fora do horário comercial. Se a conversa ainda não tem
+     * cliente_id (mensagem antes de terminar a identificação), tenta achar
+     * pelo telefone só pra essa checagem -- não avança a identificação
+     * em si, isso continua acontecendo normalmente depois.
+     */
+    private static function clienteTemLiberacaoHorario(PDO $pdo, array $conversa): bool
+    {
+        $clienteId = $conversa['cliente_id'] ? (int) $conversa['cliente_id'] : null;
+        if (!$clienteId) {
+            $identificacao = self::identificarPorTelefone($pdo, $conversa['telefone']);
+            $clienteId = $identificacao['cliente_id'] ?? null;
+        }
+        if (!$clienteId) {
+            return false;
+        }
+
+        $stmt = $pdo->prepare('SELECT whatsapp_liberacao_horario FROM clientes WHERE id = ?');
+        $stmt->execute([$clienteId]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    private static function avisarForaDoHorario(PDO $pdo, array $conversa): void
+    {
+        $ultimoAviso = $conversa['aviso_horario_enviado_em'] ?? null;
+        if ($ultimoAviso && strtotime($ultimoAviso) > time() - self::HORAS_ENTRE_AVISOS_HORARIO * 3600) {
+            return; // já avisou recentemente, fica quieto pra não repetir toda hora
+        }
+
+        self::atualizarConversa($pdo, $conversa['id'], ['aviso_horario_enviado_em' => date('Y-m-d H:i:s')]);
+        WhatsAppApi::enviarTexto($conversa['telefone'], '🕗 Nosso atendimento por aqui funciona de segunda a sexta, das ' . WHATSAPP_HORARIO_COMERCIAL_INICIO . 'h às ' . WHATSAPP_HORARIO_COMERCIAL_FIM . 'h. Recebemos sua mensagem e alguém vai te responder no próximo horário comercial. 🙏');
     }
 
     /**

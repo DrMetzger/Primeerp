@@ -627,6 +627,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Acesso ao WhatsApp atualizado.');
     }
 
+    // Liberação especial pra funcionar fora do horário comercial (ver
+    // WHATSAPP_HORARIO_COMERCIAL_* em config.php) -- é do CLIENTE inteiro,
+    // não de uma pessoa específica.
+    if ($acao === 'alternar_liberacao_horario') {
+        $pdo->prepare('UPDATE clientes SET whatsapp_liberacao_horario = NOT whatsapp_liberacao_horario WHERE id = ?')
+            ->execute([$clienteId]);
+        flash_set('sucesso', 'Liberação de horário do WhatsApp atualizada.');
+    }
+
     // Vincula (ou desvincula, se setor_id vier vazio) um usuário JÁ
     // cadastrado a um setor específico -- é isso que "Gerenciar setores"
     // usa pra buscar/relacionar em vez de cadastrar uma pessoa nova.
@@ -2082,7 +2091,7 @@ require __DIR__ . '/templates/header.php';
             <div class="card-body p-0">
                 <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th>WhatsApp</th><th></th></tr></thead>
+                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th>WhatsApp</th><th>Horário</th><th></th></tr></thead>
                     <tbody>
                         <tr>
                             <td><?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?></td>
@@ -2111,6 +2120,16 @@ require __DIR__ . '/templates/header.php';
                                     <input type="hidden" name="responsavel_id" value="">
                                     <button type="submit" class="btn btn-sm <?= $cliente['bloqueado_whatsapp'] ? 'btn-outline-danger' : 'btn-outline-success' ?>" title="<?= $cliente['bloqueado_whatsapp'] ? 'Bloqueado -- clique pra liberar' : 'Liberado -- clique pra bloquear' ?>">
                                         <i class="bi <?= $cliente['bloqueado_whatsapp'] ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i> <?= $cliente['bloqueado_whatsapp'] ? 'Bloqueado' : 'Liberado' ?>
+                                    </button>
+                                </form>
+                            </td>
+                            <td>
+                                <form method="post" class="d-inline" onsubmit="return confirm('<?= $cliente['whatsapp_liberacao_horario'] ? 'Remover' : 'Dar' ?> liberação especial pro WhatsApp de <?= e($cliente['nome']) ?> funcionar fora do horário comercial (seg-sex, ' . WHATSAPP_HORARIO_COMERCIAL_INICIO . 'h-' . WHATSAPP_HORARIO_COMERCIAL_FIM . 'h)?');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="alternar_liberacao_horario">
+                                    <input type="hidden" name="aba_retorno" value="usuarios">
+                                    <button type="submit" class="btn btn-sm <?= $cliente['whatsapp_liberacao_horario'] ? 'btn-outline-warning' : 'btn-outline-secondary' ?>" title="Vale pra qualquer pessoa desse cliente, no master ou em qualquer setor">
+                                        <i class="bi <?= $cliente['whatsapp_liberacao_horario'] ? 'bi-clock-fill' : 'bi-clock' ?>"></i> <?= $cliente['whatsapp_liberacao_horario'] ? '24h liberado' : 'Só horário comercial' ?>
                                     </button>
                                 </form>
                             </td>
@@ -2148,6 +2167,7 @@ require __DIR__ . '/templates/header.php';
                                     </button>
                                 </form>
                             </td>
+                            <td class="text-muted small" title="Liberação de horário vale pro cliente inteiro, é configurada só na linha do master">—</td>
                             <td class="text-end" onclick="event.stopPropagation()">
                                 <div class="d-flex flex-wrap gap-1 justify-content-end">
                                     <form method="post" class="d-inline">
@@ -2185,7 +2205,7 @@ require __DIR__ . '/templates/header.php';
                         </tr>
                         <?php endforeach; ?>
                         <?php if (empty($usuariosCliente)): ?>
-                            <tr><td colspan="8" class="text-muted text-center py-3">Nenhum outro usuário cadastrado ainda -- só o master.</td></tr>
+                            <tr><td colspan="9" class="text-muted text-center py-3">Nenhum outro usuário cadastrado ainda -- só o master.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

@@ -88,10 +88,11 @@ class WhatsAppApi
                 'action' => [
                     'button' => mb_substr($tituloBotao, 0, 20),
                     'sections' => [[
-                        'rows' => array_map(fn ($l) => [
+                        'rows' => array_map(fn ($l) => array_filter([
                             'id' => $l['id'],
                             'title' => mb_substr($l['titulo'], 0, 24),
-                        ], $linhas),
+                            'description' => isset($l['descricao']) ? mb_substr($l['descricao'], 0, 72) : null,
+                        ], fn ($v) => $v !== null), $linhas),
                     ]],
                 ],
             ],
