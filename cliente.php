@@ -518,6 +518,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // uma) -- cada tipo gera e guarda separado, pra dar pra ter todas
     // geradas ao mesmo tempo sem uma sobrescrever a outra.
     if ($acao === 'gerar_sugestao_implantacao') {
+        // Chamada síncrona ao Gemini com retry (ver AiSugestoes) pode passar
+        // de 1-2 minutos no pior caso (vários documentos grandes + retry) --
+        // sem isso, o limite padrão de execução do PHP (30-60s na hospedagem
+        // compartilhada) corta a resposta NO MEIO, e o navegador recebe um
+        // JSON incompleto (erro "Unexpected end of JSON input" reportado
+        // pelo Kleber). Não cobre timeout de proxy/servidor web, só do PHP.
+        set_time_limit(200);
         $ehAjaxImplantacaoIa = ($_POST['ajax'] ?? '') === '1';
         $tipoSugestaoImplantacao = $_POST['tipo'] ?? '';
         $forcarSemEtapasImplantacaoIa = ($_POST['forcar_sem_etapas'] ?? '') === '1';
@@ -576,10 +583,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
                 $arquivosImplantacaoIa = [];
                 $nomesIgnoradosImplantacaoIa = [];
+                $textoDocxImplantacaoIa = '';
                 $bytesAcumuladosImplantacaoIa = 0;
                 $limiteTotalImplantacaoIa = 18 * 1024 * 1024; // margem de segurança abaixo do limite do Gemini pra requisição inline
                 foreach ($docsImplantacaoIa as $docIa) {
                     $extensaoDocIa = strtolower(pathinfo($docIa['arquivo_nome_original'], PATHINFO_EXTENSION));
+
+                    // .docx não é aceito como inline_data pelo Gemini (só
+                    // PDF/imagem/texto/áudio/vídeo) -- muito comum vir
+                    // diagrama de processo em Word, então extrai o texto
+                    // aqui e manda como texto puro junto do prompt em vez de
+                    // simplesmente ignorar o arquivo.
+                    if ($extensaoDocIa === 'docx') {
+                        $textoExtraidoDocx = extrair_texto_docx($docIa['dados']);
+                        if ($textoExtraidoDocx) {
+                            $textoDocxImplantacaoIa .= "\n\n--- Conteúdo de \"{$docIa['arquivo_nome_original']}\" ---\n"
+                                . mb_substr($textoExtraidoDocx, 0, 20000) . "\n--- Fim de \"{$docIa['arquivo_nome_original']}\" ---\n";
+                            continue;
+                        }
+                        $nomesIgnoradosImplantacaoIa[] = $docIa['arquivo_nome_original'] . ' (não deu pra extrair o texto do Word)';
+                        continue;
+                    }
+
                     $mimeDocIa = $mimesAceitosImplantacaoIa[$extensaoDocIa] ?? null;
                     if (!$mimeDocIa || count($arquivosImplantacaoIa) >= 8 || $bytesAcumuladosImplantacaoIa + (int) $docIa['arquivo_tamanho'] > $limiteTotalImplantacaoIa) {
                         $nomesIgnoradosImplantacaoIa[] = $docIa['arquivo_nome_original'];
@@ -592,6 +617,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $promptImplantacao = "Você é um consultor de implantação de ERP (TOTVS Protheus) de uma consultoria (PrimeERP). "
                     . "Gere {$tiposSugestaoImplantacao[$tipoSugestaoImplantacao]} pro cliente \"{$cliente['nome']}\". "
                     . "Responda em português, de forma prática e organizada em tópicos ou lista numerada, pronto pra ser usado de verdade (evite generalidades).\n\n"
+                    . "REGRA MAIS IMPORTANTE: tudo que você mencionar sobre o TOTVS Protheus (nome de módulo, rotina, tela, campo, parâmetro, sigla) precisa ser algo que REALMENTE existe no Protheus -- nunca invente nome de módulo, função ou rotina que não existe, mesmo que pareça plausível. Se não tiver certeza absoluta se algo existe ou de como se chama no Protheus, NÃO invente: diga isso explicitamente (\"verificar com a equipe/documentação do Protheus qual é a rotina exata pra isso\") em vez de citar um nome específico chutado. Siga as boas práticas reais de implantação do Protheus, não de ERP genérico.\n\n"
                     . "Contexto desse cliente:\n"
                     . '- Setores cadastrados: ' . ($nomesSetoresImplantacaoIa ? implode(', ', $nomesSetoresImplantacaoIa) : 'nenhum setor cadastrado ainda') . "\n"
                     . "- Quantidade de pessoas/usuários cadastrados: {$qtdUsuariosImplantacaoIa}\n"
@@ -607,6 +633,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($arquivosImplantacaoIa) {
                     $promptImplantacao .= "\nVocê tem acesso ao conteúdo de " . count($arquivosImplantacaoIa) . ' documento(s) anexados a essa implantação (anexados nessa mesma mensagem, abaixo do texto) -- USE o conteúdo real deles pra tornar a sugestão específica desse cliente, não genérica.' . "\n";
                 }
+                if ($textoDocxImplantacaoIa !== '') {
+                    $promptImplantacao .= "\nConteúdo extraído de documento(s) Word anexados (use igual aos outros anexos):\n" . $textoDocxImplantacaoIa . "\n";
+                }
                 if ($nomesIgnoradosImplantacaoIa) {
                     $promptImplantacao .= '- Não foi possível ler o conteúdo de: ' . implode(', ', $nomesIgnoradosImplantacaoIa) . " (formato não suportado ou lote de anexos grande demais) -- considere só o nome desses arquivos.\n";
                 }
@@ -619,9 +648,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $pdo->prepare('INSERT INTO implantacao_sugestoes_ia (cliente_id, tipo, sugestao, criado_por) VALUES (?, ?, ?, ?)')
                         ->execute([$clienteId, $tipoSugestaoImplantacao, $resultadoImplantacaoIa['texto'], Auth::userId()]);
+                    $avisoIgnoradosImplantacaoIa = $nomesIgnoradosImplantacaoIa ? ' (não deu pra ler: ' . implode(', ', $nomesIgnoradosImplantacaoIa) . ')' : '';
                     $respostaImplantacaoIa = [
                         'sucesso' => true,
-                        'mensagem' => 'Sugestão gerada.',
+                        'mensagem' => 'Sugestão gerada.' . $avisoIgnoradosImplantacaoIa,
                         'sugestao' => $resultadoImplantacaoIa['texto'],
                         'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
                     ];
@@ -3491,7 +3521,20 @@ document.addEventListener('DOMContentLoaded', function () {
         if (forcarSemEtapas) dados.set('forcar_sem_etapas', '1');
 
         fetch(window.location.href, { method: 'POST', body: dados })
-            .then(function (resp) { return resp.json(); })
+            .then(function (resp) {
+                return resp.text().then(function (textoCru) {
+                    try {
+                        return JSON.parse(textoCru);
+                    } catch (erroParse) {
+                        // Resposta vazia/incompleta -- normalmente o servidor
+                        // matou a requisição no meio (documentos grandes
+                        // demais, ou demorou mais que o limite do servidor).
+                        // Sem isso, virava um SyntaxError cru sem explicação
+                        // nenhuma pro Kleber.
+                        throw new Error('O servidor não terminou de responder (provavelmente demorou demais -- tente com menos documentos anexados, ou tente de novo).');
+                    }
+                });
+            })
             .then(function (json) {
                 var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
                 if (!alvo) return;
@@ -3510,7 +3553,8 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .catch(function (erro) {
                 var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
-                if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a sugestão: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                var mensagemErro = erro && erro.message ? erro.message : String(erro);
+                if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha ao gerar a sugestão: ' + escaparHtmlCalendario(mensagemErro) + '</div>';
             })
             .finally(function () {
                 escondercarregando();

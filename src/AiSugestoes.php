@@ -25,8 +25,16 @@ class AiSugestoes
     // acontecer mesmo depois de tentar de novo, cai pra esse aqui (GA,
     // capacidade normal) em vez de simplesmente falhar na tela.
     private const MODELO_RESERVA = 'gemini-2.5-flash';
-    private const TENTATIVAS_POR_MODELO = 3;
-    private const ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 3;
+    // Pouco tempo de espera/tentativa de propósito -- isso tudo roda dentro
+    // de uma requisição HTTP síncrona (cliente.php aguardando), e hospedagem
+    // compartilhada normalmente mata o PHP em 30-60s. Errar pra menos aqui
+    // (retry mais curto, mas ainda cobre o caso de 503 passageiro) é melhor
+    // que travar a página no meio e devolver resposta cortada (ver
+    // set_time_limit() em cliente.php, que dá uma folga adicional, mas não
+    // resolve timeout de proxy/servidor, só do PHP em si).
+    private const TENTATIVAS_POR_MODELO = 2;
+    private const ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 2;
+    private const TIMEOUT_POR_CHAMADA_SEGUNDOS = 55;
 
     public static function configurada(): bool
     {
@@ -117,7 +125,7 @@ class AiSugestoes
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => ['content-type: application/json'],
             CURLOPT_POSTFIELDS => json_encode($corpo),
-            CURLOPT_TIMEOUT => 90,
+            CURLOPT_TIMEOUT => self::TIMEOUT_POR_CHAMADA_SEGUNDOS,
         ]);
 
         $resposta = curl_exec($ch);

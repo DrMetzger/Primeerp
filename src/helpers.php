@@ -231,6 +231,48 @@ function apenas_digitos(?string $valor): ?string
 }
 
 /**
+ * Texto puro de dentro de um .docx (Word) -- o Gemini NÃO aceita esse mime
+ * como inline_data (só PDF/imagem/texto/áudio/vídeo), então pra ele "ler" um
+ * diagrama de processo em Word (comum nos anexos de Implantação) é preciso
+ * extrair o texto aqui e mandar como texto puro em vez do arquivo em si.
+ * .docx é um .zip com XML dentro -- word/document.xml tem o texto do corpo.
+ * Retorna null se não conseguir abrir/ler (arquivo corrompido, não é
+ * zip válido, etc.) -- quem chamar trata como "não deu pra ler".
+ */
+function extrair_texto_docx(string $bytesDocx): ?string
+{
+    $arquivoTemp = tempnam(sys_get_temp_dir(), 'docx_');
+    if ($arquivoTemp === false) {
+        return null;
+    }
+    file_put_contents($arquivoTemp, $bytesDocx);
+
+    $zip = new \ZipArchive();
+    $textoExtraido = null;
+    if ($zip->open($arquivoTemp) === true) {
+        $xml = $zip->getFromName('word/document.xml');
+        $zip->close();
+        if ($xml !== false) {
+            // Cada quebra de parágrafo do Word (</w:p>) some ao tirar as
+            // tags -- troca por quebra de linha ANTES de remover as tags,
+            // senão o texto todo vira um parágrafo gigante sem separação.
+            $xml = str_replace('</w:p>', "\n", $xml);
+            $textoExtraido = trim(html_entity_decode(strip_tags($xml), ENT_QUOTES, 'UTF-8'));
+        }
+    }
+
+    // ZipArchive::close() pode remover o arquivo sozinho quando os bytes não
+    // formam um .docx de verdade (ex.: arquivo vazio é aceito por open() como
+    // "zip vazio válido", mas close() apaga o arquivo por não ter conteúdo
+    // pra gravar) -- confere antes pra não gerar warning de unlink() em
+    // arquivo que já não existe mais.
+    if (file_exists($arquivoTemp)) {
+        unlink($arquivoTemp);
+    }
+    return $textoExtraido !== '' ? $textoExtraido : null;
+}
+
+/**
  * Compara o wa_id que a Meta manda (DDI + DDD + número, ex: 5511988887777)
  * com o telefone guardado no cadastro (só DDD + número, sem DDI, ex:
  * 11988887777 ou 1188887777) -- usado pelo bot do WhatsApp pra achar de
