@@ -20,6 +20,13 @@ namespace AdminPrime;
 class AiSugestoes
 {
     private const MODELO = 'gemini-3-flash-preview';
+    // Preview tem MENOS capacidade reservada que modelo estável -- em hora
+    // de pico devolve 503 "alta demanda" com muito mais frequência. Se isso
+    // acontecer mesmo depois de tentar de novo, cai pra esse aqui (GA,
+    // capacidade normal) em vez de simplesmente falhar na tela.
+    private const MODELO_RESERVA = 'gemini-2.5-flash';
+    private const TENTATIVAS_POR_MODELO = 3;
+    private const ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 3;
 
     public static function configurada(): bool
     {
@@ -58,8 +65,6 @@ class AiSugestoes
             return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada.'];
         }
 
-        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . $chave;
-
         $partes = [];
         foreach ($arquivos as $arquivo) {
             $partes[] = ['inline_data' => ['mime_type' => $arquivo['mime'], 'data' => base64_encode($arquivo['dados'])]];
@@ -70,6 +75,41 @@ class AiSugestoes
         if ($ferramentas) {
             $corpo['tools'] = $ferramentas;
         }
+
+        // Tenta o modelo preview algumas vezes (503 "alta demanda" costuma
+        // ser passageiro, ver comentário na const) e, se nem assim
+        // conseguir, cai pro modelo de reserva antes de desistir de vez --
+        // sem isso, um pico de demanda no Google derrubava a geração toda.
+        foreach ([self::MODELO, self::MODELO_RESERVA] as $indiceModelo => $modelo) {
+            $ehUltimoModelo = $indiceModelo === 1;
+            $tentativas = $ehUltimoModelo ? 1 : self::TENTATIVAS_POR_MODELO;
+
+            for ($tentativa = 1; $tentativa <= $tentativas; $tentativa++) {
+                $resultado = self::chamarModelo($modelo, $chave, $corpo);
+
+                if ($resultado['ok'] || !$resultado['tentar_de_novo']) {
+                    return ['ok' => $resultado['ok'], 'texto' => $resultado['texto'], 'erro' => $resultado['erro']];
+                }
+
+                $ultimaTentativaDesseModelo = $tentativa === $tentativas;
+                if (!$ultimaTentativaDesseModelo) {
+                    sleep(self::ESPERA_ENTRE_TENTATIVAS_SEGUNDOS);
+                }
+            }
+        }
+
+        return ['ok' => false, 'texto' => null, 'erro' => $resultado['erro']];
+    }
+
+    /**
+     * Uma chamada de verdade à Graph API do Gemini. 'tentar_de_novo' só
+     * fica true pra erro claramente PASSAGEIRO (503 alta demanda, 429 cota
+     * momentânea) -- erro de chave errada/conteúdo bloqueado etc. não vale
+     * a pena repetir, já volta direto pra tela.
+     */
+    private static function chamarModelo(string $modelo, string $chave, array $corpo): array
+    {
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $modelo . ':generateContent?key=' . $chave;
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -86,33 +126,39 @@ class AiSugestoes
         curl_close($ch);
 
         if ($resposta === false) {
-            error_log('IA: falha de rede chamando o Gemini: ' . $erroCurl);
-            return ['ok' => false, 'texto' => null, 'erro' => 'Falha de rede ao chamar o Gemini: ' . $erroCurl];
+            error_log('IA: falha de rede chamando o Gemini (' . $modelo . '): ' . $erroCurl);
+            return ['ok' => false, 'texto' => null, 'erro' => 'Falha de rede ao chamar o Gemini: ' . $erroCurl, 'tentar_de_novo' => true];
         }
 
         $dados = json_decode($resposta, true);
 
         if ($codigoHttp >= 300) {
             $mensagemGoogle = $dados['error']['message'] ?? $resposta;
-            error_log('IA: falha na chamada à API do Gemini: HTTP ' . $codigoHttp . ' -- ' . $mensagemGoogle);
-            return ['ok' => false, 'texto' => null, 'erro' => "Gemini retornou HTTP {$codigoHttp}: {$mensagemGoogle}"];
+            error_log('IA: falha na chamada à API do Gemini (' . $modelo . '): HTTP ' . $codigoHttp . ' -- ' . $mensagemGoogle);
+            return [
+                'ok' => false,
+                'texto' => null,
+                'erro' => "Gemini retornou HTTP {$codigoHttp}: {$mensagemGoogle}",
+                'tentar_de_novo' => in_array($codigoHttp, [429, 500, 503], true),
+            ];
         }
 
         // Concatena o texto de TODAS as partes (não só a primeira) -- com
         // ferramenta de busca ligada o Gemini às vezes devolve mais de uma
         // parte (ex.: uma de raciocínio + uma de resposta final).
-        $partes = $dados['candidates'][0]['content']['parts'] ?? [];
-        $texto = implode('', array_filter(array_column($partes, 'text')));
+        $partesResposta = $dados['candidates'][0]['content']['parts'] ?? [];
+        $texto = implode('', array_filter(array_column($partesResposta, 'text')));
 
         if ($texto === '') {
             // Resposta 200 mas sem texto -- normalmente bloqueio de safety
             // (finishReason=SAFETY) ou resposta vazia. Mostra o que o
-            // Google mandou pra dar pra entender o motivo.
+            // Google mandou pra dar pra entender o motivo. Não vale repetir
+            // (não é erro passageiro, o modelo decidiu não responder).
             $motivo = $dados['candidates'][0]['finishReason'] ?? 'desconhecido';
-            return ['ok' => false, 'texto' => null, 'erro' => "Gemini respondeu sem texto (motivo: {$motivo})."];
+            return ['ok' => false, 'texto' => null, 'erro' => "Gemini respondeu sem texto (motivo: {$motivo}).", 'tentar_de_novo' => false];
         }
 
-        return ['ok' => true, 'texto' => $texto, 'erro' => null];
+        return ['ok' => true, 'texto' => $texto, 'erro' => null, 'tentar_de_novo' => false];
     }
 
     /**
