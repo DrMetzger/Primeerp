@@ -1071,6 +1071,9 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
    usada dentro da bolha escura da equipe). */
 .resumo-anexos-chamado { background-color: var(--ph-neutral-bg); border-radius: var(--ph-radius-sm); padding: .65rem .85rem; }
 .resumo-anexos-titulo { font-size: .78rem; font-weight: 700; color: var(--ph-text-muted); margin-bottom: .4rem; text-transform: uppercase; letter-spacing: .02em; }
+.resumo-reunioes-chamado { background-color: var(--ph-neutral-bg); border-radius: var(--ph-radius-sm); padding: .65rem .85rem; }
+.reuniao-vinculada-item { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .85rem; padding: .25rem 0; }
+.reuniao-vinculada-item + .reuniao-vinculada-item { border-top: 1px solid var(--ph-border); }
 .chat-anexos .anexo-link.anexo-link-resumo { background-color: #fff; border-color: var(--ph-border); color: var(--ph-text); }
 .chat-anexos .anexo-link.anexo-link-resumo:hover { background-color: var(--ph-primary-light); }
 
@@ -1487,6 +1490,8 @@ a.card-cliente, a.card-cliente:hover {
 }
 .calendario-evento.calendario-evento-treinamento { background-color: #7c3aed; }
 .calendario-evento.calendario-evento-reuniao { background-color: #0891b2; }
+.calendario-evento.calendario-evento-conversa { background-color: #15803d; }
+.calendario-evento.calendario-evento-auxilio { background-color: #b45309; }
 .calendario-evento.calendario-evento-cancelado { background-color: var(--ph-neutral); text-decoration: line-through; opacity: .7; }
 
 .calendario-mais-eventos {
@@ -1544,6 +1549,8 @@ a.card-cliente, a.card-cliente:hover {
     border-left: 4px solid #7c3aed;
 }
 .calendario-evento-item.calendario-evento-reuniao { border-left-color: #0891b2; }
+.calendario-evento-item.calendario-evento-conversa { border-left-color: #15803d; }
+.calendario-evento-item.calendario-evento-auxilio { border-left-color: #b45309; }
 .calendario-evento-item.calendario-evento-cancelado { border-left-color: var(--ph-neutral); opacity: .7; text-decoration: line-through; }
 .calendario-evento-item .calendario-evento-item-hora { font-weight: 700; font-size: .78rem; color: var(--ph-text-muted); white-space: nowrap; }
 .calendario-evento-item .calendario-evento-item-titulo { font-size: .86rem; }

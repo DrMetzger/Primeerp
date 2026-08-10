@@ -147,6 +147,13 @@ foreach ($stmtAnexos->fetchAll() as $a) {
     $anexosPorLinha[$chave][] = $a;
 }
 
+// Reunião/conversa/treinamento/auxílio vinculado a este chamado (ver
+// treinamentos.chamado_id) -- mesma ideia de cliente.php, pro cliente também
+// ver que houve um Meet por causa desse chamado.
+$stmtTreinamentosChamado = $pdo->prepare('SELECT titulo, tipo, data_inicio, hora_inicio, link_reuniao FROM treinamentos WHERE chamado_id = ? ORDER BY data_inicio DESC, hora_inicio DESC');
+$stmtTreinamentosChamado->execute([$chamadoId]);
+$treinamentosDoChamado = $stmtTreinamentosChamado->fetchAll();
+
 // Foto de cada membro da equipe que respondeu -- mesma ideia de cliente.php:
 // antes só se sabia o NOME (autor_nome, texto solto), nunca a foto de qual
 // usuário era, então toda resposta da equipe caía na inicial genérica.
@@ -283,6 +290,7 @@ require __DIR__ . '/../templates/portal_header.php';
 </div>
 
 <?= render_resumo_anexos_chamado($anexosPorLinha) ?>
+<?= render_reunioes_vinculadas_chamado($treinamentosDoChamado) ?>
 
 <h6 class="mt-4 mb-2">Conversa</h6>
 <!-- Suas próprias mensagens ficam à direita (convenção normal de chat), a

@@ -1062,6 +1062,32 @@ function render_resumo_anexos_chamado(array $anexosPorLinha): string
     return $html;
 }
 
+/**
+ * Mostra na tela do chamado (admin e portal) que aconteceu uma reunião/
+ * conversa/treinamento/auxílio vinculado a ele (ver treinamentos.chamado_id)
+ * -- pedido do Kleber pra poder registrar que rolou um Meet por causa de um
+ * chamado e ver isso mais tarde sem precisar procurar na aba Setores.
+ */
+function render_reunioes_vinculadas_chamado(array $treinamentos): string
+{
+    if (!$treinamentos) {
+        return '';
+    }
+
+    $html = '<div class="resumo-reunioes-chamado mb-3"><div class="resumo-anexos-titulo"><i class="bi bi-calendar-event"></i> Reuniões/conversas vinculadas (' . count($treinamentos) . ')</div>';
+    foreach ($treinamentos as $t) {
+        $quando = $t['data_inicio'] ? formatar_data($t['data_inicio']) . ($t['hora_inicio'] ? ' ' . substr($t['hora_inicio'], 0, 5) : '') : 'sem data';
+        $html .= '<div class="reuniao-vinculada-item">' . badge_tipo_treinamento($t['tipo']) . ' <strong>' . e($t['titulo']) . '</strong> <span class="text-muted small">' . e($quando) . '</span>';
+        if ($t['link_reuniao']) {
+            $html .= ' <a href="' . e($t['link_reuniao']) . '" target="_blank" class="small"><i class="bi bi-camera-video"></i> Entrar</a>';
+        }
+        $html .= '</div>';
+    }
+    $html .= '</div>';
+
+    return $html;
+}
+
 function badge_prioridade(string $prioridade): string
 {
     $mapa = [
@@ -1072,6 +1098,24 @@ function badge_prioridade(string $prioridade): string
     ];
     [$label, $classe, $icone] = $mapa[$prioridade] ?? [$prioridade, '', 'bi-circle'];
     return '<span class="badge ' . e($classe) . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
+}
+
+/**
+ * Badge do tipo de evento da agenda (treinamentos.tipo) -- treinamento e
+ * reunião já existiam, conversa/auxílio foram adicionados pra cobrir
+ * bate-papo rápido e ajuda pontual (geralmente decorrente de um chamado),
+ * que não são nem treinamento formal nem reunião de verdade.
+ */
+function badge_tipo_treinamento(string $tipo): string
+{
+    $mapa = [
+        'treinamento' => ['Treinamento', 'bg-secondary-subtle text-secondary-emphasis', 'bi-mortarboard'],
+        'reuniao' => ['Reunião', 'bg-info-subtle text-info-emphasis', 'bi-camera-video'],
+        'conversa' => ['Conversa', 'bg-success-subtle text-success-emphasis', 'bi-chat-dots'],
+        'auxilio' => ['Auxílio', 'bg-warning-subtle text-warning-emphasis', 'bi-life-preserver'],
+    ];
+    [$label, $classe, $icone] = $mapa[$tipo] ?? [$tipo, 'bg-secondary-subtle text-secondary-emphasis', 'bi-circle'];
+    return '<span class="badge ' . $classe . '"><i class="bi ' . e($icone) . '"></i> ' . e($label) . '</span>';
 }
 
 /**

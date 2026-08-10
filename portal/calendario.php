@@ -109,7 +109,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <div class="p-3 border-bottom">
             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                 <div>
-                    <span class="badge bg-<?= $t['tipo'] === 'reuniao' ? 'info' : 'dark' ?>"><?= $t['tipo'] === 'reuniao' ? 'Reunião' : 'Treinamento' ?></span>
+                    <?= badge_tipo_treinamento($t['tipo']) ?>
                     <?php if ($t['status'] === 'cancelado'): ?><span class="badge bg-secondary">Cancelado</span><?php endif; ?>
                     <?php if ($t['setor_nome']): ?><span class="badge bg-light text-dark border"><?= e($t['setor_nome']) ?></span><?php endif; ?>
                     <div class="fw-semibold mt-1"><?= e($t['titulo']) ?></div>

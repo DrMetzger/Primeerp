@@ -738,6 +738,17 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Reunião/treinamento passa a poder ser atrelado a um CHAMADO
+        // específico -- pedido do Kleber pra registrar que uma conversa/
+        // auxílio no Meet aconteceu por causa de um chamado, e ver isso
+        // direto na tela do chamado depois. NULL = evento sem chamado
+        // vinculado (continua funcionando exatamente como antes). Também
+        // ganha os tipos "conversa" (bate-papo rápido, sem ser treinamento
+        // formal) e "auxílio" (ajuda pontual, geralmente decorrente de um
+        // chamado) -- só treinamento/reunião não cobriam esses casos.
+        $pdo->exec("ALTER TABLE treinamentos MODIFY COLUMN tipo ENUM('treinamento','reuniao','conversa','auxilio') NOT NULL DEFAULT 'treinamento'");
+        $pdo->exec("ALTER TABLE treinamentos ADD COLUMN IF NOT EXISTS chamado_id INT NULL COMMENT 'Chamado que originou essa conversa/reunião, ou NULL se não tiver' AFTER setor_id");
+
         // Clientes iniciais, criados apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn();
         if ($count === 0) {

@@ -47,9 +47,8 @@ function inicializarCalendarioMensal(container, opcoes) {
     }
 
     function classeTipoEvento(ev) {
-        return ev.status === 'cancelado'
-            ? 'calendario-evento-cancelado'
-            : (ev.tipo === 'reuniao' ? 'calendario-evento-reuniao' : 'calendario-evento-treinamento');
+        if (ev.status === 'cancelado') return 'calendario-evento-cancelado';
+        return 'calendario-evento-' + (['reuniao', 'conversa', 'auxilio'].indexOf(ev.tipo) !== -1 ? ev.tipo : 'treinamento');
     }
 
     function construirChipEvento(ev) {

@@ -158,10 +158,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'criar_treinamento') {
         $setorIdTreinamentoNovo = $_POST['setor_id'] ?: null;
-        $tipoTreinamentoNovo = $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento';
+        $tiposTreinamentoValidos = ['treinamento', 'reuniao', 'conversa', 'auxilio'];
+        $tipoTreinamentoNovo = in_array($_POST['tipo'] ?? '', $tiposTreinamentoValidos, true) ? $_POST['tipo'] : 'treinamento';
         $tituloTreinamentoNovo = trim($_POST['titulo']);
 
-        $stmt = $pdo->prepare('INSERT INTO treinamentos (cliente_id, setor_id, titulo, tipo, descricao, status, data_inicio, hora_inicio, data_fim, hora_fim, link_reuniao, responsavel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        // Chamado vinculado (opcional) tem que ser mesmo desse cliente --
+        // não dá pra confiar no id que vier do POST sem confirmar isso.
+        $chamadoIdTreinamentoNovo = null;
+        if (!empty($_POST['chamado_id'])) {
+            $confereChamadoTreinamento = $pdo->prepare('SELECT id FROM chamados WHERE id = ? AND cliente_id = ?');
+            $confereChamadoTreinamento->execute([(int) $_POST['chamado_id'], $clienteId]);
+            $chamadoIdTreinamentoNovo = $confereChamadoTreinamento->fetchColumn() ?: null;
+        }
+
+        $stmt = $pdo->prepare('INSERT INTO treinamentos (cliente_id, setor_id, titulo, tipo, descricao, status, data_inicio, hora_inicio, data_fim, hora_fim, link_reuniao, responsavel_id, chamado_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
             $setorIdTreinamentoNovo,
@@ -175,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['hora_fim'] ?: null,
             trim($_POST['link_reuniao'] ?? '') ?: null,
             $_POST['responsavel_id'] ?: null,
+            $chamadoIdTreinamentoNovo,
         ]);
         $treinamentoIdNovo = (int) $pdo->lastInsertId();
         salvar_destinatarios_treinamento($pdo, $treinamentoIdNovo, $_POST['destinatarios'] ?? [], $clienteId);
@@ -197,7 +208,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'link_reuniao' => trim($_POST['link_reuniao'] ?? '') ?: null,
         ], $cliente['nome'], $nomeSetorTreinamentoNovo);
 
-        flash_set('sucesso', $tipoTreinamentoNovo === 'reuniao' ? 'Reunião registrada.' : 'Treinamento registrado.');
+        $rotulosTipoTreinamento = ['treinamento' => 'Treinamento', 'reuniao' => 'Reunião', 'conversa' => 'Conversa', 'auxilio' => 'Auxílio'];
+        flash_set('sucesso', $rotulosTipoTreinamento[$tipoTreinamentoNovo] . ' registrado(a).');
     }
 
     if ($acao === 'atualizar_treinamento_status') {
@@ -212,17 +224,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // antes ser recalculado em cima do novo horário.
     if ($acao === 'editar_treinamento') {
         $treinamentoIdEditar = (int) $_POST['treinamento_id'];
+        $tiposTreinamentoValidos = ['treinamento', 'reuniao', 'conversa', 'auxilio'];
+
+        $chamadoIdTreinamentoEditar = null;
+        if (!empty($_POST['chamado_id'])) {
+            $confereChamadoTreinamentoEditar = $pdo->prepare('SELECT id FROM chamados WHERE id = ? AND cliente_id = ?');
+            $confereChamadoTreinamentoEditar->execute([(int) $_POST['chamado_id'], $clienteId]);
+            $chamadoIdTreinamentoEditar = $confereChamadoTreinamentoEditar->fetchColumn() ?: null;
+        }
+
         $stmt = $pdo->prepare('
             UPDATE treinamentos SET
                 setor_id = ?, titulo = ?, tipo = ?, descricao = ?, status = ?,
                 data_inicio = ?, hora_inicio = ?, data_fim = ?, hora_fim = ?,
-                link_reuniao = ?, responsavel_id = ?, lembrete_enviado_em = NULL
+                link_reuniao = ?, responsavel_id = ?, chamado_id = ?, lembrete_enviado_em = NULL
             WHERE id = ? AND cliente_id = ?
         ');
         $stmt->execute([
             $_POST['setor_id'] ?: null,
             trim($_POST['titulo']),
-            $_POST['tipo'] === 'reuniao' ? 'reuniao' : 'treinamento',
+            in_array($_POST['tipo'] ?? '', $tiposTreinamentoValidos, true) ? $_POST['tipo'] : 'treinamento',
             trim($_POST['descricao']) ?: null,
             $_POST['status'] ?: 'planejado',
             $_POST['data_inicio'] ?: null,
@@ -231,6 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['hora_fim'] ?: null,
             trim($_POST['link_reuniao'] ?? '') ?: null,
             $_POST['responsavel_id'] ?: null,
+            $chamadoIdTreinamentoEditar,
             $treinamentoIdEditar,
             $clienteId,
         ]);
@@ -1227,6 +1249,17 @@ if ($chamados) {
         $anexosPorChamado[$a['chamado_id']][$chave][] = $a;
     }
 
+    // Reunião/conversa/treinamento/auxílio vinculado a cada chamado (ver
+    // treinamentos.chamado_id) -- pra mostrar na tela do chamado que
+    // aconteceu um Meet por causa dele, sem precisar ir até a aba Setores
+    // procurar.
+    $stmtTreinamentosChamado = $pdo->prepare("SELECT chamado_id, titulo, tipo, data_inicio, hora_inicio, link_reuniao FROM treinamentos WHERE chamado_id IN ($placeholders) ORDER BY data_inicio DESC, hora_inicio DESC");
+    $stmtTreinamentosChamado->execute($ids);
+    $treinamentosPorChamadoId = [];
+    foreach ($stmtTreinamentosChamado->fetchAll() as $tc) {
+        $treinamentosPorChamadoId[$tc['chamado_id']][] = $tc;
+    }
+
     // Foto de cada membro da equipe que respondeu -- antes o chat só sabia o
     // NOME de quem respondeu (autor_nome, texto solto), sem saber a foto de
     // qual usuário era, então toda resposta da equipe caía na inicial "K"
@@ -1460,6 +1493,7 @@ $mapearEventosCalendario = fn (array $lista) => array_map(fn ($t) => [
     'status' => $t['status'],
     'setor_id' => $t['setor_id'],
     'responsavel_id' => $t['responsavel_id'],
+    'chamado_id' => $t['chamado_id'],
     'destinatarios' => $destinatariosPorTreinamentoId[$t['id']] ?? [],
 ], $lista);
 
@@ -2170,6 +2204,7 @@ require __DIR__ . '/templates/header.php';
                 <p class="text-muted small mb-1"><i class="bi bi-clock"></i> Aberto em <?= formatar_data($c['criado_em']) ?><?= $c['categoria'] ? ' · ' . e($c['categoria']) : '' ?></p>
 
                 <?= render_resumo_anexos_chamado($anexosPorChamado[$c['id']] ?? []) ?>
+                <?= render_reunioes_vinculadas_chamado($treinamentosPorChamadoId[$c['id']] ?? []) ?>
 
                 <!-- Toda a conversa (mensagem de abertura + respostas) já vem normalizada
                      em $linhasChatPorChamado -- cliente sempre à esquerda e em verde,
@@ -2463,8 +2498,8 @@ require __DIR__ . '/templates/header.php';
                             <tbody>
                             <?php foreach ($treinamentosSetor as $t): ?>
                                 <tr>
-                                    <td class="fw-semibold"><?= e($t['titulo']) ?></td>
-                                    <td><?= $t['tipo'] === 'reuniao' ? '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-camera-video"></i> Reunião</span>' : '<span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-mortarboard"></i> Treinamento</span>' ?></td>
+                                    <td class="fw-semibold"><?= e($t['titulo']) ?><?php if ($t['chamado_id']): ?> <span class="badge bg-light text-dark border" title="Vinculado ao chamado #<?= (int) $t['chamado_id'] ?>"><i class="bi bi-link-45deg"></i> #<?= (int) $t['chamado_id'] ?></span><?php endif; ?></td>
+                                    <td><?= badge_tipo_treinamento($t['tipo']) ?></td>
                                     <td>
                                         <form method="post" class="d-inline">
                                             <?= csrf_field() ?>
@@ -3005,6 +3040,8 @@ require __DIR__ . '/templates/header.php';
                     <select name="tipo" class="form-select">
                         <option value="treinamento">Treinamento</option>
                         <option value="reuniao">Reunião</option>
+                        <option value="conversa">Conversa</option>
+                        <option value="auxilio">Auxílio</option>
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Setor</label>
@@ -3023,6 +3060,15 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-6"><label class="form-label">Data fim</label><input type="date" name="data_fim" class="form-control"></div>
                 <div class="col-6"><label class="form-label">Hora fim</label><input type="time" name="hora_fim" class="form-control"></div>
                 <div class="col-12"><label class="form-label">Link da videochamada</label><input type="url" name="link_reuniao" class="form-control" placeholder="Meet, Teams, Zoom..."></div>
+                <div class="col-12"><label class="form-label">Chamado vinculado (opcional)</label>
+                    <select name="chamado_id" id="novoTreinamentoChamado" class="form-select">
+                        <option value="">Nenhum</option>
+                        <?php foreach ($chamados as $c): ?>
+                            <option value="<?= $c['id'] ?>">#<?= (int) $c['id'] ?> -- <?= e($c['titulo']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">Pra registrar que essa conversa/reunião aconteceu por causa de um chamado -- ela aparece na tela dele depois.</div>
+                </div>
                 <div class="col-12"><label class="form-label">Responsável (equipe)</label>
                     <select name="responsavel_id" class="form-select">
                         <option value="">-</option>
@@ -3074,6 +3120,8 @@ require __DIR__ . '/templates/header.php';
                     <select name="tipo" id="editarTreinamentoTipo" class="form-select">
                         <option value="treinamento">Treinamento</option>
                         <option value="reuniao">Reunião</option>
+                        <option value="conversa">Conversa</option>
+                        <option value="auxilio">Auxílio</option>
                     </select>
                 </div>
                 <div class="col-6"><label class="form-label">Setor</label>
@@ -3093,6 +3141,15 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-6"><label class="form-label">Hora fim</label><input type="time" name="hora_fim" id="editarTreinamentoHoraFim" class="form-control"></div>
             </div>
             <div class="mb-3"><label class="form-label">Link da videochamada</label><input type="url" name="link_reuniao" id="editarTreinamentoLink" class="form-control" placeholder="Meet, Teams, Zoom..."></div>
+            <div class="mb-3"><label class="form-label">Chamado vinculado (opcional)</label>
+                <select name="chamado_id" id="editarTreinamentoChamado" class="form-select">
+                    <option value="">Nenhum</option>
+                    <?php foreach ($chamados as $c): ?>
+                        <option value="<?= $c['id'] ?>">#<?= (int) $c['id'] ?> -- <?= e($c['titulo']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text">Pra registrar que essa conversa/reunião aconteceu por causa de um chamado -- ela aparece na tela dele depois.</div>
+            </div>
             <div class="mb-3"><label class="form-label">Status</label>
                 <select name="status" id="editarTreinamentoStatus" class="form-select">
                     <?php foreach (['planejado' => 'Planejado', 'em_andamento' => 'Em andamento', 'concluido' => 'Concluído', 'cancelado' => 'Cancelado'] as $val => $label): ?>
@@ -3692,6 +3749,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarTreinamentoDataFim').value = evento.data_fim || '';
         document.getElementById('editarTreinamentoHoraFim').value = evento.hora_fim ? evento.hora_fim.substring(0, 5) : '';
         document.getElementById('editarTreinamentoLink').value = evento.link_reuniao || '';
+        document.getElementById('editarTreinamentoChamado').value = evento.chamado_id || '';
         document.getElementById('editarTreinamentoStatus').value = evento.status || 'planejado';
         document.getElementById('editarTreinamentoResponsavel').value = evento.responsavel_id || '';
         var destinatariosMarcados = evento.destinatarios || [];
