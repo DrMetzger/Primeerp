@@ -207,18 +207,16 @@ require __DIR__ . '/../templates/portal_header.php';
                 <form method="post" class="row g-2 align-items-end">
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="criar_setor">
-                    <div class="col-md-5"><label class="form-label">Nome do novo setor</label><input type="text" name="nome" class="form-control" placeholder="Ex.: Financeiro" required></div>
-                    <div class="col-md-5">
-                        <label class="form-label">Ícone (opcional)</label>
-                        <select name="icone" class="form-select">
-                            <option value="">-</option>
-                            <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
-                                <option value="<?= $ic ?>"><?= $ic ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-2"><button type="submit" class="btn btn-dark w-100"><i class="bi bi-plus-lg"></i> Criar</button></div>
+                    <input type="hidden" name="icone" id="novoSetorIconePortal" value="bi-diagram-3">
+                    <div class="col-md-8"><label class="form-label">Nome do novo setor</label><input type="text" name="nome" class="form-control" placeholder="Ex.: Financeiro" required></div>
+                    <div class="col-md-4"><button type="submit" class="btn btn-dark w-100"><i class="bi bi-plus-lg"></i> Criar setor</button></div>
                 </form>
+                <label class="form-label mt-2 mb-1">Ícone do setor</label>
+                <div class="seletor-icone-setor mb-2" data-campo-destino="novoSetorIconePortal">
+                    <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
+                        <button type="button" class="icone-opcao <?= $ic === 'bi-diagram-3' ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
+                    <?php endforeach; ?>
+                </div>
             </div>
         </div>
 
@@ -233,23 +231,19 @@ require __DIR__ . '/../templates/portal_header.php';
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="atualizar_setor">
                     <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <div class="col-md-4"><input type="text" name="nome" class="form-control" value="<?= e($s['nome']) ?>" required></div>
-                    <div class="col-md-4">
-                        <select name="icone" class="form-select">
-                            <option value="">-</option>
-                            <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
-                                <option value="<?= $ic ?>" <?= $s['icone'] === $ic ? 'selected' : '' ?>><?= $ic ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-2 form-check mb-2">
+                    <input type="hidden" name="icone" id="setorIconePortal<?= $s['id'] ?>" value="<?= e($s['icone'] ?: 'bi-diagram-3') ?>">
+                    <div class="col-md-5"><input type="text" name="nome" class="form-control" value="<?= e($s['nome']) ?>" required></div>
+                    <div class="col-md-3 form-check ms-2 mb-2">
                         <input type="checkbox" name="ativo" id="setorAtivo<?= $s['id'] ?>" class="form-check-input" value="1" <?= $s['ativo'] ? 'checked' : '' ?>>
                         <label class="form-check-label" for="setorAtivo<?= $s['id'] ?>">Ativo</label>
                     </div>
-                    <div class="col-md-2 d-flex gap-1">
-                        <button type="submit" class="btn btn-sm btn-outline-dark flex-grow-1"><i class="bi bi-check2"></i></button>
-                    </div>
+                    <div class="col-md-4"><button type="submit" class="btn btn-sm btn-outline-dark w-100"><i class="bi bi-check2"></i> Salvar</button></div>
                 </form>
+                <div class="seletor-icone-setor mt-2" data-campo-destino="setorIconePortal<?= $s['id'] ?>">
+                    <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
+                        <button type="button" class="icone-opcao <?= $ic === ($s['icone'] ?: 'bi-diagram-3') ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
+                    <?php endforeach; ?>
+                </div>
             </div>
         </div>
         <?php endforeach; ?>
@@ -286,9 +280,12 @@ require __DIR__ . '/../templates/portal_header.php';
                 <table class="table table-hover align-middle mb-0">
                     <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th></th></tr></thead>
                     <tbody>
-                    <?php foreach ($usuariosCliente as $uc): ?>
+                    <?php foreach ($usuariosCliente as $uc):
+                        $avatarUc = avatar_html($uc['nome'], resolver_avatar_por_email($pdo, $uc['email'], $uc['foto_perfil']), 'cliente');
+                        $ucComAvatar = $uc + ['avatar_html' => $avatarUc];
+                    ?>
                         <tr>
-                            <td><?= avatar_html($uc['nome'], resolver_avatar_por_email($pdo, $uc['email'], $uc['foto_perfil']), 'cliente') ?></td>
+                            <td><?= $avatarUc ?></td>
                             <td class="fw-semibold"><?= e($uc['nome']) ?></td>
                             <td><?= e($uc['email']) ?></td>
                             <td><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
@@ -312,23 +309,23 @@ require __DIR__ . '/../templates/portal_header.php';
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="enviar_convite_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $uc['setor_id'] ? '' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i></button>
+                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="<?= $uc['setor_id'] ? 'Enviar convite de acesso' : 'Relacione a um setor primeiro' ?>" <?= $uc['setor_id'] ? '' : 'disabled' ?>><i class="bi bi-send"></i> Convite</button>
                                     </form>
                                     <?php if ($uc['portal_ativo']): ?>
                                     <form method="post" class="d-inline" onsubmit="return confirm('Isso invalida a senha atual de <?= e($uc['nome']) ?>. Confirma?');">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="resetar_senha_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="Resetar senha"><i class="bi bi-key"></i></button>
+                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="Resetar senha"><i class="bi bi-key"></i> Resetar</button>
                                     </form>
                                     <form method="post" class="d-inline">
                                         <?= csrf_field() ?>
                                         <input type="hidden" name="acao" value="desativar_portal_setor">
                                         <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Desativar acesso"><i class="bi bi-slash-circle"></i></button>
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Desativar acesso ao portal"><i class="bi bi-slash-circle"></i> Bloquear</button>
                                     </form>
                                     <?php endif; ?>
-                                    <button type="button" class="btn btn-sm btn-outline-dark botao-editar-usuario-portal" data-usuario='<?= e(json_encode($uc, JSON_UNESCAPED_UNICODE)) ?>' title="Editar"><i class="bi bi-pencil"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-dark botao-editar-usuario-portal" data-usuario='<?= e(json_encode($ucComAvatar, JSON_UNESCAPED_UNICODE)) ?>' title="Editar"><i class="bi bi-pencil"></i> Editar</button>
                                 </div>
                             </td>
                         </tr>
@@ -354,6 +351,9 @@ require __DIR__ . '/../templates/portal_header.php';
         <input type="hidden" name="responsavel_id" id="editarUsuarioPortalId">
         <div class="modal-header"><h5 class="modal-title">Editar usuário</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
+            <div class="text-center mb-3">
+                <div class="perfil-avatar d-inline-block" id="editarUsuarioPortalAvatar"></div>
+            </div>
             <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" id="editarUsuarioPortalNome" class="form-control" required></div>
             <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioPortalEmail" class="form-control" required></div>
             <div class="mb-3"><label class="form-label">Telefone (WhatsApp) *</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone" required></div>
@@ -386,7 +386,27 @@ document.querySelectorAll('.botao-editar-usuario-portal').forEach(function (bota
         document.getElementById('editarUsuarioPortalTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarUsuarioPortalDocumento').value = dados.documento || '';
         document.getElementById('editarUsuarioPortalSetor').value = dados.setor_id || '';
+        document.getElementById('editarUsuarioPortalAvatar').innerHTML = dados.avatar_html || '';
         PrimeUI.openModal(document.getElementById('modalEditarUsuarioPortal'));
+    });
+});
+
+// Seletor de ícone de setor -- clicar num ícone marca ele como escolhido
+// (visualmente) e preenche o input escondido que vai no form de criar/
+// atualizar setor (mesma ideia da tela admin, ver cliente.php).
+function selecionarIconeSetorPortal(grupo, icone) {
+    if (!grupo) return;
+    var campo = document.getElementById(grupo.getAttribute('data-campo-destino'));
+    if (campo) campo.value = icone;
+    grupo.querySelectorAll('.icone-opcao').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-icone') === icone);
+    });
+}
+document.querySelectorAll('.seletor-icone-setor').forEach(function (grupo) {
+    grupo.querySelectorAll('.icone-opcao').forEach(function (botaoIcone) {
+        botaoIcone.addEventListener('click', function () {
+            selecionarIconeSetorPortal(grupo, botaoIcone.getAttribute('data-icone'));
+        });
     });
 });
 </script>
