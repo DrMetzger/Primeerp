@@ -138,7 +138,7 @@ $mapaOrigem = [
             </div>
         </div>
 
-        <h2 class="assunto"><?= e($chamado['titulo']) ?></h2>
+        <h2 class="assunto"><span style="color:#a1a1aa;font-weight:400;">#<?= (int) $chamado['id'] ?></span> <?= e($chamado['titulo']) ?></h2>
 
         <div class="info-grid">
             <div><span class="rotulo">Cliente</span> <?= e($chamado['cliente_nome'] ?? $chamado['empresa_informada'] ?? '-') ?></div>

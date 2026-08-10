@@ -253,7 +253,7 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <div class="card card-stat mt-3">
     <div class="card-header bg-white">
-        <h5 class="mb-2"><?= e($chamado['titulo']) ?></h5>
+        <h5 class="mb-2"><span class="text-muted fw-normal">#<?= (int) $chamado['id'] ?></span> <?= e($chamado['titulo']) ?></h5>
         <div class="d-flex align-items-center flex-wrap gap-3">
             <?php if ($setoresPortal): ?>
             <span class="d-flex align-items-center gap-1">

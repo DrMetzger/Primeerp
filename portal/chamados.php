@@ -254,7 +254,7 @@ require __DIR__ . '/../templates/portal_header.php';
             <tbody>
             <?php foreach ($chamados as $c): ?>
                 <tr data-status="<?= e($c['status']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>">
-                    <td class="fw-semibold"><?= e($c['titulo']) ?></td>
+                    <td class="fw-semibold"><span class="text-muted fw-normal">#<?= (int) $c['id'] ?></span> <?= e($c['titulo']) ?></td>
                     <td><?= badge_status_chamado_portal($c['status']) ?></td>
                     <td><?= badge_prioridade($c['prioridade']) ?></td>
                     <td><?= formatar_data($c['criado_em']) ?></td>

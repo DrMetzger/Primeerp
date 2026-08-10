@@ -2084,7 +2084,7 @@ require __DIR__ . '/templates/header.php';
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                     <div>
-                        <strong class="d-block mb-1"><?= e($c['titulo']) ?></strong>
+                        <strong class="d-block mb-1"><span class="text-muted fw-normal">#<?= (int) $c['id'] ?></span> <?= e($c['titulo']) ?></strong>
                         <div class="d-flex align-items-center flex-wrap gap-3">
                             <?php if ($setores): ?>
                             <span class="d-flex align-items-center gap-1">
