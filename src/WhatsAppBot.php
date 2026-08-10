@@ -99,7 +99,7 @@ class WhatsAppBot
 
         $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$midia['mime']] ?? null;
         if (!$extensaoPermitida) {
-            WhatsAppApi::enviarBotoes($telefone, '🚫 Esse tipo de arquivo eu não consigo anexar (só imagem ou PDF). Pode mandar outro, ou tocar no botão pra continuar sem anexo.', [
+            WhatsAppApi::enviarBotoes($telefone, '🚫 Esse tipo de arquivo eu não consigo anexar (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP). Pode mandar outro, ou tocar no botão pra continuar sem anexo.', [
                 ['id' => 'nao', 'titulo' => '✅ Continuar'],
             ]);
             return;

@@ -911,7 +911,7 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
         $tipoMime = mime_content_type($arquivos['tmp_name'][$i]);
         $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$tipoMime] ?? null;
         if (!$extensaoPermitida) {
-            $erros[] = '"' . $arquivos['name'][$i] . '" não é um tipo de arquivo permitido (use imagem ou PDF).';
+            $erros[] = '"' . $arquivos['name'][$i] . '" não é um tipo de arquivo permitido (use imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).';
             continue;
         }
 
@@ -956,7 +956,7 @@ function salvar_bytes_como_anexo_chamado(\PDO $pdo, int $chamadoId, ?int $respos
 {
     $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$mime] ?? null;
     if (!$extensaoPermitida) {
-        return '"' . $nomeOriginal . '" não é um tipo de arquivo permitido (use imagem ou PDF).';
+        return '"' . $nomeOriginal . '" não é um tipo de arquivo permitido (use imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).';
     }
     if (strlen($bytes) > ANEXO_CHAMADO_MAX_SIZE) {
         return '"' . $nomeOriginal . '" é maior que o limite de ' . (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) . 'MB.';

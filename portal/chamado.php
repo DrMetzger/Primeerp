@@ -320,10 +320,10 @@ require __DIR__ . '/../templates/portal_header.php';
     <input type="hidden" name="acao" value="responder">
     <textarea name="mensagem" class="form-control mb-2" rows="3" placeholder="Escreva uma resposta..."></textarea>
     <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" style="max-width: 320px;">
+        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>" style="max-width: 320px;">
         <button type="submit" class="btn btn-dark">Enviar resposta</button>
     </div>
-    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem ou PDF).</p>
+    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
 </form>
 
 <?php require __DIR__ . '/../templates/portal_footer.php'; ?>

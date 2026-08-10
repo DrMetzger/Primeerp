@@ -321,8 +321,8 @@ require __DIR__ . '/../templates/portal_header.php';
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="4" required></textarea></div>
             <div class="mb-3">
                 <label class="form-label">Anexos (opcional)</label>
-                <input type="file" name="anexos[]" class="form-control" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
-                <small class="text-muted">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem ou PDF).</small>
+                <input type="file" name="anexos[]" class="form-control" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+                <small class="text-muted">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</small>
             </div>
         </div>
         <div class="modal-footer">

@@ -1603,12 +1603,12 @@ require __DIR__ . '/templates/header.php';
 </div>
 
 <ul class="nav nav-tabs mb-3" id="clienteTabs">
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral">Visão geral</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral"><i class="bi bi-building"></i> Visão geral</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#implantacao"><i class="bi bi-rocket-takeoff"></i> Implantação <span class="badge bg-secondary"><?= count($etapasImplantacao) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados">Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis">KPIs</a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores">Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios">Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados"><i class="bi bi-headset"></i> Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis"><i class="bi bi-graph-up"></i> KPIs</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores"><i class="bi bi-diagram-3"></i> Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios"><i class="bi bi-people"></i> Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
 </ul>
 
 <div class="tab-content">
@@ -2246,10 +2246,10 @@ require __DIR__ . '/templates/header.php';
                         </div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center gap-2">
-                        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" style="max-width: 320px;">
+                        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>" style="max-width: 320px;">
                         <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
                     </div>
-                    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem ou PDF).</p>
+                    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
                 </form>
             </div>
         </div>

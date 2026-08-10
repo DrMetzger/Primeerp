@@ -127,15 +127,57 @@ define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: ($isLocal ? 'teste-loc
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
 
-// Anexos do formulário público de abertura de chamado.
+// Anexos de chamado (portal, admin e WhatsApp). Cliente manda de tudo --
+// Excel, Word, PowerPoint, fonte .prw do Protheus, .zip -- então a lista
+// cobre os formatos de documento/planilha/apresentação/texto/arquivo
+// compactado mais comuns, sem liberar QUALQUER coisa: fica de fora tudo que
+// é executável ou script (.exe, .bat, .js, .jar, .msi, .apk, .html etc), que
+// é por onde vírus/malware normalmente se disfarça. O tipo aqui é só o que
+// o PHP detecta LENDO o conteúdo do arquivo (mime_content_type -- não dá pra
+// enganar só renomeando a extensão), e o download sempre força
+// "application/octet-stream" + anexo pra baixar (ver download_anexo_chamado.php),
+// então mesmo um arquivo aceito aqui nunca é executado/aberto direto pelo navegador.
 define('ANEXO_CHAMADO_MAX_SIZE', 10 * 1024 * 1024); // 10MB por arquivo
 define('ANEXO_CHAMADO_MAX_QUANTIDADE', 5);
 define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
+    // Imagens
     'image/jpeg' => 'jpg',
     'image/png' => 'png',
     'image/webp' => 'webp',
+    'image/gif' => 'gif',
+    // PDF
     'application/pdf' => 'pdf',
+    // Word / Excel / PowerPoint (formato antigo .doc/.xls/.ppt e novo .docx/.xlsx/.pptx)
+    'application/msword' => 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+    'application/vnd.ms-excel' => 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+    'application/vnd.ms-powerpoint' => 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'pptx',
+    // LibreOffice/OpenDocument
+    'application/vnd.oasis.opendocument.text' => 'odt',
+    'application/vnd.oasis.opendocument.spreadsheet' => 'ods',
+    'application/vnd.oasis.opendocument.presentation' => 'odp',
+    // Texto puro -- cobre .txt, .csv e fonte .prw do Protheus (todos texto puro,
+    // o PHP não distingue por conteúdo, só a extensão original é preservada
+    // no nome exibido pro download).
+    'text/plain' => 'txt',
+    'text/csv' => 'csv',
+    'application/rtf' => 'rtf',
+    'text/rtf' => 'rtf',
+    // Compactado -- também é o formato real de .docx/.xlsx/.pptx quando o PHP
+    // não consegue distinguir o tipo específico (todos são .zip por dentro).
+    'application/zip' => 'zip',
+    'application/x-rar-compressed' => 'rar',
+    'application/vnd.rar' => 'rar',
+    'application/x-7z-compressed' => '7z',
 ]);
+
+// Atributo "accept" do <input type="file"> dos 3 formulários de anexo de
+// chamado (portal, admin e resposta) -- filtro só de UX (o cliente escolhe
+// mais rápido no seletor do sistema), a validação de verdade é sempre a
+// de ANEXO_CHAMADO_TIPOS_PERMITIDOS acima, no servidor.
+define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.prw,.rtf,.zip,.rar,.7z');
 
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
