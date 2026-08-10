@@ -540,13 +540,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // uma) -- cada tipo gera e guarda separado, pra dar pra ter todas
     // geradas ao mesmo tempo sem uma sobrescrever a outra.
     if ($acao === 'gerar_sugestao_implantacao') {
-        // Chamada síncrona ao Gemini com retry (ver AiSugestoes) pode passar
-        // de 1-2 minutos no pior caso (vários documentos grandes + retry) --
-        // sem isso, o limite padrão de execução do PHP (30-60s na hospedagem
-        // compartilhada) corta a resposta NO MEIO, e o navegador recebe um
-        // JSON incompleto (erro "Unexpected end of JSON input" reportado
-        // pelo Kleber). Não cobre timeout de proxy/servidor web, só do PHP.
-        set_time_limit(200);
+        // Chamada síncrona ao Gemini com upload de anexos + retry (ver
+        // AiSugestoes) pode passar de alguns minutos no pior caso (vários
+        // documentos + retry) -- sem isso, o limite padrão de execução do
+        // PHP (30-60s na hospedagem compartilhada) corta a resposta NO
+        // MEIO, e o navegador recebe um JSON incompleto (erro "Unexpected
+        // end of JSON input" reportado pelo Kleber). Não cobre timeout de
+        // proxy/servidor web, só do PHP.
+        set_time_limit(240);
         $ehAjaxImplantacaoIa = ($_POST['ajax'] ?? '') === '1';
         $tipoSugestaoImplantacao = $_POST['tipo'] ?? '';
         $forcarSemEtapasImplantacaoIa = ($_POST['forcar_sem_etapas'] ?? '') === '1';
@@ -606,16 +607,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $arquivosImplantacaoIa = [];
                 $nomesIgnoradosImplantacaoIa = [];
                 $textoDocxImplantacaoIa = '';
-                $bytesAcumuladosImplantacaoIa = 0;
-                $limiteTotalImplantacaoIa = 18 * 1024 * 1024; // margem de segurança abaixo do limite do Gemini pra requisição inline
                 foreach ($docsImplantacaoIa as $docIa) {
                     $extensaoDocIa = strtolower(pathinfo($docIa['arquivo_nome_original'], PATHINFO_EXTENSION));
 
-                    // .docx não é aceito como inline_data pelo Gemini (só
-                    // PDF/imagem/texto/áudio/vídeo) -- muito comum vir
-                    // diagrama de processo em Word, então extrai o texto
-                    // aqui e manda como texto puro junto do prompt em vez de
-                    // simplesmente ignorar o arquivo.
+                    // .docx não é aceito pelo Gemini (só PDF/imagem/texto/
+                    // áudio/vídeo) -- muito comum vir diagrama de processo
+                    // em Word, então extrai o texto aqui e manda como texto
+                    // puro junto do prompt em vez de simplesmente ignorar.
                     if ($extensaoDocIa === 'docx') {
                         $textoExtraidoDocx = extrair_texto_docx($docIa['dados']);
                         if ($textoExtraidoDocx) {
@@ -627,13 +625,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
 
+                    // Cada anexo agora vai pela Files API do Gemini (ver
+                    // AiSugestoes::gerar()), não mais embutido em base64 na
+                    // requisição -- por isso não há mais limite de bytes
+                    // somados aqui, só a quantidade de arquivos por chamada
+                    // (MAX_ARQUIVOS_POR_CHAMADA), pra não fazer dezenas de
+                    // uploads sequenciais numa única requisição de página.
                     $mimeDocIa = $mimesAceitosImplantacaoIa[$extensaoDocIa] ?? null;
-                    if (!$mimeDocIa || count($arquivosImplantacaoIa) >= 8 || $bytesAcumuladosImplantacaoIa + (int) $docIa['arquivo_tamanho'] > $limiteTotalImplantacaoIa) {
+                    if (!$mimeDocIa || count($arquivosImplantacaoIa) >= AiSugestoes::MAX_ARQUIVOS_POR_CHAMADA) {
                         $nomesIgnoradosImplantacaoIa[] = $docIa['arquivo_nome_original'];
                         continue;
                     }
-                    $arquivosImplantacaoIa[] = ['mime' => $mimeDocIa, 'dados' => $docIa['dados']];
-                    $bytesAcumuladosImplantacaoIa += (int) $docIa['arquivo_tamanho'];
+                    $arquivosImplantacaoIa[] = ['mime' => $mimeDocIa, 'dados' => $docIa['dados'], 'nome' => $docIa['arquivo_nome_original']];
                 }
 
                 $promptImplantacao = "Você é um consultor de implantação de ERP (TOTVS Protheus) de uma consultoria (PrimeERP). "
@@ -670,7 +673,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $pdo->prepare('INSERT INTO implantacao_sugestoes_ia (cliente_id, tipo, sugestao, criado_por) VALUES (?, ?, ?, ?)')
                         ->execute([$clienteId, $tipoSugestaoImplantacao, $resultadoImplantacaoIa['texto'], Auth::userId()]);
-                    $avisoIgnoradosImplantacaoIa = $nomesIgnoradosImplantacaoIa ? ' (não deu pra ler: ' . implode(', ', $nomesIgnoradosImplantacaoIa) . ')' : '';
+                    // Junta os documentos que nem tentamos ler (formato não
+                    // aceito, ou passou do limite de anexos por chamada) com
+                    // os que tentamos enviar mas falharam no upload (rede,
+                    // Gemini recusou etc. -- ver AiSugestoes::gerar()).
+                    $todosIgnoradosImplantacaoIa = array_merge($nomesIgnoradosImplantacaoIa, $resultadoImplantacaoIa['arquivos_com_falha'] ?? []);
+                    $avisoIgnoradosImplantacaoIa = $todosIgnoradosImplantacaoIa ? ' (não deu pra ler: ' . implode(', ', $todosIgnoradosImplantacaoIa) . ')' : '';
                     $respostaImplantacaoIa = [
                         'sucesso' => true,
                         'mensagem' => 'Sugestão gerada.' . $avisoIgnoradosImplantacaoIa,

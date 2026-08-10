@@ -19,12 +19,13 @@ namespace AdminPrime;
  */
 class AiSugestoes
 {
-    private const MODELO = 'gemini-3-flash-preview';
-    // Preview tem MENOS capacidade reservada que modelo estável -- em hora
-    // de pico devolve 503 "alta demanda" com muito mais frequência. Se isso
-    // acontecer mesmo depois de tentar de novo, cai pra esse aqui (GA,
-    // capacidade normal) em vez de simplesmente falhar na tela.
-    private const MODELO_RESERVA = 'gemini-2.5-flash';
+    // 2.5 Flash é o modelo ESTÁVEL (GA) recomendado pelo próprio Google pro
+    // plano gratuito -- trocado de propósito do antigo "3.0 preview" (que
+    // tem MENOS capacidade reservada e devolvia 503 "alta demanda" com
+    // muito mais frequência em hora de pico). 2.0 Flash como reserva: outra
+    // geração estável e também gratuita, não outro preview.
+    private const MODELO = 'gemini-2.5-flash';
+    private const MODELO_RESERVA = 'gemini-2.0-flash';
     // Pouco tempo de espera/tentativa de propósito -- isso tudo roda dentro
     // de uma requisição HTTP síncrona (cliente.php aguardando), e hospedagem
     // compartilhada normalmente mata o PHP em 30-60s. Errar pra menos aqui
@@ -35,6 +36,23 @@ class AiSugestoes
     private const TENTATIVAS_POR_MODELO = 2;
     private const ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 2;
     private const TIMEOUT_POR_CHAMADA_SEGUNDOS = 55;
+
+    // Upload de cada anexo pela Files API do Gemini (ver enviarArquivo())
+    // em vez de embutir os bytes em base64 direto no corpo da requisição
+    // (inline_data) -- o corpo de uma requisição inline tem um teto de
+    // ~20MB no total, contando TODOS os anexos juntos, o que limitava a uns
+    // 8 documentos na prática. Arquivo enviado pela Files API não conta
+    // pra esse teto (o Gemini aceita até 3.000 arquivos por requisição,
+    // 50MB por PDF) -- o limite aqui embaixo é só uma margem de segurança
+    // nossa pra não fazer dezenas de uploads sequenciais numa requisição
+    // síncrona de página (cada upload leva 1-3s), não um limite do Gemini.
+    public const MAX_ARQUIVOS_POR_CHAMADA = 15;
+    private const TIMEOUT_UPLOAD_ARQUIVO_SEGUNDOS = 12;
+    // Orçamento de tempo total pra fase de upload (soma de todos os
+    // arquivos) -- se a rede estiver ruim e os uploads começarem a
+    // demorar, para de tentar mandar mais arquivo e segue com os que já
+    // subiram, em vez de estourar o tempo de execução do PHP.
+    private const TEMPO_MAX_UPLOADS_SEGUNDOS = 60;
 
     public static function configurada(): bool
     {
@@ -57,26 +75,26 @@ class AiSugestoes
      * pesquisarPerfilEmpresa() é o único caller que passa a de busca.
      * $arquivos deixa o Gemini LER o conteúdo real de anexos (PDF/imagem/
      * texto), não só metadado -- cada item é ['mime' => string, 'dados' =>
-     * bytes crus do arquivo], enviado como "inline_data" (base64) junto do
-     * prompt (ver cliente.php, aba Implantação, que monta essa lista a
-     * partir da tabela documentos). Retorna sempre um array ['ok' => bool,
-     * 'texto' => ?string, 'erro' => ?string] -- diferente da versão
-     * anterior (que só devolvia null em qualquer falha), pra dar pra
-     * mostrar NA TELA o motivo real quando o Google recusar a chamada
-     * (conta sem cota liberada, chave errada, modelo indisponível, etc.),
-     * sem precisar ir atrás de log de servidor pra descobrir por quê.
+     * bytes crus do arquivo, 'nome' => nome original (opcional, só pra
+     * mensagem de erro)]. Cada um é enviado primeiro pra Files API do
+     * Gemini (ver enviarArquivo()) e referenciado por URI no prompt --
+     * ver cliente.php, aba Implantação, que monta essa lista a partir da
+     * tabela documentos. Retorna sempre um array ['ok' => bool, 'texto' =>
+     * ?string, 'erro' => ?string, 'arquivos_com_falha' => string[]] --
+     * arquivos_com_falha lista os que não deu pra enviar (rede, formato
+     * recusado pelo Gemini etc.), pra quem chamou avisar sem abortar a
+     * geração inteira por causa de UM anexo com problema.
      */
     public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = []): array
     {
         $chave ??= defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '';
         if ($chave === '') {
-            return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada.'];
+            return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada.', 'arquivos_com_falha' => []];
         }
 
-        $partes = [];
-        foreach ($arquivos as $arquivo) {
-            $partes[] = ['inline_data' => ['mime_type' => $arquivo['mime'], 'data' => base64_encode($arquivo['dados'])]];
-        }
+        [$partesArquivo, $arquivosComFalha] = self::enviarArquivos(array_slice($arquivos, 0, self::MAX_ARQUIVOS_POR_CHAMADA), $chave);
+
+        $partes = $partesArquivo;
         $partes[] = ['text' => $prompt];
 
         $corpo = ['contents' => [['parts' => $partes]]];
@@ -84,7 +102,7 @@ class AiSugestoes
             $corpo['tools'] = $ferramentas;
         }
 
-        // Tenta o modelo preview algumas vezes (503 "alta demanda" costuma
+        // Tenta o modelo estável algumas vezes (503 "alta demanda" costuma
         // ser passageiro, ver comentário na const) e, se nem assim
         // conseguir, cai pro modelo de reserva antes de desistir de vez --
         // sem isso, um pico de demanda no Google derrubava a geração toda.
@@ -96,7 +114,7 @@ class AiSugestoes
                 $resultado = self::chamarModelo($modelo, $chave, $corpo);
 
                 if ($resultado['ok'] || !$resultado['tentar_de_novo']) {
-                    return ['ok' => $resultado['ok'], 'texto' => $resultado['texto'], 'erro' => $resultado['erro']];
+                    return ['ok' => $resultado['ok'], 'texto' => $resultado['texto'], 'erro' => $resultado['erro'], 'arquivos_com_falha' => $arquivosComFalha];
                 }
 
                 $ultimaTentativaDesseModelo = $tentativa === $tentativas;
@@ -106,12 +124,127 @@ class AiSugestoes
             }
         }
 
-        return ['ok' => false, 'texto' => null, 'erro' => $resultado['erro']];
+        return ['ok' => false, 'texto' => null, 'erro' => $resultado['erro'], 'arquivos_com_falha' => $arquivosComFalha];
     }
 
     /**
-     * Uma chamada de verdade à Graph API do Gemini. 'tentar_de_novo' só
-     * fica true pra erro claramente PASSAGEIRO (503 alta demanda, 429 cota
+     * Envia cada anexo pra Files API do Gemini e monta a lista de "parts"
+     * (file_data, por URI) pra entrar no prompt -- ver comentário de
+     * MAX_ARQUIVOS_POR_CHAMADA sobre por que isso substitui o antigo
+     * inline_data em base64. Respeita um orçamento de tempo total
+     * (TEMPO_MAX_UPLOADS_SEGUNDOS): se a rede estiver lenta, para de tentar
+     * enviar mais arquivo e segue só com os que já subiram, em vez de
+     * arriscar estourar o tempo de execução do PHP.
+     * Retorna [partes_de_arquivo, nomes_com_falha].
+     */
+    private static function enviarArquivos(array $arquivos, string $chave): array
+    {
+        $partesArquivo = [];
+        $arquivosComFalha = [];
+        $inicio = microtime(true);
+
+        foreach ($arquivos as $arquivo) {
+            $nomeArquivo = $arquivo['nome'] ?? 'anexo';
+
+            if ((microtime(true) - $inicio) > self::TEMPO_MAX_UPLOADS_SEGUNDOS) {
+                $arquivosComFalha[] = $nomeArquivo . ' (tempo de upload esgotado)';
+                continue;
+            }
+
+            $upload = self::enviarArquivo($arquivo['mime'], $arquivo['dados'], $chave);
+            if ($upload['ok']) {
+                $partesArquivo[] = ['file_data' => ['mime_type' => $arquivo['mime'], 'file_uri' => $upload['uri']]];
+            } else {
+                $arquivosComFalha[] = $nomeArquivo . ' (' . $upload['erro'] . ')';
+            }
+        }
+
+        return [$partesArquivo, $arquivosComFalha];
+    }
+
+    /**
+     * Upload resumível de um arquivo pra Files API do Gemini (protocolo
+     * oficial do Google: https://ai.google.dev/api/files) -- duas
+     * chamadas: a primeira "reserva" o upload e devolve a URL real de
+     * envio no cabeçalho X-Goog-Upload-URL, a segunda manda os bytes de
+     * verdade pra essa URL. Retorna o file_uri devolvido pelo Gemini (usado
+     * depois como file_data na chamada de geração), ou erro.
+     */
+    private static function enviarArquivo(string $mime, string $bytes, string $chave): array
+    {
+        $tamanho = strlen($bytes);
+        $urlInicio = 'https://generativelanguage.googleapis.com/upload/v1beta/files?key=' . $chave;
+
+        $ch = curl_init($urlInicio);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                'X-Goog-Upload-Protocol: resumable',
+                'X-Goog-Upload-Command: start',
+                'X-Goog-Upload-Header-Content-Length: ' . $tamanho,
+                'X-Goog-Upload-Header-Content-Type: ' . $mime,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode(['file' => ['display_name' => 'anexo']]),
+            CURLOPT_TIMEOUT => self::TIMEOUT_UPLOAD_ARQUIVO_SEGUNDOS,
+        ]);
+        $respostaInicio = curl_exec($ch);
+        $codigoInicio = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $tamanhoCabecalho = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $erroInicio = curl_error($ch);
+        curl_close($ch);
+
+        if ($respostaInicio === false) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'falha de rede ao iniciar upload: ' . $erroInicio];
+        }
+        if ($codigoInicio >= 300) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'Gemini recusou iniciar o upload (HTTP ' . $codigoInicio . ')'];
+        }
+
+        $cabecalhosInicio = substr($respostaInicio, 0, $tamanhoCabecalho);
+        if (!preg_match('/^x-goog-upload-url:\s*(\S+)/mi', $cabecalhosInicio, $m)) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'Gemini não retornou a URL de upload'];
+        }
+        $urlUpload = trim($m[1]);
+
+        $ch2 = curl_init($urlUpload);
+        curl_setopt_array($ch2, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Length: ' . $tamanho,
+                'X-Goog-Upload-Offset: 0',
+                'X-Goog-Upload-Command: upload, finalize',
+            ],
+            CURLOPT_POSTFIELDS => $bytes,
+            CURLOPT_TIMEOUT => self::TIMEOUT_UPLOAD_ARQUIVO_SEGUNDOS,
+        ]);
+        $respostaUpload = curl_exec($ch2);
+        $codigoUpload = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+        $erroUpload = curl_error($ch2);
+        curl_close($ch2);
+
+        if ($respostaUpload === false) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'falha de rede ao enviar arquivo: ' . $erroUpload];
+        }
+        if ($codigoUpload >= 300) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'Gemini recusou o arquivo (HTTP ' . $codigoUpload . ')'];
+        }
+
+        $dadosUpload = json_decode($respostaUpload, true);
+        $uri = $dadosUpload['file']['uri'] ?? null;
+        if (!$uri) {
+            return ['ok' => false, 'uri' => null, 'erro' => 'Gemini não retornou o identificador do arquivo enviado'];
+        }
+
+        return ['ok' => true, 'uri' => $uri, 'erro' => null];
+    }
+
+    /**
+     * Uma chamada de verdade à API do Gemini. 'tentar_de_novo' só fica true
+     * pra erro claramente PASSAGEIRO (503 alta demanda, 429 cota
      * momentânea) -- erro de chave errada/conteúdo bloqueado etc. não vale
      * a pena repetir, já volta direto pra tela.
      */
