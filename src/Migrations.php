@@ -687,6 +687,51 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Aba "Implantação" (cliente.php) -- checklist de etapas do processo
+        // de onboarding do cliente (contrato, cadastros, treinamento,
+        // testes, go-live...), nível CLIENTE (não por setor, é um processo
+        // único da empresa toda). "ordem" define a posição no checklist
+        // (ver ações reordenar_etapa_implantacao em cliente.php).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS implantacao_etapas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                titulo VARCHAR(200) NOT NULL,
+                descricao TEXT NULL,
+                status ENUM('pendente','em_andamento','concluida') NOT NULL DEFAULT 'pendente',
+                ordem INT NOT NULL DEFAULT 0,
+                data_prevista DATE NULL,
+                data_concluida DATE NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_implantacao_etapas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Anexo de uma etapa de implantação específica -- reaproveita 100%
+        // do upload/backup/download de documentos já existente (mesma ideia
+        // de propostas_desenvolvimento.documento_id), só que aqui pode ter
+        // VÁRIOS anexos (não um só), então em vez de um id único na
+        // implantação é a linha de documentos que aponta pra etapa dela.
+        // NULL = anexo geral da implantação, sem etapa específica.
+        $pdo->exec("ALTER TABLE documentos ADD COLUMN IF NOT EXISTS implantacao_etapa_id INT NULL COMMENT 'Anexo de uma etapa de implantação (categoria=Implantação), ou NULL se for anexo geral' AFTER setor_id");
+
+        // Histórico de sugestões de IA específicas do processo de
+        // implantação -- guarda a mais recente POR TIPO (não sobrescreve,
+        // só mostra a última de cada tipo na tela), pra dar pra gerar de
+        // novo um tipo sem perder os outros já gerados.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS implantacao_sugestoes_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                tipo VARCHAR(40) NOT NULL COMMENT 'treinamento, teste, boas_praticas, migracao_dados, comunicacao, riscos ou go_live',
+                sugestao TEXT NOT NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_implantacao_sugestoes_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_implantacao_sugestoes_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Clientes iniciais, criados apenas se a tabela estiver vazia.
         $count = (int) $pdo->query('SELECT COUNT(*) FROM clientes')->fetchColumn();
         if ($count === 0) {

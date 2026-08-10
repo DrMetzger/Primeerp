@@ -415,6 +415,172 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set($idDocumentoNovo ? 'sucesso' : 'erro', $idDocumentoNovo ? 'Documento enviado.' : $erroUploadDocumento);
     }
 
+    // --- Implantação (aba Implantação) ------------------------------------
+    // Checklist de etapas do onboarding desse cliente -- nível CLIENTE
+    // (processo único da empresa toda), não por setor.
+
+    if ($acao === 'criar_etapa_implantacao') {
+        $tituloEtapa = trim($_POST['titulo'] ?? '');
+        if ($tituloEtapa === '') {
+            flash_set('erro', 'Informe o título da etapa.');
+        } else {
+            $stmtOrdemMax = $pdo->prepare('SELECT COALESCE(MAX(ordem), 0) FROM implantacao_etapas WHERE cliente_id = ?');
+            $stmtOrdemMax->execute([$clienteId]);
+            $ordemNova = (int) $stmtOrdemMax->fetchColumn() + 1;
+            $pdo->prepare('INSERT INTO implantacao_etapas (cliente_id, titulo, descricao, data_prevista, ordem) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$clienteId, $tituloEtapa, trim($_POST['descricao'] ?? '') ?: null, $_POST['data_prevista'] ?: null, $ordemNova]);
+            flash_set('sucesso', 'Etapa adicionada.');
+        }
+    }
+
+    if ($acao === 'atualizar_etapa_implantacao') {
+        $etapaId = (int) $_POST['etapa_id'];
+        $stmtEtapaAtual = $pdo->prepare('SELECT status, data_concluida FROM implantacao_etapas WHERE id = ? AND cliente_id = ?');
+        $stmtEtapaAtual->execute([$etapaId, $clienteId]);
+        $etapaAtual = $stmtEtapaAtual->fetch();
+        $tituloEtapa = trim($_POST['titulo'] ?? '');
+
+        if (!$etapaAtual) {
+            flash_set('erro', 'Etapa não encontrada.');
+        } elseif ($tituloEtapa === '') {
+            flash_set('erro', 'Informe o título da etapa.');
+        } else {
+            $novoStatusEtapa = in_array($_POST['status'] ?? '', ['pendente', 'em_andamento', 'concluida'], true) ? $_POST['status'] : 'pendente';
+            // Só "renova" a data de conclusão se ela ainda não tinha uma --
+            // senão editar só o título/descrição depois de já concluída
+            // ficaria empurrando a data pra hoje toda vez.
+            $dataConcluidaEtapa = $novoStatusEtapa === 'concluida' ? ($etapaAtual['data_concluida'] ?: date('Y-m-d')) : null;
+            $pdo->prepare('UPDATE implantacao_etapas SET titulo=?, descricao=?, status=?, data_prevista=?, data_concluida=? WHERE id=?')
+                ->execute([$tituloEtapa, trim($_POST['descricao'] ?? '') ?: null, $novoStatusEtapa, $_POST['data_prevista'] ?: null, $dataConcluidaEtapa, $etapaId]);
+            flash_set('sucesso', 'Etapa atualizada.');
+        }
+    }
+
+    // Não é destrutiva pros anexos -- eles só perdem o vínculo com a etapa
+    // (mesma filosofia de excluir_setor).
+    if ($acao === 'excluir_etapa_implantacao') {
+        $etapaId = (int) $_POST['etapa_id'];
+        $confereEtapa = $pdo->prepare('SELECT 1 FROM implantacao_etapas WHERE id = ? AND cliente_id = ?');
+        $confereEtapa->execute([$etapaId, $clienteId]);
+        if ($confereEtapa->fetchColumn()) {
+            $pdo->prepare('UPDATE documentos SET implantacao_etapa_id = NULL WHERE implantacao_etapa_id = ?')->execute([$etapaId]);
+            $pdo->prepare('DELETE FROM implantacao_etapas WHERE id = ?')->execute([$etapaId]);
+            flash_set('sucesso', 'Etapa excluída. Os anexos dela continuam salvos, só sem vínculo.');
+        }
+    }
+
+    if ($acao === 'reordenar_etapa_implantacao') {
+        $etapaId = (int) $_POST['etapa_id'];
+        $sentido = $_POST['sentido'] === 'up' ? 'up' : 'down';
+        $stmtOrdemTodas = $pdo->prepare('SELECT id, ordem FROM implantacao_etapas WHERE cliente_id = ? ORDER BY ordem ASC, id ASC');
+        $stmtOrdemTodas->execute([$clienteId]);
+        $todasEtapas = $stmtOrdemTodas->fetchAll();
+        $indiceEtapa = null;
+        foreach ($todasEtapas as $i => $et) {
+            if ((int) $et['id'] === $etapaId) {
+                $indiceEtapa = $i;
+                break;
+            }
+        }
+        if ($indiceEtapa !== null) {
+            $indiceAlvo = $sentido === 'up' ? $indiceEtapa - 1 : $indiceEtapa + 1;
+            if (isset($todasEtapas[$indiceAlvo])) {
+                $pdo->prepare('UPDATE implantacao_etapas SET ordem = ? WHERE id = ?')->execute([$todasEtapas[$indiceAlvo]['ordem'], $etapaId]);
+                $pdo->prepare('UPDATE implantacao_etapas SET ordem = ? WHERE id = ?')->execute([$todasEtapas[$indiceEtapa]['ordem'], $todasEtapas[$indiceAlvo]['id']]);
+            }
+        }
+    }
+
+    if ($acao === 'upload_documento_implantacao' && isset($_FILES['arquivo'])) {
+        $erroUploadImplantacao = null;
+        $etapaIdAnexo = $_POST['etapa_id'] !== '' ? (int) $_POST['etapa_id'] : null;
+        $idDocImplantacao = salvar_documento_upload(
+            $pdo,
+            $clienteId,
+            null,
+            trim($_POST['titulo'] ?? ''),
+            null,
+            'Implantação',
+            $_FILES['arquivo'],
+            Auth::userId(),
+            $erroUploadImplantacao
+        );
+        if ($idDocImplantacao) {
+            $pdo->prepare('UPDATE documentos SET implantacao_etapa_id = ? WHERE id = ?')->execute([$etapaIdAnexo, $idDocImplantacao]);
+        }
+        flash_set($idDocImplantacao ? 'sucesso' : 'erro', $idDocImplantacao ? 'Anexo enviado.' : $erroUploadImplantacao);
+    }
+
+    // IA: várias sugestões diferentes pro processo de implantação (não só
+    // uma) -- cada tipo gera e guarda separado, pra dar pra ter todas
+    // geradas ao mesmo tempo sem uma sobrescrever a outra.
+    if ($acao === 'gerar_sugestao_implantacao') {
+        $ehAjaxImplantacaoIa = ($_POST['ajax'] ?? '') === '1';
+        $tipoSugestaoImplantacao = $_POST['tipo'] ?? '';
+
+        $tiposSugestaoImplantacao = [
+            'treinamento' => 'um roteiro de treinamento pros usuários da empresa aprenderem a usar o sistema, dividido por perfil/setor quando fizer sentido',
+            'teste' => 'um roteiro de testes (homologação) pra validar se o sistema está configurado certo antes de ir pro ar, cobrindo os fluxos mais críticos',
+            'boas_praticas' => 'uma lista de boas práticas de implantação de ERP aplicadas a esse cliente específico (não genérica)',
+            'migracao_dados' => 'um checklist de dados cadastrais que normalmente precisam ser migrados e validados nessa fase (clientes, produtos/serviços, fornecedores, saldos, tabelas de preço, etc.)',
+            'comunicacao' => 'um plano de comunicação com os usuários finais da empresa sobre a mudança de sistema (gestão de mudança), incluindo o que comunicar e quando',
+            'riscos' => 'uma análise de riscos e pontos de atenção específicos dessa implantação, com base no que já foi cadastrado',
+            'go_live' => 'um checklist de critérios objetivos pra considerar que essa implantação está pronta pra "ir ao ar" (go-live)',
+        ];
+
+        if (!isset($tiposSugestaoImplantacao[$tipoSugestaoImplantacao])) {
+            $respostaImplantacaoIa = ['sucesso' => false, 'mensagem' => 'Tipo de sugestão inválido.', 'sugestao' => null, 'gerado_em' => null];
+        } else {
+            $stmtSetoresImplantacaoIa = $pdo->prepare('SELECT nome FROM setores WHERE cliente_id = ? AND ativo = 1');
+            $stmtSetoresImplantacaoIa->execute([$clienteId]);
+            $nomesSetoresImplantacaoIa = $stmtSetoresImplantacaoIa->fetchAll(PDO::FETCH_COLUMN);
+
+            $stmtQtdUsuariosImplantacaoIa = $pdo->prepare('SELECT COUNT(*) FROM setor_responsaveis WHERE cliente_id = ?');
+            $stmtQtdUsuariosImplantacaoIa->execute([$clienteId]);
+            $qtdUsuariosImplantacaoIa = (int) $stmtQtdUsuariosImplantacaoIa->fetchColumn();
+
+            $stmtEtapasImplantacaoIa = $pdo->prepare('SELECT titulo, status FROM implantacao_etapas WHERE cliente_id = ? ORDER BY ordem ASC');
+            $stmtEtapasImplantacaoIa->execute([$clienteId]);
+            $etapasImplantacaoIa = $stmtEtapasImplantacaoIa->fetchAll();
+
+            $promptImplantacao = "Você é um consultor de implantação de ERP (TOTVS Protheus) de uma consultoria (PrimeERP). "
+                . "Gere {$tiposSugestaoImplantacao[$tipoSugestaoImplantacao]} pro cliente \"{$cliente['nome']}\". "
+                . "Responda em português, de forma prática e organizada em tópicos ou lista numerada, pronto pra ser usado de verdade (evite generalidades).\n\n"
+                . "Contexto desse cliente:\n"
+                . '- Setores cadastrados: ' . ($nomesSetoresImplantacaoIa ? implode(', ', $nomesSetoresImplantacaoIa) : 'nenhum setor cadastrado ainda') . "\n"
+                . "- Quantidade de pessoas/usuários cadastrados: {$qtdUsuariosImplantacaoIa}\n"
+                . "- Etapas de implantação já registradas nesse checklist:\n";
+            if ($etapasImplantacaoIa) {
+                foreach ($etapasImplantacaoIa as $etIa) {
+                    $promptImplantacao .= "  - {$etIa['titulo']} ({$etIa['status']})\n";
+                }
+            } else {
+                $promptImplantacao .= "  (nenhuma etapa registrada ainda)\n";
+            }
+
+            $resultadoImplantacaoIa = AiSugestoes::gerar($promptImplantacao);
+            if (!$resultadoImplantacaoIa['ok']) {
+                $respostaImplantacaoIa = ['sucesso' => false, 'mensagem' => 'Não foi possível gerar a sugestão: ' . $resultadoImplantacaoIa['erro'], 'sugestao' => null, 'gerado_em' => null];
+            } else {
+                $pdo->prepare('INSERT INTO implantacao_sugestoes_ia (cliente_id, tipo, sugestao, criado_por) VALUES (?, ?, ?, ?)')
+                    ->execute([$clienteId, $tipoSugestaoImplantacao, $resultadoImplantacaoIa['texto'], Auth::userId()]);
+                $respostaImplantacaoIa = [
+                    'sucesso' => true,
+                    'mensagem' => 'Sugestão gerada.',
+                    'sugestao' => $resultadoImplantacaoIa['texto'],
+                    'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
+                ];
+            }
+        }
+
+        if ($ehAjaxImplantacaoIa) {
+            header('Content-Type: application/json');
+            echo json_encode($respostaImplantacaoIa, JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        flash_set($respostaImplantacaoIa['sucesso'] ? 'sucesso' : 'erro', $respostaImplantacaoIa['mensagem']);
+    }
+
     if ($acao === 'enviar_convite_portal') {
         if (!$cliente['contato_email']) {
             flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
@@ -1018,9 +1184,40 @@ foreach ($documentos as $doc) {
         $contratoSocial ??= $doc; // primeiro = mais recente (ORDER BY criado_em DESC)
     } elseif ($doc['categoria'] === 'Contrato de Prestação de Serviços') {
         $contratoPrestacaoServicos ??= $doc;
+    } elseif ($doc['categoria'] === 'Implantação') {
+        // Aparecem só na aba Implantação (ver mais abaixo), não aqui.
     } else {
         $documentosGerais[] = $doc;
     }
+}
+
+// Anexos da aba Implantação, agrupados por etapa (NULL = anexo geral, sem
+// etapa específica) -- reaproveita a mesma lista de $documentos já buscada
+// acima, sem fazer outra query.
+$anexosImplantacaoPorEtapaId = [];
+$anexosImplantacaoGerais = [];
+foreach ($documentos as $doc) {
+    if ($doc['categoria'] !== 'Implantação') {
+        continue;
+    }
+    if ($doc['implantacao_etapa_id']) {
+        $anexosImplantacaoPorEtapaId[$doc['implantacao_etapa_id']][] = $doc;
+    } else {
+        $anexosImplantacaoGerais[] = $doc;
+    }
+}
+
+$etapasImplantacao = $pdo->prepare('SELECT * FROM implantacao_etapas WHERE cliente_id = ? ORDER BY ordem ASC, id ASC');
+$etapasImplantacao->execute([$clienteId]);
+$etapasImplantacao = $etapasImplantacao->fetchAll();
+
+// Só a sugestão mais recente DE CADA TIPO (ORDER BY criado_em DESC + ??=
+// pega a primeira ocorrência de cada tipo, que é a mais nova).
+$sugestoesImplantacaoIa = $pdo->prepare('SELECT * FROM implantacao_sugestoes_ia WHERE cliente_id = ? ORDER BY criado_em DESC');
+$sugestoesImplantacaoIa->execute([$clienteId]);
+$ultimaSugestaoImplantacaoPorTipo = [];
+foreach ($sugestoesImplantacaoIa->fetchAll() as $sugImplantacao) {
+    $ultimaSugestaoImplantacaoPorTipo[$sugImplantacao['tipo']] ??= $sugImplantacao;
 }
 
 // Propostas de melhoria/desenvolvimento por setor (aba Setores) -- backlog
@@ -1200,6 +1397,7 @@ require __DIR__ . '/templates/header.php';
 
 <ul class="nav nav-tabs mb-3" id="clienteTabs">
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral">Visão geral</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#implantacao"><i class="bi bi-rocket-takeoff"></i> Implantação <span class="badge bg-secondary"><?= count($etapasImplantacao) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados">Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis">KPIs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores">Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
@@ -1464,6 +1662,183 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <p class="text-muted small">Treinamentos/reuniões que não são de um setor específico (para agenda de setor, ver a aba Setores).</p>
                 <div class="calendario-mensal" data-eventos='<?= e(json_encode($mapearEventosCalendario($treinamentosGerais), JSON_UNESCAPED_UNICODE)) ?>' data-setor-id="" data-aba-retorno="visao-geral"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IMPLANTAÇÃO -->
+    <div class="tab-pane" id="implantacao">
+        <?php
+        $totalEtapasImplantacao = count($etapasImplantacao);
+        $concluidasImplantacao = count(array_filter($etapasImplantacao, fn ($e) => $e['status'] === 'concluida'));
+        ?>
+        <p class="text-muted small mb-3"><i class="bi bi-rocket-takeoff"></i> Checklist do processo de implantação desse cliente -- contrato, cadastros, treinamento, testes, go-live. Cada etapa pode ter anexo (contrato assinado, material de treinamento, evidência de teste...) e a IA pode sugerir roteiros pra ajudar.</p>
+
+        <?php if ($totalEtapasImplantacao > 0): ?>
+        <div class="card card-stat mb-3">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center justify-content-between">
+                    <span class="fw-semibold"><?= $concluidasImplantacao ?> de <?= $totalEtapasImplantacao ?> etapas concluídas</span>
+                    <span class="text-muted small"><?= round($totalEtapasImplantacao ? $concluidasImplantacao / $totalEtapasImplantacao * 100 : 0) ?>%</span>
+                </div>
+                <div class="progress mt-1" style="height:6px;">
+                    <div class="progress-bar bg-success" style="width: <?= $totalEtapasImplantacao ? round($concluidasImplantacao / $totalEtapasImplantacao * 100) : 0 ?>%"></div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <div class="card card-stat mb-3">
+            <div class="card-body">
+                <form method="post" class="row g-2 align-items-end">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="criar_etapa_implantacao">
+                    <input type="hidden" name="aba_retorno" value="implantacao">
+                    <div class="col-md-4"><input type="text" name="titulo" class="form-control" placeholder="Nova etapa (ex.: Assinatura de contrato)" required></div>
+                    <div class="col-md-4"><input type="text" name="descricao" class="form-control" placeholder="Descrição (opcional)"></div>
+                    <div class="col-md-2"><input type="date" name="data_prevista" class="form-control" title="Data prevista (opcional)"></div>
+                    <div class="col-md-2"><button type="submit" class="btn btn-dark w-100"><i class="bi bi-plus-lg"></i> Adicionar</button></div>
+                </form>
+            </div>
+        </div>
+
+        <?php if (!$etapasImplantacao): ?>
+            <p class="text-muted text-center py-4"><i class="bi bi-rocket-takeoff" style="font-size:2rem;"></i><br>Nenhuma etapa de implantação cadastrada ainda.</p>
+        <?php endif; ?>
+
+        <?php foreach ($etapasImplantacao as $indiceEtapaImplantacao => $etapa):
+            $idEtapaAtual = (int) $etapa['id'];
+            $anexosEtapaAtual = $anexosImplantacaoPorEtapaId[$idEtapaAtual] ?? [];
+            $statusBadgeEtapa = ['pendente' => 'secondary', 'em_andamento' => 'warning', 'concluida' => 'success'][$etapa['status']];
+        ?>
+        <div class="card card-stat mb-2">
+            <div class="card-body">
+                <form method="post" class="row g-2 align-items-end mb-2">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="atualizar_etapa_implantacao">
+                    <input type="hidden" name="aba_retorno" value="implantacao">
+                    <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
+                    <div class="col-md-4"><input type="text" name="titulo" class="form-control" value="<?= e($etapa['titulo']) ?>" required></div>
+                    <div class="col-md-3">
+                        <select name="status" class="form-select">
+                            <option value="pendente" <?= $etapa['status'] === 'pendente' ? 'selected' : '' ?>>Pendente</option>
+                            <option value="em_andamento" <?= $etapa['status'] === 'em_andamento' ? 'selected' : '' ?>>Em andamento</option>
+                            <option value="concluida" <?= $etapa['status'] === 'concluida' ? 'selected' : '' ?>>Concluída</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2"><input type="date" name="data_prevista" class="form-control form-control-sm" value="<?= e($etapa['data_prevista']) ?>" title="Data prevista"></div>
+                    <div class="col-md-3 d-flex gap-1">
+                        <button type="submit" class="btn btn-sm btn-outline-dark flex-grow-1"><i class="bi bi-check2"></i> Salvar</button>
+                    </div>
+                    <div class="col-12"><textarea name="descricao" class="form-control form-control-sm" rows="1" placeholder="Descrição (opcional)"><?= e($etapa['descricao']) ?></textarea></div>
+                </form>
+
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                    <span class="badge bg-<?= $statusBadgeEtapa ?>"><?= ['pendente' => 'Pendente', 'em_andamento' => 'Em andamento', 'concluida' => 'Concluída'][$etapa['status']] ?></span>
+                    <?php if ($etapa['data_prevista']): ?><span class="text-muted small">Previsto: <?= formatar_data($etapa['data_prevista']) ?></span><?php endif; ?>
+                    <?php if ($etapa['data_concluida']): ?><span class="text-muted small">Concluído: <?= formatar_data($etapa['data_concluida']) ?></span><?php endif; ?>
+
+                    <div class="ms-auto d-flex gap-1">
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="reordenar_etapa_implantacao">
+                            <input type="hidden" name="aba_retorno" value="implantacao">
+                            <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
+                            <input type="hidden" name="sentido" value="up">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" <?= $indiceEtapaImplantacao === 0 ? 'disabled' : '' ?> title="Mover pra cima"><i class="bi bi-arrow-up"></i></button>
+                        </form>
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="reordenar_etapa_implantacao">
+                            <input type="hidden" name="aba_retorno" value="implantacao">
+                            <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
+                            <input type="hidden" name="sentido" value="down">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" <?= $indiceEtapaImplantacao === count($etapasImplantacao) - 1 ? 'disabled' : '' ?> title="Mover pra baixo"><i class="bi bi-arrow-down"></i></button>
+                        </form>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir a etapa \'<?= e($etapa['titulo']) ?>\'? Os anexos dela continuam salvos, só sem vínculo.');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="excluir_etapa_implantacao">
+                            <input type="hidden" name="aba_retorno" value="implantacao">
+                            <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir etapa"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="border-top pt-2">
+                    <?php foreach ($anexosEtapaAtual as $anexoEtapa): ?>
+                        <a href="<?= url('download.php?id=' . $anexoEtapa['id']) ?>" class="btn btn-sm btn-outline-dark me-1 mb-1"><i class="bi bi-paperclip"></i> <?= e($anexoEtapa['arquivo_nome_original']) ?></a>
+                    <?php endforeach; ?>
+                    <form method="post" enctype="multipart/form-data" class="d-inline-flex gap-1 align-items-center mt-1">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="upload_documento_implantacao">
+                        <input type="hidden" name="aba_retorno" value="implantacao">
+                        <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
+                        <input type="file" name="arquivo" class="form-control form-control-sm" required style="max-width:220px;">
+                        <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Anexar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+
+        <div class="card card-stat mt-3">
+            <div class="card-header bg-white fw-bold"><i class="bi bi-paperclip"></i> Anexos gerais (sem etapa específica)</div>
+            <div class="card-body">
+                <?php foreach ($anexosImplantacaoGerais as $anexoGeral): ?>
+                    <a href="<?= url('download.php?id=' . $anexoGeral['id']) ?>" class="btn btn-sm btn-outline-dark me-1 mb-1"><i class="bi bi-paperclip"></i> <?= e($anexoGeral['arquivo_nome_original']) ?></a>
+                <?php endforeach; ?>
+                <?php if (!$anexosImplantacaoGerais): ?><p class="text-muted small mb-2">Nenhum anexo geral ainda.</p><?php endif; ?>
+                <form method="post" enctype="multipart/form-data" class="d-flex gap-1 align-items-center mt-2">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="upload_documento_implantacao">
+                    <input type="hidden" name="aba_retorno" value="implantacao">
+                    <input type="hidden" name="etapa_id" value="">
+                    <input type="file" name="arquivo" class="form-control form-control-sm" required style="max-width:260px;">
+                    <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Anexar</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-header bg-white fw-bold"><i class="bi bi-stars"></i> Sugestões de IA pra essa implantação</div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    <i class="bi bi-info-circle"></i> A IA usa os setores, a quantidade de usuários e as etapas já cadastradas desse cliente pra gerar cada sugestão -- não lê documentos nem chamados.
+                    <?php if (!AiSugestoes::configurada()): ?><span class="d-block mt-1">IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY).</span><?php endif; ?>
+                </p>
+                <?php foreach ([
+                    'treinamento' => ['📋', 'Roteiro de treinamento'],
+                    'teste' => ['🧪', 'Roteiro de testes (homologação)'],
+                    'boas_praticas' => ['✅', 'Boas práticas de implantação'],
+                    'migracao_dados' => ['📦', 'Checklist de dados a migrar'],
+                    'comunicacao' => ['📣', 'Plano de comunicação com usuários'],
+                    'riscos' => ['⚠️', 'Riscos e pontos de atenção'],
+                    'go_live' => ['🚀', 'Checklist de "pronto pra ir ao ar"'],
+                ] as $tipoSugestao => [$emojiSugestao, $labelSugestao]):
+                    $sugestaoExistente = $ultimaSugestaoImplantacaoPorTipo[$tipoSugestao] ?? null;
+                ?>
+                <div class="card mb-2">
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <span class="fw-semibold"><?= $emojiSugestao ?> <?= e($labelSugestao) ?></span>
+                            <form method="post" class="d-inline form-gerar-sugestao-implantacao" data-tipo="<?= $tipoSugestao ?>">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="gerar_sugestao_implantacao">
+                                <input type="hidden" name="aba_retorno" value="implantacao">
+                                <input type="hidden" name="tipo" value="<?= $tipoSugestao ?>">
+                                <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $sugestaoExistente ? 'Gerar de novo' : 'Gerar' ?></button>
+                            </form>
+                        </div>
+                        <div class="resultado-sugestao-implantacao mt-2" id="resultadoSugestaoImplantacao<?= $tipoSugestao ?>">
+                        <?php if ($sugestaoExistente): ?>
+                            <p class="text-muted small mb-1">Gerado em <?= formatar_data($sugestaoExistente['criado_em']) ?></p>
+                            <div style="white-space: pre-wrap;" class="small"><?= e($sugestaoExistente['sugestao']) ?></div>
+                        <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
             </div>
         </div>
     </div>
@@ -2947,6 +3322,40 @@ document.addEventListener('DOMContentLoaded', function () {
                 .catch(function (erro) {
                     var setorId = form.getAttribute('data-setor-id');
                     var alvo = document.getElementById('resultadoSugestaoIa' + setorId);
+                    if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a sugestão: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                })
+                .finally(function () {
+                    escondercarregando();
+                });
+        });
+    });
+
+    document.querySelectorAll('.form-gerar-sugestao-implantacao').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            mostrarCarregando('Gerando sugestão com IA...', true);
+
+            var dados = new FormData(form);
+            dados.set('ajax', '1');
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (resp) { return resp.json(); })
+                .then(function (json) {
+                    var tipo = form.getAttribute('data-tipo');
+                    var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
+                    if (!alvo) return;
+                    if (json.sucesso) {
+                        alvo.innerHTML = '<p class="text-muted small mb-1">Gerado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
+                            + '<div style="white-space: pre-wrap;" class="small">' + escaparHtmlCalendario(json.sugestao) + '</div>';
+                        form.querySelector('button').innerHTML = '<i class="bi bi-stars"></i> Gerar de novo';
+                    } else {
+                        alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
+                    }
+                })
+                .catch(function (erro) {
+                    var tipo = form.getAttribute('data-tipo');
+                    var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
                     if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a sugestão: ' + escaparHtmlCalendario(String(erro)) + '</div>';
                 })
                 .finally(function () {
