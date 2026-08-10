@@ -968,6 +968,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $chamadoId = (int) $_POST['chamado_id'];
         $mensagem = trim($_POST['mensagem'] ?? '');
         $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
+        $notificarCliente = ($_POST['notificar_cliente'] ?? '') === '1';
+        // Sem essa escolha explícita cai no comportamento de sempre
+        // (recalcular_status_chamado() -- vira "aguardando_cliente" depois
+        // de resposta da equipe). Pedido do Kleber: às vezes já quer
+        // encerrar na mesma hora (chamado antigo, resolvido por fora) ou
+        // deixar como pendência NOSSA mesmo tendo respondido algo, sem
+        // precisar de um segundo clique separado em "Encerrar".
+        $statusAposResposta = $_POST['status_apos_resposta'] ?? 'aguardando_cliente';
+        if (!in_array($statusAposResposta, ['aguardando_cliente', 'aguardando_equipe', 'fechado'], true)) {
+            $statusAposResposta = 'aguardando_cliente';
+        }
 
         if ($mensagem !== '' || $temAnexo) {
             $nomeResponsavel = Auth::userName();
@@ -976,7 +987,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $respostaId = (int) $pdo->lastInsertId();
 
             $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'equipe');
-            recalcular_status_chamado($pdo, $chamadoId);
+
+            if ($statusAposResposta === 'fechado') {
+                $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoId]);
+            } else {
+                $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusAposResposta, $chamadoId]);
+            }
 
             $stmtAnexosResposta = $pdo->prepare('SELECT id, arquivo_nome_original FROM chamado_anexos WHERE resposta_id = ?');
             $stmtAnexosResposta->execute([$respostaId]);
@@ -986,17 +1002,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $chamadoAtualizado->execute([$chamadoId]);
             $chamadoAtualizado = $chamadoAtualizado->fetch();
 
-            // Avisa a PESSOA certa (quem abriu -- pode ser um responsável de
-            // setor específico, não sempre o contato master) com o texto da
-            // resposta e os anexos, e pergunta no zap o que ela quer fazer
-            // agora (encerrar/responder/nada) -- pedido do Kleber.
-            $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
-            Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
-            if ($pessoaChamado['telefone']) {
-                WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
+            if ($notificarCliente) {
+                // Avisa a PESSOA certa (quem abriu -- pode ser um responsável
+                // de setor específico, não sempre o contato master) com o
+                // texto da resposta e os anexos. Só pergunta no zap o que
+                // ela quer fazer (encerrar/responder/nada) se o chamado NÃO
+                // foi encerrado agora mesmo -- não faz sentido perguntar
+                // "quer encerrar?" de algo que já está encerrado.
+                $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
+                Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
+                if ($pessoaChamado['telefone'] && $statusAposResposta !== 'fechado') {
+                    WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
+                }
             }
 
-            flash_set('sucesso', $errosAnexo ? 'Resposta enviada, mas: ' . implode(' ', $errosAnexo) : 'Resposta enviada ao cliente.');
+            $rotuloStatus = ['aguardando_cliente' => 'aguardando cliente', 'aguardando_equipe' => 'aguardando nós', 'fechado' => 'fechado'][$statusAposResposta];
+            $mensagemSucesso = 'Resposta registrada, chamado ' . $rotuloStatus . '.' . ($notificarCliente ? '' : ' Cliente NÃO foi notificado.');
+            flash_set('sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
         }
     }
 
@@ -2122,6 +2144,20 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="aba_retorno" value="chamados">
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
+                    <div class="d-flex flex-wrap align-items-center gap-3 mb-2 resposta-opcoes-envio">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" name="notificar_cliente" id="notificarCliente<?= $c['id'] ?>" value="1" checked>
+                            <label class="form-check-label small" for="notificarCliente<?= $c['id'] ?>" title="Desmarque pra registrar a resposta sem avisar o cliente por e-mail/WhatsApp (ex.: encerrando chamado antigo)">Notificar cliente</label>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="small text-muted mb-0" for="statusAposResposta<?= $c['id'] ?>">Deixar como:</label>
+                            <select name="status_apos_resposta" id="statusAposResposta<?= $c['id'] ?>" class="form-select form-select-sm w-auto">
+                                <option value="aguardando_cliente" selected>Aguardando cliente</option>
+                                <option value="aguardando_equipe">Aguardando nós</option>
+                                <option value="fechado">Fechado (encerrar)</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center gap-2">
                         <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" style="max-width: 320px;">
                         <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
