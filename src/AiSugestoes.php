@@ -40,14 +40,18 @@ class AiSugestoes
      * (só gera texto a partir do próprio prompt, sem buscar nada). $chave é
      * qual GEMINI_API_KEY* usar -- sempre a de análise interna por padrão;
      * pesquisarPerfilEmpresa() é o único caller que passa a de busca.
-     * Retorna sempre um array ['ok' => bool, 'texto' => ?string, 'erro' =>
-     * ?string] -- diferente da versão anterior (que só devolvia null em
-     * qualquer falha), pra dar pra mostrar NA TELA o motivo real quando o
-     * Google recusar a chamada (conta sem cota liberada, chave errada,
-     * modelo indisponível, etc.), sem precisar ir atrás de log de servidor
-     * pra descobrir por quê.
+     * $arquivos deixa o Gemini LER o conteúdo real de anexos (PDF/imagem/
+     * texto), não só metadado -- cada item é ['mime' => string, 'dados' =>
+     * bytes crus do arquivo], enviado como "inline_data" (base64) junto do
+     * prompt (ver cliente.php, aba Implantação, que monta essa lista a
+     * partir da tabela documentos). Retorna sempre um array ['ok' => bool,
+     * 'texto' => ?string, 'erro' => ?string] -- diferente da versão
+     * anterior (que só devolvia null em qualquer falha), pra dar pra
+     * mostrar NA TELA o motivo real quando o Google recusar a chamada
+     * (conta sem cota liberada, chave errada, modelo indisponível, etc.),
+     * sem precisar ir atrás de log de servidor pra descobrir por quê.
      */
-    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null): array
+    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = []): array
     {
         $chave ??= defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '';
         if ($chave === '') {
@@ -56,7 +60,13 @@ class AiSugestoes
 
         $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . self::MODELO . ':generateContent?key=' . $chave;
 
-        $corpo = ['contents' => [['parts' => [['text' => $prompt]]]]];
+        $partes = [];
+        foreach ($arquivos as $arquivo) {
+            $partes[] = ['inline_data' => ['mime_type' => $arquivo['mime'], 'data' => base64_encode($arquivo['dados'])]];
+        }
+        $partes[] = ['text' => $prompt];
+
+        $corpo = ['contents' => [['parts' => $partes]]];
         if ($ferramentas) {
             $corpo['tools'] = $ferramentas;
         }
@@ -67,7 +77,7 @@ class AiSugestoes
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => ['content-type: application/json'],
             CURLOPT_POSTFIELDS => json_encode($corpo),
-            CURLOPT_TIMEOUT => 40,
+            CURLOPT_TIMEOUT => 90,
         ]);
 
         $resposta = curl_exec($ch);

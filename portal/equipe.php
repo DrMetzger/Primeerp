@@ -320,26 +320,31 @@ require __DIR__ . '/../templates/portal_header.php';
         </div>
 
         <div class="card card-stat">
+            <div class="card-body p-2 pb-0">
+                <input type="text" class="form-control form-control-sm busca-toolbar" id="buscaUsuariosPortal" placeholder="Buscar por nome, e-mail, telefone ou setor...">
+            </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover align-middle mb-0 tabela-cards-mobile" id="tabelaUsuariosPortal">
                     <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th></th></tr></thead>
                     <tbody>
                     <?php foreach ($usuariosCliente as $uc):
                         $avatarUc = avatar_html($uc['nome'], resolver_avatar_por_email($pdo, $uc['email'], $uc['foto_perfil']), 'cliente');
                         $ucComAvatar = $uc + ['avatar_html' => $avatarUc];
+                        $nomeSetorUc = array_values(array_filter($setores, fn ($s) => (int) $s['id'] === (int) $uc['setor_id']))[0]['nome'] ?? 'Sem setor';
+                        $buscaUc = mb_strtolower($uc['nome'] . ' ' . $uc['email'] . ' ' . $uc['telefone'] . ' ' . $nomeSetorUc);
                     ?>
-                        <tr>
+                        <tr data-busca="<?= e($buscaUc) ?>">
                             <td><?= $avatarUc ?></td>
-                            <td class="fw-semibold"><?= e($uc['nome']) ?></td>
-                            <td><?= e($uc['email']) ?></td>
-                            <td><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
-                            <td>
+                            <td class="fw-semibold" data-rotulo="Nome"><?= e($uc['nome']) ?></td>
+                            <td data-rotulo="E-mail"><?= e($uc['email']) ?></td>
+                            <td class="telefone-linha" data-rotulo="Telefone"><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
+                            <td data-rotulo="Setor">
                                 <form method="post" class="d-inline">
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="acao" value="relacionar_responsavel_setor">
                                     <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                    <select name="setor_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                                    <select name="setor_id" class="form-select form-select-sm select-setor-linha" onchange="this.form.submit()">
                                         <option value="">Sem setor</option>
                                         <?php foreach ($setores as $s): ?>
                                             <option value="<?= $s['id'] ?>" <?= (int) $uc['setor_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
@@ -347,7 +352,7 @@ require __DIR__ . '/../templates/portal_header.php';
                                     </select>
                                 </form>
                             </td>
-                            <td><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
+                            <td data-rotulo="Portal"><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
                             <td class="text-end">
                                 <div class="d-flex flex-wrap gap-1 justify-content-end">
                                     <form method="post" class="d-inline">
@@ -446,6 +451,16 @@ require __DIR__ . '/../templates/portal_header.php';
 </div>
 
 <script>
+var buscaUsuariosPortal = document.getElementById('buscaUsuariosPortal');
+if (buscaUsuariosPortal) {
+    buscaUsuariosPortal.addEventListener('input', function () {
+        var termo = buscaUsuariosPortal.value.trim().toLowerCase();
+        document.querySelectorAll('#tabelaUsuariosPortal tbody tr[data-busca]').forEach(function (linha) {
+            linha.style.display = linha.getAttribute('data-busca').includes(termo) ? '' : 'none';
+        });
+    });
+}
+
 document.querySelectorAll('.botao-editar-usuario-portal').forEach(function (botao) {
     botao.addEventListener('click', function () {
         var dados = JSON.parse(botao.getAttribute('data-usuario'));

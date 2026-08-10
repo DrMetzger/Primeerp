@@ -128,7 +128,10 @@ $mapaOrigem = [
     </div>
     <div class="folha">
         <div class="cabecalho">
-            <span class="marca-caixa"><img class="marca" src="<?= e(asset_url('assets/img/logo.webp')) ?>" alt="Prime Hub"></span>
+            <span class="marca-caixa"><picture>
+                <source srcset="<?= e(asset_url('assets/img/logo.webp')) ?>" type="image/webp">
+                <img class="marca" src="<?= e(asset_url('assets/img/logo.png')) ?>" alt="Prime Hub">
+            </picture></span>
             <div class="titulo-relatorio">
                 <h1>Relatório de chamado</h1>
                 <p><?= e(APP_NAME) ?> · <?= date('d/m/Y H:i') ?></p>

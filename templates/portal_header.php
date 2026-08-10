@@ -20,11 +20,15 @@ use AdminPrime\ClienteAuth;
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container-fluid">
     <a class="navbar-brand d-flex align-items-center" href="<?= url('portal/chamados.php') ?>">
-      <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="PrimeERP">
+      <picture>
+        <source srcset="<?= asset_url('assets/img/logo.webp') ?>" type="image/webp">
+        <img src="<?= asset_url('assets/img/logo.png') ?>" alt="PrimeERP">
+      </picture>
     </a>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
+        <li class="nav-item"><a class="nav-link" href="<?= url('portal/calendario.php') ?>"><i class="bi bi-calendar-event"></i> Calendário</a></li>
         <?php if (ClienteAuth::podeGerenciarEquipe()): ?>
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/equipe.php') ?>"><i class="bi bi-diagram-3"></i> Setores e Usuários</a></li>
         <?php endif; ?>

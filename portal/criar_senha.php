@@ -79,7 +79,10 @@ if (!$tokenInfo) {
 <body class="login-wrapper">
     <div class="card login-card shadow-lg overflow-hidden">
         <div class="login-logo-wrap text-center py-4">
-            <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="PrimeERP" height="36">
+            <picture>
+                <source srcset="<?= asset_url('assets/img/logo.webp') ?>" type="image/webp">
+                <img src="<?= asset_url('assets/img/logo.png') ?>" alt="PrimeERP" height="36">
+            </picture>
             <div class="mt-2 text-white fw-semibold">Criar senha de acesso</div>
         </div>
         <div class="card-body p-4">

@@ -20,7 +20,10 @@ use AdminPrime\Auth;
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <div class="container-fluid">
     <a class="navbar-brand d-flex align-items-center" href="<?= url('dashboard.php') ?>">
-      <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="Prime Hub · PrimeERP">
+      <picture>
+        <source srcset="<?= asset_url('assets/img/logo.webp') ?>" type="image/webp">
+        <img src="<?= asset_url('assets/img/logo.png') ?>" alt="Prime Hub · PrimeERP">
+      </picture>
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
       <span class="navbar-toggler-icon"></span>

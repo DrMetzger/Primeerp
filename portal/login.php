@@ -51,7 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="login-wrapper">
     <div class="card login-card shadow-lg overflow-hidden">
         <div class="login-logo-wrap text-center py-4">
-            <img src="<?= asset_url('assets/img/logo.webp') ?>" alt="PrimeERP" height="36">
+            <picture>
+                <source srcset="<?= asset_url('assets/img/logo.webp') ?>" type="image/webp">
+                <img src="<?= asset_url('assets/img/logo.png') ?>" alt="PrimeERP" height="36">
+            </picture>
             <div class="mt-2 text-white fw-semibold">Portal do Cliente</div>
             <small class="text-white-50">Acompanhe seus chamados</small>
         </div>

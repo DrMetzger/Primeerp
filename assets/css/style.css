@@ -278,7 +278,51 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 /* Tamanho padrão pra botões de ação em linha de tabela (Convite/Resetar/
    Bloquear/Editar) -- antes cada um tinha uma largura diferente porque só
    o texto definia o tamanho, ficava desalinhado. */
-.btn-acao-linha { min-width: 92px; justify-content: center; }
+.btn-acao-linha { width: 106px; flex: 0 0 auto; justify-content: center; white-space: nowrap; }
+
+/* Coluna de setor (select dentro de linha de tabela) e telefone -- sem
+   isso o select fica largo só do tamanho do texto mais curto da tabela
+   inteira e corta o nome do setor selecionado, e o telefone quebra linha. */
+.select-setor-linha { min-width: 150px; }
+.telefone-linha { white-space: nowrap; }
+
+/* Tabela com muitas colunas (equipe/usuários) virando cards em telas
+   pequenas -- em vez de forçar scroll horizontal ou espremer tudo, cada
+   linha passa a ser um bloco com "rótulo: valor", empilhado. */
+@media (max-width: 768px) {
+    .tabela-cards-mobile thead { display: none; }
+    .tabela-cards-mobile, .tabela-cards-mobile tbody, .tabela-cards-mobile tr { display: block; width: 100%; }
+    .tabela-cards-mobile tbody tr {
+        border: 1px solid var(--ph-border);
+        border-radius: var(--ph-radius);
+        margin-bottom: .75rem;
+        padding: .5rem .75rem;
+    }
+    .tabela-cards-mobile tbody tr:hover { background-color: transparent; }
+    .tabela-cards-mobile td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .75rem;
+        border: none;
+        padding: .35rem 0;
+        text-align: right;
+        white-space: normal;
+    }
+    .tabela-cards-mobile td[data-rotulo]::before {
+        content: attr(data-rotulo);
+        font-weight: 600;
+        font-size: .72rem;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        color: var(--ph-text-muted);
+        text-align: left;
+        margin-right: auto;
+    }
+    .tabela-cards-mobile td:empty { display: none; }
+    .tabela-cards-mobile td:not([data-rotulo]):has(img.avatar-circle) { justify-content: center; padding-bottom: .5rem; }
+    .tabela-cards-mobile .btn-acao-linha { width: auto; flex: 1 1 0; }
+}
 
 .btn-group { display: inline-flex; }
 .btn-group .btn { border-radius: var(--ph-radius-sm); }
@@ -927,7 +971,6 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     display: flex;
     flex-wrap: wrap;
     gap: .4rem;
-    max-width: 480px;
 }
 .icone-opcao {
     width: 40px;
@@ -1123,6 +1166,16 @@ a.card-cliente, a.card-cliente:hover {
 .card-cliente-logo-vazio {
     font-size: 1.8rem;
     color: var(--ph-text-muted);
+}
+
+/* Logo do cliente ao lado do nome, no topo da própria página dele
+   (cliente.php) -- menor que o card da listagem, só um selo de identidade
+   junto do título. */
+.cliente-topo-logo {
+    max-width: 48px;
+    max-height: 48px;
+    object-fit: contain;
+    border-radius: var(--ph-radius-sm);
 }
 
 .card-cliente-topo {

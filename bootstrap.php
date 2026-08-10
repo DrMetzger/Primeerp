@@ -6,6 +6,10 @@ require_once __DIR__ . '/config/config.php';
 // para envio autenticado via SMTP.
 require_once __DIR__ . '/vendor/phpmailer/autoload.php';
 
+// FPDF vendorizado manualmente (sem Composer), mesmo motivo do PHPMailer --
+// usado pelo PdfExport.php pra gerar todo PDF timbrado do sistema.
+require_once __DIR__ . '/vendor/fpdf/fpdf.php';
+
 // Autoloader simples (sem Composer) para o namespace AdminPrime\*
 spl_autoload_register(function (string $class) {
     $prefix = 'AdminPrime\\';
