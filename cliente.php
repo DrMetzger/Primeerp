@@ -748,18 +748,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Título padronizado em MAIÚSCULAS (mesma regra do chamado aberto
             // pelo cliente no portal) -- pedido do Kleber pra não ter títulos
             // com capitalização diferente misturados na listagem.
-            $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-            $stmt->execute([
-                $clienteId,
-                mb_strtoupper(trim($_POST['titulo']), 'UTF-8'),
-                trim($_POST['descricao']),
-                $categoriaNovoChamado,
-                $_POST['prioridade'] ?? 'media',
-                'equipe',
-                $_POST['responsavel_id'] ?: null,
-                $_POST['setor_id'] ?: null,
-            ]);
-            flash_set('sucesso', 'Chamado registrado.');
+            $tituloNovoChamadoEquipe = mb_strtoupper(trim($_POST['titulo']), 'UTF-8');
+            $descricaoNovoChamadoEquipe = trim($_POST['descricao']);
+
+            // Mesma trava contra duplo-clique/duplo-toque usada no portal do
+            // cliente (ver bug de 3 chamados idênticos criados de uma vez).
+            if (chamado_e_duplicado_recente($pdo, $clienteId, $tituloNovoChamadoEquipe, $descricaoNovoChamadoEquipe)) {
+                flash_set('sucesso', 'Chamado registrado.');
+            } else {
+                $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, responsavel_id, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmt->execute([
+                    $clienteId,
+                    $tituloNovoChamadoEquipe,
+                    $descricaoNovoChamadoEquipe,
+                    $categoriaNovoChamado,
+                    $_POST['prioridade'] ?? 'media',
+                    'equipe',
+                    $_POST['responsavel_id'] ?: null,
+                    $_POST['setor_id'] ?: null,
+                ]);
+                flash_set('sucesso', 'Chamado registrado.');
+            }
         }
     }
 
@@ -1010,46 +1019,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $statusAposResposta = 'aguardando_cliente';
         }
 
-        if ($mensagem !== '' || $temAnexo) {
-            $nomeResponsavel = Auth::userName();
+        $temMensagemOuAnexo = $mensagem !== '' || $temAnexo;
+        $nomeResponsavel = Auth::userName();
+        $errosAnexo = [];
+        $anexosResposta = [];
+
+        if ($temMensagemOuAnexo) {
             $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
                 ->execute([$chamadoId, $nomeResponsavel, Auth::userId(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
             $respostaId = (int) $pdo->lastInsertId();
 
             $errosAnexo = processar_anexos_chamado($pdo, $chamadoId, $respostaId, 'equipe');
 
-            if ($statusAposResposta === 'fechado') {
-                $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoId]);
-            } else {
-                $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusAposResposta, $chamadoId]);
-            }
-
             $stmtAnexosResposta = $pdo->prepare('SELECT id, arquivo_nome_original FROM chamado_anexos WHERE resposta_id = ?');
             $stmtAnexosResposta->execute([$respostaId]);
             $anexosResposta = $stmtAnexosResposta->fetchAll();
-
-            $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
-            $chamadoAtualizado->execute([$chamadoId]);
-            $chamadoAtualizado = $chamadoAtualizado->fetch();
-
-            if ($notificarCliente) {
-                // Avisa a PESSOA certa (quem abriu -- pode ser um responsável
-                // de setor específico, não sempre o contato master) com o
-                // texto da resposta e os anexos. Só pergunta no zap o que
-                // ela quer fazer (encerrar/responder/nada) se o chamado NÃO
-                // foi encerrado agora mesmo -- não faz sentido perguntar
-                // "quer encerrar?" de algo que já está encerrado.
-                $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
-                Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
-                if ($pessoaChamado['telefone'] && $statusAposResposta !== 'fechado') {
-                    WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
-                }
-            }
-
-            $rotuloStatus = ['aguardando_cliente' => 'aguardando cliente', 'aguardando_equipe' => 'aguardando nós', 'fechado' => 'fechado'][$statusAposResposta];
-            $mensagemSucesso = 'Resposta registrada, chamado ' . $rotuloStatus . '.' . ($notificarCliente ? '' : ' Cliente NÃO foi notificado.');
-            flash_set('sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
         }
+
+        // O status escolhido no "Deixar como" sempre é aplicado, MESMO sem
+        // mensagem/anexo nenhum -- pedido explícito do Kleber: às vezes só
+        // quer encerrar um chamado antigo sem escrever nada, e isso não
+        // pode depender de ter digitado algo (bug real: antes ficava tudo
+        // dentro do if($temMensagemOuAnexo), então "Fechado" sem texto não
+        // fechava nada, só voltava pra tela sem avisar que não fez nada).
+        if ($statusAposResposta === 'fechado') {
+            $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoId]);
+        } else {
+            $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusAposResposta, $chamadoId]);
+        }
+
+        $chamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+        $chamadoAtualizado->execute([$chamadoId]);
+        $chamadoAtualizado = $chamadoAtualizado->fetch();
+
+        // Só faz sentido avisar o cliente se teve mensagem/anexo de verdade
+        // -- não há nada pra "notificar" de uma troca de status silenciosa.
+        if ($temMensagemOuAnexo && $notificarCliente) {
+            // Avisa a PESSOA certa (quem abriu -- pode ser um responsável
+            // de setor específico, não sempre o contato master) com o
+            // texto da resposta e os anexos. Só pergunta no zap o que
+            // ela quer fazer (encerrar/responder/nada) se o chamado NÃO
+            // foi encerrado agora mesmo -- não faz sentido perguntar
+            // "quer encerrar?" de algo que já está encerrado.
+            $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
+            Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
+            if ($pessoaChamado['telefone'] && $statusAposResposta !== 'fechado') {
+                WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
+            }
+        }
+
+        $rotuloStatus = ['aguardando_cliente' => 'aguardando cliente', 'aguardando_equipe' => 'aguardando nós', 'fechado' => 'fechado'][$statusAposResposta];
+        $mensagemSucesso = ($temMensagemOuAnexo ? 'Resposta registrada, chamado ' : 'Chamado ') . $rotuloStatus . '.'
+            . ($temMensagemOuAnexo && !$notificarCliente ? ' Cliente NÃO foi notificado.' : '');
+        flash_set('sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
     }
 
     if ($acao === 'fechar_chamado') {
@@ -3233,6 +3255,19 @@ require __DIR__ . '/templates/header.php';
 <script>
 // Ativa a aba certa com base no hash da URL (ex: #chamados) ou abre "Visão geral" por padrão.
 document.addEventListener('DOMContentLoaded', function () {
+    // Mesma trava contra duplo-clique/duplo-toque do formulário do portal
+    // do cliente -- ver bug de chamados duplicados criados de uma vez.
+    var formNovoChamadoEquipe = document.querySelector('#modalNovoChamado form');
+    if (formNovoChamadoEquipe) {
+        formNovoChamadoEquipe.addEventListener('submit', function () {
+            var botaoEnviar = formNovoChamadoEquipe.querySelector('button[type="submit"]');
+            if (botaoEnviar) {
+                botaoEnviar.disabled = true;
+                botaoEnviar.textContent = 'Enviando...';
+            }
+        });
+    }
+
     var hash = window.location.hash || '#visao-geral';
     var tabLink = document.querySelector('.nav-tabs a[href="' + hash + '"]');
     var tabPane = document.querySelector(hash);

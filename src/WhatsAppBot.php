@@ -517,6 +517,16 @@ class WhatsAppBot
     {
         $tituloFinal = mb_strtoupper($conversa['titulo'], 'UTF-8');
 
+        // Meta pode reentregar o mesmo webhook se a resposta não for rápida
+        // o bastante -- mesma trava contra duplicado usada no portal/admin
+        // (ver bug de chamados idênticos criados de uma vez).
+        if (chamado_e_duplicado_recente($pdo, $conversa['cliente_id'], $tituloFinal, $conversa['descricao'])) {
+            self::excluirConversa($pdo, $conversa['id']);
+            $saudacao = $conversa['nome_pessoa'] ? ('Prontinho, ' . self::primeiroNome($conversa['nome_pessoa']) . '!') : 'Prontinho!';
+            WhatsAppApi::enviarTexto($conversa['telefone'], "✅ {$saudacao} Seu chamado já tinha sido aberto. 🙌 Nossa equipe já foi avisada e vai te responder por aqui.");
+            return;
+        }
+
         $stmt = $pdo->prepare('
             INSERT INTO chamados
                 (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, aberto_por_setor_responsavel_id, origem_canal, setor_id, telefone_whatsapp)

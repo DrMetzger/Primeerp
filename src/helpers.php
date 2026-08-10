@@ -219,6 +219,23 @@ function resolver_pessoa_do_chamado(\PDO $pdo, array $chamado, array $cliente): 
 }
 
 /**
+ * Detecta chamado duplicado (mesmo cliente + título + descrição) criado nos
+ * últimos $janelaSegundos -- guarda contra duplo-clique no formulário e
+ * reenvio de webhook. Checa nos 3 pontos que fazem INSERT INTO chamados
+ * (portal, admin, WhatsApp bot) antes de criar o registro.
+ */
+function chamado_e_duplicado_recente(\PDO $pdo, int $clienteId, string $titulo, string $descricao, int $janelaSegundos = 20): bool
+{
+    $stmt = $pdo->prepare('SELECT id FROM chamados
+        WHERE cliente_id = ? AND titulo = ? AND descricao = ?
+        AND criado_em >= (NOW() - INTERVAL ? SECOND)
+        LIMIT 1');
+    $stmt->execute([$clienteId, $titulo, $descricao, $janelaSegundos]);
+
+    return (bool) $stmt->fetch();
+}
+
+/**
  * Guarda telefone só com os dígitos no banco (sem máscara) -- importante
  * pra integração futura com WhatsApp Cloud API, que precisa do número
  * "cru". A máscara é só visual, aplicada na hora de exibir/preencher campo

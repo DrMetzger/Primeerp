@@ -39,10 +39,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
         // Título padronizado em MAIÚSCULAS -- pedido do Kleber pra não ter
         // cada chamado com uma capitalização diferente ("Erro no sistema",
         // "ERRO NO SISTEMA", "erro no sistema" tudo misturado na listagem).
+        $tituloPadronizado = mb_strtoupper($titulo, 'UTF-8');
+
+        // Duplo-clique/duplo-toque no botão "Abrir chamado" (rede lenta) não
+        // pode criar 2+ chamados idênticos -- se já existe um igual criado
+        // há poucos segundos, finge que deu certo mas não insere de novo.
+        if (chamado_e_duplicado_recente($pdo, $clienteId, $tituloPadronizado, $descricao)) {
+            flash_set('sucesso', 'Chamado aberto com sucesso! Nossa equipe já foi avisada.');
+            header('Location: ' . url('portal/chamados.php'));
+            exit;
+        }
+
         $stmt = $pdo->prepare('INSERT INTO chamados (cliente_id, titulo, descricao, categoria, prioridade, aberto_por, aberto_por_tipo, aberto_por_setor_responsavel_id, setor_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
-            mb_strtoupper($titulo, 'UTF-8'),
+            $tituloPadronizado,
             $descricao,
             $categoria,
             $_POST['prioridade'] ?? 'media',
@@ -361,6 +372,21 @@ require __DIR__ . '/../templates/portal_header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Duplo-clique/duplo-toque em "Enviar chamado" (rede lenta) chegou a
+    // criar 2-3 chamados idênticos de uma vez -- trava o botão assim que o
+    // form é enviado, só reabilita se o navegador bloquear o submit (campo
+    // obrigatório vazio etc.), senão a página já vai recarregar de qualquer jeito.
+    var formNovoChamado = document.querySelector('#modalNovoChamado form');
+    if (formNovoChamado) {
+        formNovoChamado.addEventListener('submit', function () {
+            var botaoEnviar = formNovoChamado.querySelector('button[type="submit"]');
+            if (botaoEnviar) {
+                botaoEnviar.disabled = true;
+                botaoEnviar.textContent = 'Enviando...';
+            }
+        });
+    }
+
     var filtroAtual = 'todos';
     var filtroSetorAtual = 'todos';
 
