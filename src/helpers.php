@@ -935,7 +935,7 @@ function render_anexos_html(array $anexos): string
 
     $html = '<div class="chat-anexos">';
     foreach ($anexos as $a) {
-        $html .= render_anexo_item_html($a, 'anexo-link');
+        $html .= render_anexo_item_html($a, 'anexo-link', true);
     }
     $html .= '</div>';
 
@@ -944,20 +944,28 @@ function render_anexos_html(array $anexos): string
 
 /**
  * Um anexo (imagem ou documento) de chamado -- imagem mostra a MINIATURA de
- * verdade (clique abre em tela grande via lightbox, sem baixar nada, ver
- * .botao-abrir-lightbox em app.js) em vez de só nome+ícone, que obrigava
- * abrir arquivo por arquivo pra saber o que era (comparado pelo Kleber com
- * o mesmo problema no WhatsApp). Documento (PDF etc.) continua como link
- * de nome+ícone, que baixa/abre numa aba normal.
+ * verdade em vez de só nome+ícone, que obrigava abrir arquivo por arquivo
+ * pra saber o que era (comparado pelo Kleber com o mesmo problema no
+ * WhatsApp). $comLightbox decide o que o clique faz: true = abre em tela
+ * grande sem baixar nada (dentro da bolha do chat, pra só OLHAR rápido);
+ * false = baixa de verdade via download_anexo_chamado.php (resumo "Documentos
+ * deste chamado" no topo -- ali o Kleber quer o link de download mesmo,
+ * pra salvar/reenviar o arquivo, não só espiar). Documento (PDF etc.)
+ * sempre baixa, com ou sem lightbox.
  */
-function render_anexo_item_html(array $a, string $classeExtra): string
+function render_anexo_item_html(array $a, string $classeExtra, bool $comLightbox): string
 {
     $url = e(url('download_anexo_chamado.php?id=' . $a['id']));
     $extensao = strtolower(pathinfo($a['arquivo_nome_original'], PATHINFO_EXTENSION));
     $ehImagem = in_array($extensao, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
 
-    if ($ehImagem) {
+    if ($ehImagem && $comLightbox) {
         return '<a href="' . $url . '" class="' . $classeExtra . ' anexo-link-imagem botao-abrir-lightbox" data-lightbox-src="' . $url . '" data-lightbox-legenda="' . e($a['arquivo_nome_original']) . '" title="' . e($a['arquivo_nome_original']) . '">'
+            . '<img src="' . $url . '" class="anexo-thumb" alt="' . e($a['arquivo_nome_original']) . '" loading="lazy"></a>';
+    }
+
+    if ($ehImagem) {
+        return '<a href="' . $url . '" class="' . $classeExtra . ' anexo-link-imagem" target="_blank" rel="noopener" title="Baixar ' . e($a['arquivo_nome_original']) . '">'
             . '<img src="' . $url . '" class="anexo-thumb" alt="' . e($a['arquivo_nome_original']) . '" loading="lazy"></a>';
     }
 
@@ -988,7 +996,7 @@ function render_resumo_anexos_chamado(array $anexosPorLinha): string
     $html .= '<div class="resumo-anexos-titulo"><i class="bi bi-paperclip"></i> Documentos deste chamado (' . count($todos) . ')</div>';
     $html .= '<div class="chat-anexos">';
     foreach ($todos as $a) {
-        $html .= render_anexo_item_html($a, 'anexo-link anexo-link-resumo');
+        $html .= render_anexo_item_html($a, 'anexo-link anexo-link-resumo', false);
     }
     $html .= '</div></div>';
 
