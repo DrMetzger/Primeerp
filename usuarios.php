@@ -264,9 +264,12 @@ require __DIR__ . '/templates/header.php';
             <div class="mb-3"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" placeholder="(00) 00000-0000"></div>
             <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" placeholder="Só números"></div>
             <div class="mb-3"><label class="form-label">Senha *</label>
-                <input type="password" name="senha" class="form-control" minlength="8"
-                       pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
-                       title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                <div class="campo-senha">
+                    <input type="password" name="senha" class="form-control" minlength="8"
+                           pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
+                           title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                    <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                </div>
                 <small class="text-muted">Pelo menos 8 caracteres, com 1 número, 1 maiúscula e 1 caractere especial.</small>
             </div>
             <div class="mb-3"><label class="form-label">Perfil</label>
@@ -415,13 +418,19 @@ require __DIR__ . '/templates/header.php';
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label">Nova senha *</label>
-                            <input type="password" name="nova_senha" class="form-control" minlength="8"
-                                   pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
-                                   title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                            <div class="campo-senha">
+                                <input type="password" name="nova_senha" class="form-control" minlength="8"
+                                       pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
+                                       title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Confirmar nova senha *</label>
-                            <input type="password" name="confirmar_senha" class="form-control" minlength="8" required>
+                            <div class="campo-senha">
+                                <input type="password" name="confirmar_senha" class="form-control" minlength="8" required>
+                                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                     </div>
                     <small class="text-muted">Pelo menos 8 caracteres, com 1 número, 1 maiúscula e 1 caractere especial.</small>
@@ -437,6 +446,15 @@ require __DIR__ . '/templates/header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.toggle-senha').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            var campo = botao.previousElementSibling;
+            var mostrando = campo.type === 'text';
+            campo.type = mostrando ? 'password' : 'text';
+            botao.querySelector('i').className = mostrando ? 'bi bi-eye' : 'bi bi-eye-slash';
+        });
+    });
+
     var baseUrlAvatar = <?= json_encode(url('')) ?>;
 
     function abrirModalUsuario(dados) {

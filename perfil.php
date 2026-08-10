@@ -165,17 +165,26 @@ require __DIR__ . '/templates/header.php';
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">Senha atual *</label>
-                            <input type="password" name="senha_atual" class="form-control" required>
+                            <div class="campo-senha">
+                                <input type="password" name="senha_atual" class="form-control" required>
+                                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Nova senha *</label>
-                            <input type="password" name="nova_senha" class="form-control" minlength="8"
-                                   pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
-                                   title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                            <div class="campo-senha">
+                                <input type="password" name="nova_senha" class="form-control" minlength="8"
+                                       pattern="(?=.*[0-9])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}"
+                                       title="Pelo menos 8 caracteres, com 1 número, 1 letra maiúscula e 1 caractere especial" required>
+                                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Confirmar nova senha *</label>
-                            <input type="password" name="confirmar_senha" class="form-control" minlength="8" required>
+                            <div class="campo-senha">
+                                <input type="password" name="confirmar_senha" class="form-control" minlength="8" required>
+                                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            </div>
                         </div>
                     </div>
                     <small class="text-muted">Pelo menos 8 caracteres, com 1 número, 1 maiúscula e 1 caractere especial.</small>
@@ -186,5 +195,16 @@ require __DIR__ . '/templates/header.php';
         </div>
     </div>
 </div>
+
+<script>
+document.querySelectorAll('.toggle-senha').forEach(function (botao) {
+    botao.addEventListener('click', function () {
+        var campo = botao.previousElementSibling;
+        var mostrando = campo.type === 'text';
+        campo.type = mostrando ? 'password' : 'text';
+        botao.querySelector('i').className = mostrando ? 'bi bi-eye' : 'bi bi-eye-slash';
+    });
+});
+</script>
 
 <?php require __DIR__ . '/templates/footer.php'; ?>

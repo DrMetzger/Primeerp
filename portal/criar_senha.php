@@ -73,6 +73,7 @@ if (!$tokenInfo) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="<?= asset_url('assets/css/style.css') ?>" rel="stylesheet">
 </head>
 <body class="login-wrapper">
@@ -99,11 +100,17 @@ if (!$tokenInfo) {
                     <input type="hidden" name="token" value="<?= e($token) ?>">
                     <div class="mb-3">
                         <label class="form-label">Nova senha</label>
-                        <input type="password" name="senha" class="form-control" minlength="6" required autofocus>
+                        <div class="campo-senha">
+                            <input type="password" name="senha" class="form-control" minlength="6" required autofocus>
+                            <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Confirmar senha</label>
-                        <input type="password" name="confirmar_senha" class="form-control" minlength="6" required>
+                        <div class="campo-senha">
+                            <input type="password" name="confirmar_senha" class="form-control" minlength="6" required>
+                            <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-dark w-100">Criar senha e continuar</button>
                 </form>
@@ -112,5 +119,15 @@ if (!$tokenInfo) {
             <?php endif; ?>
         </div>
     </div>
+    <script>
+        document.querySelectorAll('.toggle-senha').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                var campo = botao.previousElementSibling;
+                var mostrando = campo.type === 'text';
+                campo.type = mostrando ? 'password' : 'text';
+                botao.querySelector('i').className = mostrando ? 'bi bi-eye' : 'bi bi-eye-slash';
+            });
+        });
+    </script>
 </body>
 </html>
