@@ -596,6 +596,12 @@ class Migrations
         // "responsável interno" por essa conta, pra ficar claro quem
         // acompanha esse cliente enquanto não há um contato de verdade.
         $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_interno_id INT NULL COMMENT 'usuarios.id -- admin da Prime responsável por essa conta, usado sobretudo quando ainda não há contato_nome definido' AFTER contato_documento");
+
+        // Nem todo cliente deve poder cadastrar setor/usuário sozinho no
+        // portal (portal/equipe.php) -- fica DESLIGADO por padrão, a Prime
+        // libera cliente por cliente (tem cliente que não tem preparo pra
+        // isso sem confundir tudo).
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS portal_permite_gerenciar_equipe TINYINT(1) NOT NULL DEFAULT 0 AFTER responsavel_interno_id");
         // Evita mandar o aviso de "fora do horário" em toda mensagem se a
         // pessoa insistir escrevendo várias vezes fora do expediente.
         $pdo->exec("ALTER TABLE whatsapp_conversas ADD COLUMN IF NOT EXISTS aviso_horario_enviado_em DATETIME NULL AFTER bloqueado_ate");

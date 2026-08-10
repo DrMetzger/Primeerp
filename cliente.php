@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=?, portal_permite_gerenciar_equipe=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             apenas_digitos($_POST['cnpj'] ?? ''),
@@ -40,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['responsavel_interno_id'] ?: null,
             trim($_POST['observacoes']) ?: null,
             isset($_POST['acesso_fora_horario']) ? 1 : 0,
+            isset($_POST['portal_permite_gerenciar_equipe']) ? 1 : 0,
             $clienteId,
         ]);
 
@@ -993,10 +994,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     foreach ($membrosSetorAlvo as $membro) {
                         Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $membro, $setorAlvo['nome']);
                     }
-                    if ($masterNesseSetor && $cliente['contato_email']) {
+                    if ($masterNesseSetor) {
                         Notificacoes::chamadoAtribuidoSetor(
                             ['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']],
-                            ['nome' => $cliente['contato_nome'] ?: $cliente['nome'], 'email' => $cliente['contato_email']],
+                            ['nome' => $cliente['contato_nome'] ?: $cliente['nome'], 'email' => $cliente['contato_email'], 'telefone' => $cliente['contato_telefone']],
                             $setorAlvo['nome']
                         );
                     }
@@ -1483,6 +1484,12 @@ require __DIR__ . '/templates/header.php';
                                 <input type="checkbox" name="acesso_fora_horario" id="acessoForaHorario" class="form-check-input" value="1" <?= $cliente['acesso_fora_horario'] ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="acessoForaHorario">
                                     Liberar acesso ao portal fora do horário comercial (<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?>–<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?>) pra esse cliente
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" name="portal_permite_gerenciar_equipe" id="portalPermiteGerenciarEquipe" class="form-check-input" value="1" <?= $cliente['portal_permite_gerenciar_equipe'] ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="portalPermiteGerenciarEquipe">
+                                    Deixar o master cadastrar setor/usuário sozinho no portal (aba "Setores e Usuários") -- só CRIAR e ALTERAR, exclusão continua só aqui. Desligado por padrão.
                                 </label>
                             </div>
                         </div>

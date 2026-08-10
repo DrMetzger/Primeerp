@@ -251,6 +251,33 @@ class ClienteAuth
     }
 
     /**
+     * Além de ser master, o CLIENTE precisa ter sido liberado pela Prime pra
+     * gerenciar setor/usuário sozinho (clientes.portal_permite_gerenciar_equipe,
+     * ver cliente.php/clientes.php) -- desligado por padrão, tem cliente que
+     * não tem preparo pra isso sem confundir tudo. SEMPRE busca no banco
+     * (mesmo motivo de podeAcessarForaDoHorario()): uma liberação dada/tirada
+     * pela Prime tem que valer na hora, não só no próximo login.
+     */
+    public static function podeGerenciarEquipe(): bool
+    {
+        if (!self::check() || !self::isMaster()) {
+            return false;
+        }
+        $stmt = Database::connection()->prepare('SELECT portal_permite_gerenciar_equipe FROM clientes WHERE id = ?');
+        $stmt->execute([self::clienteId()]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    public static function exigirGerenciarEquipe(): void
+    {
+        self::exigirMaster();
+        if (!self::podeGerenciarEquipe()) {
+            header('Location: ' . APP_BASE_PATH . '/portal/chamados.php');
+            exit;
+        }
+    }
+
+    /**
      * Portal do cliente só funciona em horário comercial (ver config.php) --
      * inclusive pra quem já está logado (não é só bloquear o login). Se
      * abrir uma página fora do horário, mostra um aviso simples e para a

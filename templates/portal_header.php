@@ -25,7 +25,7 @@ use AdminPrime\ClienteAuth;
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
-        <?php if (ClienteAuth::isMaster()): ?>
+        <?php if (ClienteAuth::podeGerenciarEquipe()): ?>
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/equipe.php') ?>"><i class="bi bi-diagram-3"></i> Setores e Usuários</a></li>
         <?php endif; ?>
       </ul>

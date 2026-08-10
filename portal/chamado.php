@@ -26,7 +26,7 @@ if (ClienteAuth::isMaster()) {
 }
 $chamado = $stmt->fetch();
 
-$stmtCliente = $pdo->prepare('SELECT nome, foto_perfil, contato_nome, contato_email FROM clientes WHERE id = ?');
+$stmtCliente = $pdo->prepare('SELECT nome, foto_perfil, contato_nome, contato_email, contato_telefone FROM clientes WHERE id = ?');
 $stmtCliente->execute([$clienteId]);
 $clienteInfo = $stmtCliente->fetch();
 $fotoPerfilCliente = resolver_avatar_por_email($pdo, $clienteInfo['contato_email'] ?? null, $clienteInfo['foto_perfil'] ?? null);
@@ -72,10 +72,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
                 foreach ($membrosAlvoPortal as $membro) {
                     Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $membro, $setorAlvoPortal['nome']);
                 }
-                if ($masterNesseSetorPortal && $clienteInfo['contato_email']) {
+                if ($masterNesseSetorPortal) {
                     Notificacoes::chamadoAtribuidoSetor(
                         ['id' => $chamadoId, 'titulo' => $chamado['titulo']],
-                        ['nome' => $nomeMasterCliente, 'email' => $clienteInfo['contato_email']],
+                        ['nome' => $nomeMasterCliente, 'email' => $clienteInfo['contato_email'], 'telefone' => $clienteInfo['contato_telefone']],
                         $setorAlvoPortal['nome']
                     );
                 }

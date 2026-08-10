@@ -493,10 +493,19 @@ class WhatsAppBot
         $saudacao = $conversa['nome_pessoa'] ? ('Prontinho, ' . self::primeiroNome($conversa['nome_pessoa']) . '!') : 'Prontinho!';
         WhatsAppApi::enviarTexto($conversa['telefone'], "✅ {$saudacao} Chamado #$chamadoId aberto com sucesso. 🙌 Nossa equipe já foi avisada e vai te responder por aqui.");
 
-        // Mesmo aviso (e-mail pra equipe + WhatsApp pro Kleber, via
-        // Notificacoes::whatsapp()) de qualquer outro chamado novo -- não
+        // Mesmo aviso (e-mail pra equipe + WhatsApp pro Kleber, e agora
+        // também pra quem é responsável pelo setor, via
+        // Notificacoes::novoChamado()) de qualquer outro chamado novo -- não
         // precisa de nada especial só porque veio do WhatsApp.
-        Notificacoes::novoChamado(['id' => $chamadoId, 'titulo' => $tituloFinal, 'prioridade' => $conversa['prioridade'], 'descricao' => $conversa['descricao']], $cliente);
+        Notificacoes::novoChamado($pdo, [
+            'id' => $chamadoId,
+            'titulo' => $tituloFinal,
+            'prioridade' => $conversa['prioridade'],
+            'descricao' => $conversa['descricao'],
+            'setor_id' => $conversa['setor_id'],
+            'aberto_por_tipo' => $conversa['setor_responsavel_id'] ? 'setor' : 'master',
+            'aberto_por_setor_responsavel_id' => $conversa['setor_responsavel_id'],
+        ], $cliente);
     }
 
     // --- Identificação por telefone -----------------------------------------

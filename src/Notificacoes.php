@@ -8,7 +8,13 @@ namespace AdminPrime;
  */
 class Notificacoes
 {
-    public static function novoChamado(array $chamado, array $cliente): void
+    /**
+     * $pdo é usado só pra avisar quem é responsável pelo SETOR desse
+     * chamado (quando ele já nasce com setor_id definido) -- pedido do
+     * Kleber pra também tocar no WhatsApp de quem é do setor, não só
+     * mandar aviso pra equipe interna da Prime.
+     */
+    public static function novoChamado(\PDO $pdo, array $chamado, array $cliente): void
     {
         $link = self::baseUrlAbsoluta() . url('cliente.php?id=' . $cliente['id'] . '#chamados');
 
@@ -25,6 +31,48 @@ class Notificacoes
         }
 
         self::whatsapp(null, "Novo chamado de {$cliente['nome']}: {$chamado['titulo']}");
+
+        if (!empty($chamado['setor_id'])) {
+            self::avisarPessoasDoSetorSobreChamado($pdo, $chamado, $cliente, (int) $chamado['setor_id']);
+        }
+    }
+
+    /**
+     * Avisa (e-mail + WhatsApp) todo mundo responsável pelo setor desse
+     * chamado -- cada responsável de setor com telefone, e o master também
+     * se esse for o setor "padrão" dele (clientes.setor_id). Não avisa quem
+     * foi a própria pessoa que abriu o chamado (não faz sentido avisar
+     * alguém sobre o próprio chamado que ela mesma acabou de criar).
+     */
+    private static function avisarPessoasDoSetorSobreChamado(\PDO $pdo, array $chamado, array $cliente, int $setorId): void
+    {
+        $stmtSetorNome = $pdo->prepare('SELECT nome FROM setores WHERE id = ?');
+        $stmtSetorNome->execute([$setorId]);
+        $nomeSetor = $stmtSetorNome->fetchColumn();
+        if (!$nomeSetor) {
+            return;
+        }
+
+        $abertoPorSetorResponsavelId = (int) ($chamado['aberto_por_setor_responsavel_id'] ?? 0);
+
+        $stmtMembros = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+        $stmtMembros->execute([$setorId]);
+        foreach ($stmtMembros->fetchAll() as $membro) {
+            if ($abertoPorSetorResponsavelId && (int) $membro['id'] === $abertoPorSetorResponsavelId) {
+                continue;
+            }
+            self::chamadoAtribuidoSetor($chamado, $membro, $nomeSetor);
+        }
+
+        $ehSetorPadraoMaster = (int) $cliente['setor_id'] === $setorId;
+        $abertoPeloMaster = ($chamado['aberto_por_tipo'] ?? '') === 'master';
+        if ($ehSetorPadraoMaster && !$abertoPeloMaster) {
+            self::chamadoAtribuidoSetor($chamado, [
+                'nome' => $cliente['contato_nome'] ?: $cliente['nome'],
+                'email' => $cliente['contato_email'],
+                'telefone' => $cliente['contato_telefone'],
+            ], $nomeSetor);
+        }
     }
 
     /**
@@ -241,19 +289,20 @@ class Notificacoes
      */
     public static function chamadoAtribuidoSetor(array $chamado, array $setorResponsavel, string $setorNome): void
     {
-        if (!$setorResponsavel['email']) {
-            return;
-        }
-
         $link = self::baseUrlAbsoluta() . url('portal/chamado.php?id=' . $chamado['id']);
 
-        $corpo = "
-            <p>Olá, " . e($setorResponsavel['nome']) . ".</p>
-            <p>O chamado <strong>" . e($chamado['titulo']) . "</strong> foi atribuído ao setor <strong>" . e($setorNome) . "</strong>, do qual você é responsável.</p>
-            <p><a href=\"$link\">Ver chamado no portal</a></p>
-        ";
+        if ($setorResponsavel['email']) {
+            $corpo = "
+                <p>Olá, " . e($setorResponsavel['nome']) . ".</p>
+                <p>O chamado <strong>" . e($chamado['titulo']) . "</strong> foi atribuído ao setor <strong>" . e($setorNome) . "</strong>, do qual você é responsável.</p>
+                <p><a href=\"$link\">Ver chamado no portal</a></p>
+            ";
+            Mailer::enviar($setorResponsavel['email'], "Novo chamado atribuído ao setor {$setorNome}: {$chamado['titulo']}", $corpo);
+        }
 
-        Mailer::enviar($setorResponsavel['email'], "Novo chamado atribuído ao setor {$setorNome}: {$chamado['titulo']}", $corpo);
+        if (!empty($setorResponsavel['telefone'])) {
+            WhatsAppApi::enviarTexto($setorResponsavel['telefone'], "📌 O chamado *#{$chamado['id']} - {$chamado['titulo']}* foi atribuído ao setor *{$setorNome}*, do qual você é responsável.");
+        }
     }
 
     public static function conviteAcessoPortal(array $cliente, string $token): void

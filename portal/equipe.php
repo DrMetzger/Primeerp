@@ -16,10 +16,17 @@ use AdminPrime\Notificacoes;
  * (isso continua só na tela admin) -- aqui é só setor + usuário + vínculo,
  * mais o básico de acesso ao portal (convite/reset/desativar), porque sem
  * isso a pessoa cadastrada não consegue nem entrar pra usar o sistema.
+ *
+ * Só CRIAR e ALTERAR -- de propósito NÃO tem exclusão de setor nem de
+ * usuário aqui (pedido explícito do Kleber: cliente não deve conseguir
+ * apagar nada, só incluir e ajustar; exclusão de verdade continua exigindo
+ * a Prime em cliente.php). E só existe pra clientes liberados um a um
+ * (clientes.portal_permite_gerenciar_equipe) -- tem cliente sem preparo
+ * pra isso, ver ClienteAuth::exigirGerenciarEquipe().
  */
 
 ClienteAuth::requireLogin();
-ClienteAuth::exigirMaster();
+ClienteAuth::exigirGerenciarEquipe();
 
 $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
@@ -55,29 +62,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Mesma regra da tela admin: exclusão não é destrutiva pros chamados nem
-    // pras pessoas -- só perdem o vínculo com esse setor, continuam salvos.
-    if ($acao === 'excluir_setor') {
-        $setorId = (int) $_POST['setor_id'];
-        $confereSetor = $pdo->prepare('SELECT 1 FROM setores WHERE id = ? AND cliente_id = ?');
-        $confereSetor->execute([$setorId, $clienteId]);
-        if ($confereSetor->fetchColumn()) {
-            $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE setor_id = ?')->execute([$setorId]);
-            $pdo->prepare('UPDATE setor_responsaveis SET setor_id = NULL WHERE setor_id = ?')->execute([$setorId]);
-            if ((int) $cliente['setor_id'] === $setorId) {
-                $pdo->prepare('UPDATE clientes SET setor_id = NULL WHERE id = ?')->execute([$clienteId]);
-            }
-            $pdo->prepare('DELETE FROM setores WHERE id = ?')->execute([$setorId]);
-            flash_set('sucesso', 'Setor excluído. Os chamados e pessoas dele continuam salvos, só sem setor vinculado.');
-        }
-    }
-
     if ($acao === 'criar_usuario_cliente') {
         $nomeResp = trim($_POST['nome'] ?? '');
         $emailResp = trim($_POST['email'] ?? '');
+        $telefoneRespObrigatorio = apenas_digitos($_POST['telefone'] ?? '');
 
         if ($nomeResp === '' || $emailResp === '') {
             flash_set('erro', 'Preencha nome e e-mail.');
+        } elseif (!$telefoneRespObrigatorio) {
+            // Telefone é obrigatório aqui (diferente do cadastro pela
+            // equipe interna) -- é o que permite avisar essa pessoa no
+            // WhatsApp quando um chamado cair no setor dela.
+            flash_set('erro', 'Informe o telefone -- é por ele que a pessoa recebe aviso no WhatsApp quando um chamado cai no setor dela.');
         } else {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
@@ -99,28 +95,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nomeResp = trim($_POST['nome'] ?? '');
         $emailResp = trim($_POST['email'] ?? '');
 
+        $telefoneRespEditar = apenas_digitos($_POST['telefone'] ?? '');
+
         if (!$confereResp->fetchColumn()) {
             flash_set('erro', 'Usuário não encontrado.');
         } elseif ($nomeResp === '' || $emailResp === '') {
             flash_set('erro', 'Preencha nome e e-mail.');
+        } elseif (!$telefoneRespEditar) {
+            flash_set('erro', 'Informe o telefone -- é por ele que a pessoa recebe aviso no WhatsApp quando um chamado cai no setor dela.');
         } else {
-            $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
             $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
             try {
                 $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=? WHERE id=?')
-                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $setorIdResp, $responsavelId]);
+                    ->execute([$nomeResp, $emailResp, $telefoneRespEditar, $documentoResp, $setorIdResp, $responsavelId]);
                 flash_set('sucesso', 'Usuário atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro usuário desse cliente?).');
             }
         }
-    }
-
-    if ($acao === 'excluir_usuario_cliente') {
-        $responsavelId = (int) $_POST['responsavel_id'];
-        $pdo->prepare('DELETE FROM setor_responsaveis WHERE id = ? AND cliente_id = ?')->execute([$responsavelId, $clienteId]);
-        flash_set('sucesso', 'Usuário removido.');
     }
 
     if ($acao === 'relacionar_responsavel_setor') {
@@ -198,7 +191,7 @@ require __DIR__ . '/../templates/portal_header.php';
 ?>
 
 <h4 class="mb-1">Setores e Usuários</h4>
-<p class="text-muted small mb-4">Cadastre os setores da empresa e as pessoas de cada um, e relacione uma coisa à outra. Depois de relacionar a um setor, dá pra mandar o convite de acesso ao portal pra pessoa.</p>
+<p class="text-muted small mb-4">Cadastre os setores da empresa e as pessoas de cada um, e relacione uma coisa à outra. O telefone de cada pessoa é obrigatório -- é por ele que a Prime avisa no WhatsApp quando um chamado cai no setor dela. Depois de relacionar a um setor, dá pra mandar o convite de acesso ao portal pra pessoa. Aqui só dá pra criar e alterar -- exclusão é só com a Prime.</p>
 
 <ul class="nav nav-tabs mb-3" id="equipeTabs">
     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#equipeSetores"><i class="bi bi-diagram-3"></i> Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
@@ -257,12 +250,6 @@ require __DIR__ . '/../templates/portal_header.php';
                         <button type="submit" class="btn btn-sm btn-outline-dark flex-grow-1"><i class="bi bi-check2"></i></button>
                     </div>
                 </form>
-                <form method="post" class="mt-2" onsubmit="return confirm('Excluir o setor \'<?= e($s['nome']) ?>\'? Chamados e pessoas dele continuam salvos, só perdem o vínculo.');">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="excluir_setor">
-                    <input type="hidden" name="setor_id" value="<?= $s['id'] ?>">
-                    <button type="submit" class="btn btn-sm btn-link text-danger p-0"><i class="bi bi-trash"></i> Excluir setor</button>
-                </form>
             </div>
         </div>
         <?php endforeach; ?>
@@ -278,7 +265,7 @@ require __DIR__ . '/../templates/portal_header.php';
                     <input type="hidden" name="acao" value="criar_usuario_cliente">
                     <div class="col-md-4"><input type="text" name="nome" class="form-control" placeholder="Nome *" required></div>
                     <div class="col-md-4"><input type="email" name="email" class="form-control" placeholder="E-mail *" required></div>
-                    <div class="col-md-4"><input type="text" name="telefone" class="form-control input-telefone" placeholder="Telefone"></div>
+                    <div class="col-md-4"><input type="text" name="telefone" class="form-control input-telefone" placeholder="Telefone (WhatsApp) *" required></div>
                     <div class="col-md-6"><input type="text" name="documento" class="form-control" placeholder="CPF (só números)"></div>
                     <div class="col-md-6">
                         <select name="setor_id" class="form-select">
@@ -342,12 +329,6 @@ require __DIR__ . '/../templates/portal_header.php';
                                     </form>
                                     <?php endif; ?>
                                     <button type="button" class="btn btn-sm btn-outline-dark botao-editar-usuario-portal" data-usuario='<?= e(json_encode($uc, JSON_UNESCAPED_UNICODE)) ?>' title="Editar"><i class="bi bi-pencil"></i></button>
-                                    <form method="post" class="d-inline formExcluirUsuarioPortal" onsubmit="return confirm('Remover <?= e($uc['nome']) ?>? Essa ação não pode ser desfeita.');">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="acao" value="excluir_usuario_cliente">
-                                        <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir"><i class="bi bi-trash"></i></button>
-                                    </form>
                                 </div>
                             </td>
                         </tr>
@@ -375,7 +356,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <div class="modal-body">
             <div class="mb-3"><label class="form-label">Nome *</label><input type="text" name="nome" id="editarUsuarioPortalNome" class="form-control" required></div>
             <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioPortalEmail" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">Telefone</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone"></div>
+            <div class="mb-3"><label class="form-label">Telefone (WhatsApp) *</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone" required></div>
             <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" id="editarUsuarioPortalDocumento" class="form-control"></div>
             <div class="mb-3"><label class="form-label">Setor</label>
                 <select name="setor_id" id="editarUsuarioPortalSetor" class="form-select">

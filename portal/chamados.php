@@ -63,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
         $cliente->execute([$clienteId]);
         $cliente = $cliente->fetch();
 
-        Notificacoes::novoChamado($chamado, $cliente);
+        Notificacoes::novoChamado($pdo, $chamado, $cliente);
 
         flash_set('sucesso', 'Chamado aberto com sucesso! Nossa equipe já foi avisada.');
     }
