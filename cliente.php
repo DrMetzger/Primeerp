@@ -526,17 +526,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // uma) -- cada tipo gera e guarda separado, pra dar pra ter todas
     // geradas ao mesmo tempo sem uma sobrescrever a outra.
     if ($acao === 'gerar_sugestao_implantacao') {
-        // Chamada síncrona ao Gemini com upload de anexos + retry (ver
-        // AiSugestoes) pode passar de alguns minutos no pior caso (vários
-        // documentos + retry) -- sem isso, o limite padrão de execução do
-        // PHP (30-60s na hospedagem compartilhada) corta a resposta NO
-        // MEIO, e o navegador recebe um JSON incompleto (erro "Unexpected
-        // end of JSON input" reportado pelo Kleber). Não cobre timeout de
-        // proxy/servidor web, só do PHP.
-        set_time_limit(240);
+        // Um documento POR CHAMADA (não mais todos juntos numa única
+        // chamada síncrona ao Gemini) -- pedido do Kleber: com vários
+        // documentos grandes de uma vez, o tempo de resposta somado batia no
+        // timeout do proxy da hospedagem antes do PHP terminar. O JS (ver
+        // gerarSugestoesImplantacaoSequencial()) chama essa ação uma vez pra
+        // cada documento selecionado, em sequência, e vai atualizando a
+        // tela conforme cada resposta chega. 90s é bem mais que suficiente
+        // pra UM documento só (testado na prática: 4-8s de verdade).
+        set_time_limit(90);
         $ehAjaxImplantacaoIa = ($_POST['ajax'] ?? '') === '1';
         $tipoSugestaoImplantacao = $_POST['tipo'] ?? '';
         $forcarSemEtapasImplantacaoIa = ($_POST['forcar_sem_etapas'] ?? '') === '1';
+        // 0 = seção "geral" (sem documento específico, só o contexto
+        // cadastrado) -- usado quando não há nenhum documento anexado ainda.
+        $documentoIdImplantacaoIa = (int) ($_POST['documento_id'] ?? 0);
+        $ordemImplantacaoIa = (int) ($_POST['ordem'] ?? 0);
 
         $tiposSugestaoImplantacao = [
             'treinamento' => 'um roteiro de treinamento pros usuários da empresa aprenderem a usar o sistema, dividido por perfil/setor quando fizer sentido',
@@ -574,21 +579,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtQtdUsuariosImplantacaoIa->execute([$clienteId]);
                 $qtdUsuariosImplantacaoIa = (int) $stmtQtdUsuariosImplantacaoIa->fetchColumn();
 
-                // Documentos anexados na aba Implantação (gerais + de cada
-                // etapa) -- manda o CONTEÚDO real pro Gemini (não só nome/
-                // contagem), pra sugestão ser específica desse cliente. Só
-                // os que o usuário marcou no modal de seleção (ver
-                // modalDocsSugestaoImplantacao) -- "IN (...)" garante que só
-                // pega documento que realmente é dessa implantação/cliente,
-                // mesmo que o POST venha com um id de outro cliente.
-                $idsDocsSelecionadosImplantacaoIa = array_map('intval', $_POST['documentos_selecionados'] ?? []);
-                $docsImplantacaoIa = [];
-                if ($idsDocsSelecionadosImplantacaoIa) {
-                    $placeholdersDocsIa = implode(',', array_fill(0, count($idsDocsSelecionadosImplantacaoIa), '?'));
-                    $stmtDocsImplantacaoIa = $pdo->prepare("SELECT titulo, arquivo_nome_original, arquivo_tamanho, dados FROM documentos WHERE cliente_id = ? AND categoria = 'Implantação' AND id IN ($placeholdersDocsIa) ORDER BY criado_em ASC");
-                    $stmtDocsImplantacaoIa->execute(array_merge([$clienteId], $idsDocsSelecionadosImplantacaoIa));
-                    $docsImplantacaoIa = $stmtDocsImplantacaoIa->fetchAll();
+                // O UM documento dessa chamada (ownership-safe -- só pega se
+                // for da categoria Implantação E desse mesmo cliente, mesmo
+                // que o POST venha com id de outro documento/cliente).
+                $docImplantacaoIa = null;
+                if ($documentoIdImplantacaoIa > 0) {
+                    $stmtDocImplantacaoIa = $pdo->prepare("SELECT titulo, arquivo_nome_original, arquivo_tamanho, dados FROM documentos WHERE cliente_id = ? AND categoria = 'Implantação' AND id = ?");
+                    $stmtDocImplantacaoIa->execute([$clienteId, $documentoIdImplantacaoIa]);
+                    $docImplantacaoIa = $stmtDocImplantacaoIa->fetch();
                 }
+
+                $nomeSecaoImplantacaoIa = $docImplantacaoIa
+                    ? $docImplantacaoIa['arquivo_nome_original']
+                    : 'Visão geral (setores, etapas e usuários cadastrados)';
 
                 $mimesAceitosImplantacaoIa = [
                     'pdf' => 'application/pdf',
@@ -600,43 +603,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'webp' => 'image/webp',
                 ];
                 $arquivosImplantacaoIa = [];
-                $nomesIgnoradosImplantacaoIa = [];
                 $textoDocxImplantacaoIa = '';
-                foreach ($docsImplantacaoIa as $docIa) {
-                    $extensaoDocIa = strtolower(pathinfo($docIa['arquivo_nome_original'], PATHINFO_EXTENSION));
+                $documentoIgnoradoImplantacaoIa = null;
+
+                if ($docImplantacaoIa) {
+                    $extensaoDocIa = strtolower(pathinfo($docImplantacaoIa['arquivo_nome_original'], PATHINFO_EXTENSION));
 
                     // .docx não é aceito pelo Gemini (só PDF/imagem/texto/
                     // áudio/vídeo) -- muito comum vir diagrama de processo
                     // em Word, então extrai o texto aqui e manda como texto
                     // puro junto do prompt em vez de simplesmente ignorar.
                     if ($extensaoDocIa === 'docx') {
-                        $textoExtraidoDocx = extrair_texto_docx($docIa['dados']);
+                        $textoExtraidoDocx = extrair_texto_docx($docImplantacaoIa['dados']);
                         if ($textoExtraidoDocx) {
-                            $textoDocxImplantacaoIa .= "\n\n--- Conteúdo de \"{$docIa['arquivo_nome_original']}\" ---\n"
-                                . mb_substr($textoExtraidoDocx, 0, 20000) . "\n--- Fim de \"{$docIa['arquivo_nome_original']}\" ---\n";
-                            continue;
+                            $textoDocxImplantacaoIa = mb_substr($textoExtraidoDocx, 0, 20000);
+                        } else {
+                            $documentoIgnoradoImplantacaoIa = $docImplantacaoIa['arquivo_nome_original'] . ' (não deu pra extrair o texto do Word)';
                         }
-                        $nomesIgnoradosImplantacaoIa[] = $docIa['arquivo_nome_original'] . ' (não deu pra extrair o texto do Word)';
-                        continue;
+                    } else {
+                        // Anexo vai pela Files API do Gemini (ver
+                        // AiSugestoes::gerar()) -- uma chamada, um documento,
+                        // sem limite de tamanho somado (só o de cada
+                        // arquivo, já validado no upload em si).
+                        $mimeDocIa = $mimesAceitosImplantacaoIa[$extensaoDocIa] ?? null;
+                        if ($mimeDocIa) {
+                            $arquivosImplantacaoIa[] = ['mime' => $mimeDocIa, 'dados' => $docImplantacaoIa['dados'], 'nome' => $docImplantacaoIa['arquivo_nome_original']];
+                        } else {
+                            $documentoIgnoradoImplantacaoIa = $docImplantacaoIa['arquivo_nome_original'];
+                        }
                     }
-
-                    // Cada anexo agora vai pela Files API do Gemini (ver
-                    // AiSugestoes::gerar()), não mais embutido em base64 na
-                    // requisição -- por isso não há mais limite de bytes
-                    // somados aqui, só a quantidade de arquivos por chamada
-                    // (MAX_ARQUIVOS_POR_CHAMADA), pra não fazer dezenas de
-                    // uploads sequenciais numa única requisição de página.
-                    $mimeDocIa = $mimesAceitosImplantacaoIa[$extensaoDocIa] ?? null;
-                    if (!$mimeDocIa || count($arquivosImplantacaoIa) >= AiSugestoes::MAX_ARQUIVOS_POR_CHAMADA) {
-                        $nomesIgnoradosImplantacaoIa[] = $docIa['arquivo_nome_original'];
-                        continue;
-                    }
-                    $arquivosImplantacaoIa[] = ['mime' => $mimeDocIa, 'dados' => $docIa['dados'], 'nome' => $docIa['arquivo_nome_original']];
                 }
 
-                $promptImplantacao = "Você é um consultor de implantação de ERP (TOTVS Protheus) de uma consultoria (PrimeERP). "
-                    . "Gere {$tiposSugestaoImplantacao[$tipoSugestaoImplantacao]} pro cliente \"{$cliente['nome']}\". "
-                    . "Responda em português, de forma prática e organizada em tópicos ou lista numerada, pronto pra ser usado de verdade (evite generalidades).\n\n"
+                $promptImplantacao = "Você é um consultor de implantação de ERP (TOTVS Protheus) da consultoria PrimeERP, escrevendo um trecho de um documento OFICIAL que vai ser entregue ao cliente. "
+                    . "Gere {$tiposSugestaoImplantacao[$tipoSugestaoImplantacao]} pro cliente \"{$cliente['nome']}\".\n\n"
+                    . "FORMATO: responda em português, em MARKDOWN bem estruturado -- use \"##\" pra títulos de seção/bloco, \"**texto**\" pra negrito nos termos e rotinas importantes, listas numeradas (\"1.\", \"2.\"...) ou com \"-\" quando fizer sentido, e parágrafos curtos e claros entre os blocos. Tom CORPORATIVO, sério e técnico, mas fácil de digerir -- isso vai direto num PDF entregue ao cliente, sem edição manual depois.\n\n"
                     . "REGRA MAIS IMPORTANTE: tudo que você mencionar sobre o TOTVS Protheus (nome de módulo, rotina, tela, campo, parâmetro, sigla) precisa ser algo que REALMENTE existe no Protheus -- nunca invente nome de módulo, função ou rotina que não existe, mesmo que pareça plausível. Se não tiver certeza absoluta se algo existe ou de como se chama no Protheus, NÃO invente: diga isso explicitamente (\"verificar com a equipe/documentação do Protheus qual é a rotina exata pra isso\") em vez de citar um nome específico chutado. Siga as boas práticas reais de implantação do Protheus, não de ERP genérico.\n\n"
                     . "Contexto desse cliente:\n"
                     . '- Setores cadastrados: ' . ($nomesSetoresImplantacaoIa ? implode(', ', $nomesSetoresImplantacaoIa) : 'nenhum setor cadastrado ainda') . "\n"
@@ -650,14 +650,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $promptImplantacao .= "  (nenhuma etapa registrada ainda -- avise no início da resposta que seria melhor cadastrar as etapas antes, mas gere a sugestão de forma genérica sobre implantação de ERP mesmo assim)\n";
                 }
 
+                // ESTA chamada é focada em UM documento só (ou nenhum) --
+                // pedido do Kleber pra processar documento por documento,
+                // cada um virando uma SEÇÃO própria e autocontida do roteiro
+                // final (que é montado juntando todas as seções depois, ver
+                // mais abaixo). Sem isso, o Gemini tenderia a recapitular ou
+                // se referir a "outros documentos" que ele nunca viu nessa
+                // chamada específica.
                 if ($arquivosImplantacaoIa) {
-                    $promptImplantacao .= "\nVocê tem acesso ao conteúdo de " . count($arquivosImplantacaoIa) . ' documento(s) anexados a essa implantação (anexados nessa mesma mensagem, abaixo do texto) -- USE o conteúdo real deles pra tornar a sugestão específica desse cliente, não genérica.' . "\n";
-                }
-                if ($textoDocxImplantacaoIa !== '') {
-                    $promptImplantacao .= "\nConteúdo extraído de documento(s) Word anexados (use igual aos outros anexos):\n" . $textoDocxImplantacaoIa . "\n";
-                }
-                if ($nomesIgnoradosImplantacaoIa) {
-                    $promptImplantacao .= '- Não foi possível ler o conteúdo de: ' . implode(', ', $nomesIgnoradosImplantacaoIa) . " (formato não suportado ou lote de anexos grande demais) -- considere só o nome desses arquivos.\n";
+                    $promptImplantacao .= "\nEsta geração é focada EXCLUSIVAMENTE no documento \"{$nomeSecaoImplantacaoIa}\" (anexado nessa mesma mensagem) -- gere uma SEÇÃO específica e autocontida sobre o que ele traz de relevante pra essa sugestão, começando com um título curto (\"## \") que identifique o assunto principal do documento. Não recapitule nem se refira a \"outros documentos\" -- cada documento é processado numa chamada separada e as seções são juntadas depois automaticamente.\n";
+                } elseif ($textoDocxImplantacaoIa !== '') {
+                    $promptImplantacao .= "\nEsta geração é focada EXCLUSIVAMENTE no conteúdo extraído do documento Word \"{$nomeSecaoImplantacaoIa}\" abaixo -- gere uma SEÇÃO específica e autocontida sobre o que ele traz de relevante, começando com um título curto (\"## \") que identifique o assunto. Não recapitule nem se refira a \"outros documentos\".\nConteúdo extraído desse documento:\n{$textoDocxImplantacaoIa}\n";
+                } else {
+                    $promptImplantacao .= "\nNenhum documento específico foi anexado nesta geração -- escreva a seção inicial/geral (introdução + o que puder concluir só do contexto cadastrado acima).\n";
                 }
 
                 // Comentário/ajuste que o responsável da PrimeERP escreveu
@@ -668,24 +673,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $promptImplantacao .= "\nComentário/ajuste do responsável da PrimeERP pra essa geração (siga isso com atenção, é mais importante que o resto do contexto): \"{$comentarioImplantacaoIa}\"\n";
                 }
 
-                $promptImplantacao .= "\nSe faltar alguma informação importante pra dar uma resposta específica (em vez de genérica), ou se você tiver alguma dúvida real sobre esse cliente, liste isso primeiro, num bloco curto no topo da resposta com o título \"❓ Pontos a confirmar antes de aplicar isso:\" -- só inclua esse bloco se for realmente necessário, não invente dúvida à toa.";
+                $promptImplantacao .= "\nSe faltar alguma informação importante pra dar uma resposta específica (em vez de genérica), ou se você tiver alguma dúvida real sobre esse documento/cliente, liste isso primeiro, num bloco curto no topo da SEÇÃO com o título \"❓ Pontos a confirmar antes de aplicar isso:\" -- só inclua esse bloco se for realmente necessário, não invente dúvida à toa.";
 
                 $resultadoImplantacaoIa = AiSugestoes::gerar($promptImplantacao, [], null, $arquivosImplantacaoIa);
                 if (!$resultadoImplantacaoIa['ok']) {
-                    $respostaImplantacaoIa = ['sucesso' => false, 'mensagem' => 'Não foi possível gerar a sugestão: ' . $resultadoImplantacaoIa['erro'], 'sugestao' => null, 'gerado_em' => null];
+                    $respostaImplantacaoIa = ['sucesso' => false, 'mensagem' => "Não foi possível gerar a seção \"{$nomeSecaoImplantacaoIa}\": " . $resultadoImplantacaoIa['erro'], 'sugestao' => null, 'gerado_em' => null];
                 } else {
+                    // Grava/substitui a seção DESSE documento (ver UNIQUE em
+                    // Migrations::run()) e remonta o texto completo juntando
+                    // TODAS as seções desse (cliente, tipo) na ordem em que
+                    // foram processadas.
+                    $pdo->prepare('
+                        INSERT INTO implantacao_sugestoes_ia_secoes (cliente_id, tipo, documento_id, documento_nome, conteudo, ordem)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE documento_nome = VALUES(documento_nome), conteudo = VALUES(conteudo), ordem = VALUES(ordem)
+                    ')->execute([$clienteId, $tipoSugestaoImplantacao, $documentoIdImplantacaoIa, $nomeSecaoImplantacaoIa, trim($resultadoImplantacaoIa['texto']), $ordemImplantacaoIa]);
+
+                    $stmtSecoesImplantacaoIa = $pdo->prepare('SELECT conteudo FROM implantacao_sugestoes_ia_secoes WHERE cliente_id = ? AND tipo = ? ORDER BY ordem ASC, id ASC');
+                    $stmtSecoesImplantacaoIa->execute([$clienteId, $tipoSugestaoImplantacao]);
+                    $textoCompletoImplantacaoIa = implode("\n\n---\n\n", $stmtSecoesImplantacaoIa->fetchAll(PDO::FETCH_COLUMN));
+
                     $pdo->prepare('INSERT INTO implantacao_sugestoes_ia (cliente_id, tipo, sugestao, criado_por) VALUES (?, ?, ?, ?)')
-                        ->execute([$clienteId, $tipoSugestaoImplantacao, $resultadoImplantacaoIa['texto'], Auth::userId()]);
-                    // Junta os documentos que nem tentamos ler (formato não
-                    // aceito, ou passou do limite de anexos por chamada) com
-                    // os que tentamos enviar mas falharam no upload (rede,
-                    // Gemini recusou etc. -- ver AiSugestoes::gerar()).
-                    $todosIgnoradosImplantacaoIa = array_merge($nomesIgnoradosImplantacaoIa, $resultadoImplantacaoIa['arquivos_com_falha'] ?? []);
-                    $avisoIgnoradosImplantacaoIa = $todosIgnoradosImplantacaoIa ? ' (não deu pra ler: ' . implode(', ', $todosIgnoradosImplantacaoIa) . ')' : '';
+                        ->execute([$clienteId, $tipoSugestaoImplantacao, $textoCompletoImplantacaoIa, Auth::userId()]);
+
+                    $ignoradosImplantacaoIa = array_filter([$documentoIgnoradoImplantacaoIa]);
+                    $ignoradosImplantacaoIa = array_merge($ignoradosImplantacaoIa, $resultadoImplantacaoIa['arquivos_com_falha'] ?? []);
+                    $avisoIgnoradosImplantacaoIa = $ignoradosImplantacaoIa ? ' (não deu pra ler: ' . implode(', ', $ignoradosImplantacaoIa) . ')' : '';
+
                     $respostaImplantacaoIa = [
                         'sucesso' => true,
-                        'mensagem' => 'Sugestão gerada.' . $avisoIgnoradosImplantacaoIa,
-                        'sugestao' => $resultadoImplantacaoIa['texto'],
+                        'mensagem' => "Seção \"{$nomeSecaoImplantacaoIa}\" processada.{$avisoIgnoradosImplantacaoIa}",
+                        'sugestao' => $textoCompletoImplantacaoIa,
                         'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
                     ];
                 }
@@ -714,7 +732,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdfSugestao = new PdfExport($labelSugestaoPdf . ' - ' . $cliente['nome']);
         $pdfSugestao->subtitulo('Gerado em ' . formatar_data(date('Y-m-d H:i:s')));
-        $pdfSugestao->escreverTexto($textoSugestaoPdf);
+        $pdfSugestao->escreverMarkdown($textoSugestaoPdf);
 
         $nomeArquivoPdf = 'implantacao-' . preg_replace('/[^a-z0-9]+/i', '-', $labelSugestaoPdf) . '-' . $clienteId . '.pdf';
         header('Content-Type: application/pdf');
@@ -3682,54 +3700,95 @@ document.addEventListener('DOMContentLoaded', function () {
             + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-implantacao" data-tipo="' + tipo + '" data-label="' + escaparHtmlCalendario(label) + '"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>';
     }
 
-    function gerarSugestaoImplantacao(form, forcarSemEtapas) {
-        var tipo = form.getAttribute('data-tipo');
-        var label = form.closest('.card-body').querySelector('.fw-semibold').textContent.trim();
-        mostrarCarregando('Gerando sugestão com IA...', true);
-
+    // Manda UM documento por chamada ao Gemini (não mais todos juntos numa
+    // única requisição) -- pedido do Kleber: assim que ele manda o próximo
+    // documento, a IA "digere" e vai ACRESCENTANDO ao roteiro que já existe,
+    // sem risco de timeout de proxy mesmo com vários documentos grandes.
+    // Resolve com {sucesso, mensagemFinal} -- nunca rejeita (erro de UM
+    // documento não aborta os outros da fila, só é reportado no final).
+    function gerarUmaSecaoSugestaoImplantacao(form, documentoId, ordem, comentario, forcarSemEtapas) {
         var dados = new FormData(form);
         dados.set('ajax', '1');
+        dados.set('documento_id', documentoId);
+        dados.set('ordem', ordem);
+        dados.set('comentario_ia', comentario);
         if (forcarSemEtapas) dados.set('forcar_sem_etapas', '1');
 
-        fetch(window.location.href, { method: 'POST', body: dados })
+        return fetch(window.location.href, { method: 'POST', body: dados })
             .then(function (resp) {
                 return resp.text().then(function (textoCru) {
                     try {
                         return JSON.parse(textoCru);
                     } catch (erroParse) {
                         // Resposta vazia/incompleta -- normalmente o servidor
-                        // matou a requisição no meio (documentos grandes
-                        // demais, ou demorou mais que o limite do servidor).
-                        // Sem isso, virava um SyntaxError cru sem explicação
-                        // nenhuma pro Kleber.
-                        throw new Error('O servidor não terminou de responder (provavelmente demorou demais -- tente com menos documentos anexados, ou tente de novo).');
+                        // matou a requisição no meio. Bem mais raro agora
+                        // que cada chamada processa só 1 documento, mas
+                        // ainda dá pra acontecer num documento muito grande.
+                        throw new Error('O servidor não terminou de responder pra esse documento (provavelmente demorou demais).');
                     }
                 });
-            })
-            .then(function (json) {
-                var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
-                if (!alvo) return;
-                if (json.sucesso) {
-                    renderizarResultadoSugestaoImplantacao(tipo, label, json);
-                    form.querySelector('button').innerHTML = '<i class="bi bi-stars"></i> Gerar de novo';
-                } else if (json.precisa_confirmar_sem_etapas) {
-                    escondercarregando();
-                    if (confirm(json.mensagem + '\n\nGerar assim mesmo?')) {
-                        gerarSugestaoImplantacao(form, true);
-                    }
-                    return;
-                } else {
-                    alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
-                }
-            })
-            .catch(function (erro) {
-                var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
-                var mensagemErro = erro && erro.message ? erro.message : String(erro);
-                if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha ao gerar a sugestão: ' + escaparHtmlCalendario(mensagemErro) + '</div>';
-            })
-            .finally(function () {
-                escondercarregando();
             });
+    }
+
+    // Fila sequencial: um documento por vez, esperando a resposta de um
+    // antes de mandar o próximo -- é isso que evita o timeout de proxy (que
+    // acontecia mandando todos juntos numa chamada só). Atualiza a tela a
+    // cada resposta (não só no final), pra dar pra acompanhar o roteiro
+    // sendo "alimentado" documento por documento.
+    function gerarSugestoesImplantacaoSequencial(form, filaDocumentos, comentario, forcarSemEtapas) {
+        var tipo = form.getAttribute('data-tipo');
+        var label = form.closest('.card-body').querySelector('.fw-semibold').textContent.trim();
+        var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
+        var total = filaDocumentos.length;
+        var falhas = [];
+        var ultimoJson = null;
+
+        function processarIndice(indice) {
+            if (indice >= total) {
+                escondercarregando();
+                if (ultimoJson) {
+                    renderizarResultadoSugestaoImplantacao(tipo, label, ultimoJson);
+                    form.querySelector('button').innerHTML = '<i class="bi bi-stars"></i> Gerar de novo';
+                }
+                if (falhas.length && alvo) {
+                    var avisoFalhas = document.createElement('div');
+                    avisoFalhas.className = 'alert alert-danger mt-2';
+                    avisoFalhas.textContent = 'Alguns documentos não puderam ser processados: ' + falhas.join('; ');
+                    alvo.appendChild(avisoFalhas);
+                }
+                return;
+            }
+
+            var doc = filaDocumentos[indice];
+            mostrarCarregando('Processando documento ' + (indice + 1) + ' de ' + total + ': ' + doc.nome + '...', true);
+
+            gerarUmaSecaoSugestaoImplantacao(form, doc.id, indice, comentario, forcarSemEtapas)
+                .then(function (json) {
+                    if (json.sucesso) {
+                        ultimoJson = json;
+                        // Mostra o roteiro crescendo a cada documento, não só
+                        // no final -- pedido explícito do Kleber.
+                        renderizarResultadoSugestaoImplantacao(tipo, label, json);
+                    } else if (json.precisa_confirmar_sem_etapas) {
+                        escondercarregando();
+                        if (confirm(json.mensagem + '\n\nGerar assim mesmo?')) {
+                            gerarSugestoesImplantacaoSequencial(form, filaDocumentos, comentario, true);
+                        }
+                        return Promise.reject({ jaTratado: true });
+                    } else {
+                        falhas.push(doc.nome + ' (' + json.mensagem + ')');
+                    }
+                    processarIndice(indice + 1);
+                })
+                .catch(function (erro) {
+                    if (erro && erro.jaTratado) return; // confirmação sem etapas já tratada acima
+                    var mensagemErro = erro && erro.message ? erro.message : String(erro);
+                    falhas.push(doc.nome + ' (' + mensagemErro + ')');
+                    processarIndice(indice + 1);
+                });
+        }
+
+        processarIndice(0);
     }
 
     // Os 7 botões "Gerar" (um por tipo de sugestão) todos abrem o MESMO
@@ -3753,26 +3812,21 @@ document.addEventListener('DOMContentLoaded', function () {
         botaoConfirmarDocsImplantacaoIa.addEventListener('click', function () {
             if (!formImplantacaoIaPendente) return;
 
-            // Tira campo antigo (se essa mesma form já foi usada antes,
-            // numa geração anterior) antes de adicionar os de agora.
-            formImplantacaoIaPendente.querySelectorAll('input[name="documentos_selecionados[]"], input[name="comentario_ia"]').forEach(function (el) { el.remove(); });
-
+            var filaDocumentos = [];
             document.querySelectorAll('.checkbox-doc-implantacao-ia:checked').forEach(function (chk) {
-                var campoDoc = document.createElement('input');
-                campoDoc.type = 'hidden';
-                campoDoc.name = 'documentos_selecionados[]';
-                campoDoc.value = chk.value;
-                formImplantacaoIaPendente.appendChild(campoDoc);
+                filaDocumentos.push({ id: chk.value, nome: chk.closest('.form-check').querySelector('label').textContent.trim() });
             });
+            // Nenhum documento marcado (ou nenhum cadastrado ainda) -- ainda
+            // assim processa UMA "seção geral", só com o contexto cadastrado
+            // (setores/etapas/usuários), documento_id=0 no backend.
+            if (!filaDocumentos.length) {
+                filaDocumentos.push({ id: '0', nome: 'contexto geral' });
+            }
 
-            var campoComentario = document.createElement('input');
-            campoComentario.type = 'hidden';
-            campoComentario.name = 'comentario_ia';
-            campoComentario.value = document.getElementById('comentarioDocsImplantacaoIa').value;
-            formImplantacaoIaPendente.appendChild(campoComentario);
+            var comentario = document.getElementById('comentarioDocsImplantacaoIa').value;
 
             PrimeUI.closeModal(document.getElementById('modalDocsSugestaoImplantacao'));
-            gerarSugestaoImplantacao(formImplantacaoIaPendente, false);
+            gerarSugestoesImplantacaoSequencial(formImplantacaoIaPendente, filaDocumentos, comentario, false);
         });
     }
 

@@ -748,6 +748,34 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Cada "seção" é o resultado da IA pra UM documento específico (ou a
+        // seção geral, sem documento -- documento_id=0) de uma sugestão de
+        // Implantação -- pedido do Kleber pra processar documento por
+        // documento numa chamada de cada vez ao Gemini (em vez de mandar
+        // todos juntos numa chamada só, que arriscava timeout de proxy com
+        // vários documentos grandes) e ir "alimentando" o roteiro conforme
+        // cada um é processado. UNIQUE(cliente_id, tipo, documento_id): gerar
+        // de novo pro MESMO documento SUBSTITUI a seção dele (não duplica);
+        // gerar pra um documento novo ADICIONA uma seção nova. O texto final
+        // mostrado/exportado é a concatenação de todas as seções desse
+        // (cliente_id, tipo), na ordem em que foram processadas (ver coluna
+        // "ordem") -- ver cliente.php, ação "gerar_sugestao_implantacao".
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS implantacao_sugestoes_ia_secoes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                tipo VARCHAR(40) NOT NULL,
+                documento_id INT NOT NULL DEFAULT 0 COMMENT '0 = seção geral, sem documento específico',
+                documento_nome VARCHAR(255) NOT NULL DEFAULT '',
+                conteudo MEDIUMTEXT NOT NULL,
+                ordem INT NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_secao_implantacao (cliente_id, tipo, documento_id),
+                CONSTRAINT fk_implantacao_secoes_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         // Reunião/treinamento passa a poder ser atrelado a um CHAMADO
         // específico -- pedido do Kleber pra registrar que uma conversa/
         // auxílio no Meet aconteceu por causa de um chamado, e ver isso

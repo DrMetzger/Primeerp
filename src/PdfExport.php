@@ -76,8 +76,10 @@ class PdfExport extends \FPDF
 
     /**
      * Escreve um bloco de texto livre (já editado pelo admin) respeitando
-     * quebras de linha/paragrafo -- usado pelas sugestões de IA da
-     * Implantação, mas serve pra qualquer texto simples.
+     * quebras de linha/paragrafo -- usado pra texto simples, sem nenhuma
+     * marcação. Pra texto gerado por IA (que vem em Markdown -- ##, **,
+     * listas), usar escreverMarkdown() abaixo, que de fato interpreta essas
+     * marcações em vez de jogar o símbolo cru no PDF.
      */
     public function escreverTexto(string $texto): void
     {
@@ -92,6 +94,164 @@ class PdfExport extends \FPDF
         $this->SetTextColor(110, 110, 110);
         $this->Cell(0, 6, $this->texto($texto), 0, 1);
         $this->Ln(1);
+    }
+
+    /**
+     * Renderiza um texto em MARKDOWN simples (o formato que a IA já é
+     * instruída a usar, ver cliente.php/AiSugestoes) com hierarquia visual
+     * de verdade -- antes o texto ia cru pro PDF (##, ** e "-" apareciam
+     * como símbolo literal, tudo no mesmo tamanho/peso de fonte, "plano"),
+     * o que o Kleber não podia entregar pro cliente como documento oficial.
+     * Suporta: títulos (#/##/###), negrito inline (**texto**), listas
+     * ("- item" ou "1. item") e separador de seção ("---").
+     */
+    public function escreverMarkdown(string $texto): void
+    {
+        $linhas = explode("\n", str_replace("\r\n", "\n", $texto));
+        $paragrafoAtual = [];
+
+        $flushParagrafo = function () use (&$paragrafoAtual): void {
+            if (!$paragrafoAtual) {
+                return;
+            }
+            $this->paragrafoMarkdown(implode(' ', $paragrafoAtual));
+            $paragrafoAtual = [];
+        };
+
+        foreach ($linhas as $linha) {
+            $linhaAparada = trim($linha);
+
+            if ($linhaAparada === '') {
+                $flushParagrafo();
+                continue;
+            }
+
+            if (preg_match('/^(#{1,3})\s+(.+)$/', $linhaAparada, $m)) {
+                $flushParagrafo();
+                $this->tituloMarkdown($m[2], strlen($m[1]));
+                continue;
+            }
+
+            if (preg_match('/^-{3,}$/', $linhaAparada) || preg_match('/^\*{3,}$/', $linhaAparada)) {
+                $flushParagrafo();
+                $this->separadorMarkdown();
+                continue;
+            }
+
+            if (preg_match('/^[-*]\s+(.+)$/', $linhaAparada, $m)) {
+                $flushParagrafo();
+                $this->itemListaMarkdown($m[1]);
+                continue;
+            }
+
+            if (preg_match('/^(\d+)[.)]\s+(.+)$/', $linhaAparada, $m)) {
+                $flushParagrafo();
+                $this->itemListaMarkdown($m[2], $m[1] . '.');
+                continue;
+            }
+
+            $paragrafoAtual[] = $linhaAparada;
+        }
+
+        $flushParagrafo();
+    }
+
+    private const TAMANHOS_TITULO_MARKDOWN = [1 => 14.5, 2 => 12.5, 3 => 11];
+    private const COR_TITULO_MARKDOWN = [55, 48, 163]; // mesmo tom do meio do gradiente do timbrado
+
+    private function tituloMarkdown(string $texto, int $nivel): void
+    {
+        // Espaço antes do título (menos pro primeiro bloco da página, pra
+        // não abrir com um vão enorme embaixo do cabeçalho).
+        if ($this->GetY() > $this->tMargin + 2) {
+            $this->Ln($nivel === 1 ? 4 : 2.5);
+        }
+
+        $this->SetFont('Helvetica', 'B', self::TAMANHOS_TITULO_MARKDOWN[$nivel] ?? 10.5);
+        $this->SetTextColor(...self::COR_TITULO_MARKDOWN);
+        $this->escreverInlineMarkdown($texto, $nivel === 1 ? 7 : 6);
+        $this->Ln($nivel === 1 ? 2 : 1.5);
+        $this->SetTextColor(20, 20, 20);
+    }
+
+    private function paragrafoMarkdown(string $texto): void
+    {
+        $this->SetFont('Helvetica', '', 10.5);
+        $this->SetTextColor(20, 20, 20);
+        $this->escreverInlineMarkdown($texto, 5.5);
+        $this->Ln(3);
+    }
+
+    private function itemListaMarkdown(string $texto, ?string $marcador = null): void
+    {
+        $this->SetFont('Helvetica', '', 10.5);
+        $this->SetTextColor(20, 20, 20);
+
+        $xInicial = $this->GetX();
+        $indentacao = 6;
+        $this->Cell($indentacao, 5.5, $this->texto($marcador ?? '-'));
+        $this->SetX($xInicial + $indentacao);
+        $this->escreverInlineMarkdown($texto, 5.5, $indentacao);
+        $this->Ln(1.5);
+    }
+
+    private function separadorMarkdown(): void
+    {
+        $this->Ln(1.5);
+        $this->SetDrawColor(224, 224, 231);
+        $this->Line($this->GetX(), $this->GetY(), $this->GetX() + $this->GetPageWidth() - $this->lMargin - $this->rMargin, $this->GetY());
+        $this->Ln(3.5);
+    }
+
+    /**
+     * Escreve uma linha/parágrafo respeitando **negrito** inline -- FPDF
+     * não tem rich text nativo, então alterna a fonte a cada trecho e usa
+     * Write() (que flui e quebra linha automaticamente) em vez de Cell/
+     * MultiCell, que travariam tudo num único estilo. $indentacaoContinuacao
+     * é o quanto recuar as linhas SEGUINTES quando o texto quebra (0 = sem
+     * recuo, usado nos itens de lista pra alinhar com o texto após o
+     * marcador, não embaixo dele).
+     */
+    private function escreverInlineMarkdown(string $texto, float $alturaLinha, float $indentacaoContinuacao = 0): void
+    {
+        if ($indentacaoContinuacao > 0) {
+            $this->SetLeftMargin($this->lMargin + $indentacaoContinuacao);
+        }
+
+        $fonteAtual = $this->FontFamily;
+        $tamanhoAtual = $this->FontSizePt;
+
+        // Primeiro separa **negrito**, depois -- só dentro dos trechos que
+        // NÃO são negrito -- separa *itálico* (asterisco duplo já foi
+        // consumido antes, então um asterisco sozinho aqui é sempre itálico
+        // de verdade, sem ambiguidade).
+        $partesNegrito = preg_split('/\*\*(.+?)\*\*/s', $texto, -1, PREG_SPLIT_DELIM_CAPTURE);
+        foreach ($partesNegrito as $indiceNegrito => $parteNegrito) {
+            if ($parteNegrito === '') {
+                continue;
+            }
+            $negrito = $indiceNegrito % 2 === 1;
+            if ($negrito) {
+                $this->SetFont($fonteAtual, 'B', $tamanhoAtual);
+                $this->Write($alturaLinha, $this->texto($parteNegrito));
+                continue;
+            }
+
+            $partesItalico = preg_split('/\*(.+?)\*/s', $parteNegrito, -1, PREG_SPLIT_DELIM_CAPTURE);
+            foreach ($partesItalico as $indiceItalico => $parteItalico) {
+                if ($parteItalico === '') {
+                    continue;
+                }
+                $italico = $indiceItalico % 2 === 1;
+                $this->SetFont($fonteAtual, $italico ? 'I' : '', $tamanhoAtual);
+                $this->Write($alturaLinha, $this->texto($parteItalico));
+            }
+        }
+        $this->Ln($alturaLinha);
+
+        if ($indentacaoContinuacao > 0) {
+            $this->SetLeftMargin($this->lMargin - $indentacaoContinuacao);
+        }
     }
 
     /**
