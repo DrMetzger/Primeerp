@@ -177,12 +177,27 @@ class WhatsAppBot
 
         if ($setorResponsavelId) {
             // Bateu com o telefone de um responsável de setor específico --
-            // igual ao login de setor no portal, já nasce vinculado a esse
-            // setor, sem precisar perguntar.
-            $dados['setor_id'] = $setorId;
-            $dados['etapa'] = 'titulo';
+            // se ela só tem UM setor, já nasce vinculado a ele, igual antes,
+            // sem precisar perguntar. Se estiver em MAIS de um (pedido do
+            // Kleber: uma pessoa pode estar em vários agora), pergunta qual
+            // é o assunto -- só entre os setores DELA, não os da empresa toda.
+            $idsSetoresPessoa = setores_do_responsavel($pdo, $setorResponsavelId);
+            if (count($idsSetoresPessoa) <= 1) {
+                $dados['setor_id'] = $setorId;
+                $dados['etapa'] = 'titulo';
+                self::atualizarConversa($pdo, $conversa['id'], $dados);
+                WhatsAppApi::enviarTexto($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}* ({$nomeSetor}). ✅ Vamos abrir seu chamado.\n\n📝 Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):");
+                return;
+            }
+
+            $setoresPessoa = self::setoresParaEscolha($pdo, $clienteId, $setorResponsavelId);
+            $dados['etapa'] = 'escolher_setor';
             self::atualizarConversa($pdo, $conversa['id'], $dados);
-            WhatsAppApi::enviarTexto($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}* ({$nomeSetor}). ✅ Vamos abrir seu chamado.\n\n📝 Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):");
+            $linhas = [];
+            foreach (array_values($setoresPessoa) as $i => $s) {
+                $linhas[] = ['id' => (string) ($i + 1), 'titulo' => $s['nome']];
+            }
+            WhatsAppApi::enviarLista($conversa['telefone'], "{$saudacao}Encontrei seu cadastro: *{$nomeCliente}*. Vi que você está em mais de um setor. 🗂️ Qual setor é o assunto?", 'Escolher setor', $linhas);
             return;
         }
 
@@ -379,8 +394,22 @@ class WhatsAppBot
         $clienteId = (int) $conversa['cliente_id'];
 
         if ($setorResponsavelId) {
-            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
-            WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
+            // Só 1 setor -- continua reaproveitando o setor_id que já estava
+            // na conversa (sem precisar perguntar de novo). Com mais de um,
+            // pergunta de novo (pode ser um assunto de outro setor dela).
+            if (count(setores_do_responsavel($pdo, $setorResponsavelId)) <= 1) {
+                self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
+                WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
+                return;
+            }
+
+            $setoresPessoa = self::setoresParaEscolha($pdo, $clienteId, $setorResponsavelId);
+            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]);
+            $linhas = [];
+            foreach (array_values($setoresPessoa) as $i => $s) {
+                $linhas[] = ['id' => (string) ($i + 1), 'titulo' => $s['nome']];
+            }
+            WhatsAppApi::enviarLista($conversa['telefone'], '🗂️ Beleza, novo assunto. Qual setor é o assunto?', 'Escolher setor', $linhas);
             return;
         }
 
@@ -401,7 +430,12 @@ class WhatsAppBot
 
     private static function etapaEscolherSetor(PDO $pdo, array $conversa, string $texto): void
     {
-        $setores = self::setoresDisponiveis($pdo, $conversa['cliente_id']);
+        // setor_responsavel_id (se tiver) já ficou salvo na conversa desde a
+        // identificação -- usa a mesma lista RESTRITA (só os setores dela)
+        // que foi mostrada, pra não aceitar um número que corresponda a um
+        // setor de fora da lista que ela realmente viu.
+        $setorResponsavelId = $conversa['setor_responsavel_id'] ? (int) $conversa['setor_responsavel_id'] : null;
+        $setores = self::setoresParaEscolha($pdo, (int) $conversa['cliente_id'], $setorResponsavelId);
         $escolha = self::interpretarEscolhaNumerada($texto, $setores);
 
         if (!$escolha) {
@@ -585,16 +619,27 @@ class WhatsAppBot
 
         // Primeiro tenta bater com o telefone de um responsável de setor
         // específico (mais preciso: já sabe exatamente quem é a pessoa).
-        $stmtResp = $pdo->query("SELECT sr.id AS setor_responsavel_id, sr.nome, sr.telefone, sr.setor_id, sr.bloqueado_whatsapp, s.nome AS nome_setor, s.cliente_id, c.nome AS nome_cliente
+        // Não filtra mais pelo setor_id ÚNICO (primário) -- uma pessoa pode
+        // estar em vários setores agora (ver setor_responsavel_setores), então
+        // o match pelo telefone só depende do CLIENTE estar ativo e ela ter
+        // PELO MENOS UM setor ativo (não necessariamente o principal). O
+        // setor_id retornado aqui continua sendo só o principal, usado como
+        // atalho quando ela só tem um setor mesmo (ver avancarAposIdentificar()).
+        $stmtResp = $pdo->query("SELECT sr.id AS setor_responsavel_id, sr.nome, sr.telefone, sr.setor_id, sr.bloqueado_whatsapp, s.nome AS nome_setor, sr.cliente_id, c.nome AS nome_cliente
             FROM setor_responsaveis sr
-            JOIN setores s ON s.id = sr.setor_id
-            JOIN clientes c ON c.id = s.cliente_id
-            WHERE s.ativo = 1 AND c.status = 'ativo' AND sr.telefone IS NOT NULL");
+            JOIN clientes c ON c.id = sr.cliente_id
+            LEFT JOIN setores s ON s.id = sr.setor_id
+            WHERE c.status = 'ativo' AND sr.telefone IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM setor_responsavel_setores srs
+                  INNER JOIN setores s2 ON s2.id = srs.setor_id
+                  WHERE srs.setor_responsavel_id = sr.id AND s2.ativo = 1
+              )");
         foreach ($stmtResp->fetchAll() as $linha) {
             if (telefones_correspondem($telefone, $linha['telefone'])) {
                 return [
                     'cliente_id' => (int) $linha['cliente_id'],
-                    'setor_id' => (int) $linha['setor_id'],
+                    'setor_id' => $linha['setor_id'] !== null ? (int) $linha['setor_id'] : null,
                     'setor_responsavel_id' => (int) $linha['setor_responsavel_id'],
                     'nome_cliente' => $linha['nome_cliente'],
                     'nome_setor' => $linha['nome_setor'],
@@ -654,18 +699,43 @@ class WhatsAppBot
         return $linhas;
     }
 
-    /** Setores com pelo menos 1 responsável relacionado ou que sejam o setor do master. */
+    /** Setores com pelo menos 1 responsável relacionado ou que o master participe. */
     private static function setoresDisponiveis(PDO $pdo, int $clienteId): array
     {
         $stmt = $pdo->prepare("
             SELECT s.id, s.nome
             FROM setores s
-            INNER JOIN clientes c ON c.id = s.cliente_id
             WHERE s.cliente_id = ? AND s.ativo = 1
-              AND (c.setor_id = s.id OR EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id))
+              AND (
+                  EXISTS(SELECT 1 FROM cliente_setores cs WHERE cs.cliente_id = s.cliente_id AND cs.setor_id = s.id)
+                  OR EXISTS(SELECT 1 FROM setor_responsavel_setores srs WHERE srs.setor_id = s.id)
+              )
             ORDER BY s.nome ASC
         ");
         $stmt->execute([$clienteId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Setores que uma pessoa pode escolher no WhatsApp -- todos os
+     * disponíveis da empresa pro MASTER (ele pode abrir chamado em qualquer
+     * setor), mas só os PRÓPRIOS setores pra quem é um responsável de setor
+     * específico -- pedido do Kleber: uma pessoa pode estar em mais de um
+     * setor agora, mas continua só podendo escolher entre os DELA, não os
+     * de toda a empresa.
+     */
+    private static function setoresParaEscolha(PDO $pdo, int $clienteId, ?int $setorResponsavelId): array
+    {
+        if (!$setorResponsavelId) {
+            return self::setoresDisponiveis($pdo, $clienteId);
+        }
+        $idsSetoresPessoa = setores_do_responsavel($pdo, $setorResponsavelId);
+        if (!$idsSetoresPessoa) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($idsSetoresPessoa), '?'));
+        $stmt = $pdo->prepare("SELECT id, nome FROM setores WHERE cliente_id = ? AND ativo = 1 AND id IN ($placeholders) ORDER BY nome ASC");
+        $stmt->execute([$clienteId, ...$idsSetoresPessoa]);
         return $stmt->fetchAll();
     }
 
