@@ -160,6 +160,24 @@ class ClienteAuth
     }
 
     /**
+     * TODOS os setor_id que o login de setor atual pertence (ver tabela
+     * setor_responsavel_setores) -- pra escopo/visibilidade de chamado,
+     * já que uma pessoa pode estar em mais de um setor agora. setorId()
+     * continua existindo (o setor "principal", sincronizado automaticamente)
+     * pra quem só precisa de UM valor (login, WhatsApp, pré-preenchimento).
+     * Array vazio se for o master (o master não tem restrição de setor
+     * nenhuma, então nunca precisa filtrar por essa lista).
+     */
+    public static function setorIds(): array
+    {
+        $responsavelId = self::setorResponsavelId();
+        if (!$responsavelId) {
+            return [];
+        }
+        return setores_do_responsavel(Database::connection(), $responsavelId);
+    }
+
+    /**
      * Setor PADRÃO do master (clientes.setor_id, editado na aba Usuários do
      * cliente) -- null se não for o login MASTER de verdade (isMaster(),
      * não temPermissaoMaster()) ou se o master ainda não tiver nenhum setor
@@ -188,6 +206,21 @@ class ClienteAuth
         $stmt->execute([self::clienteId()]);
         $setorId = $stmt->fetchColumn();
         return $setorId !== null ? (int) $setorId : null;
+    }
+
+    /**
+     * TODOS os setor_id que o contato MASTER pertence (ver tabela
+     * cliente_setores) -- mesma ideia de setorIds(), só que pro master.
+     * Array vazio se não for isMaster() de verdade ou não tiver setor
+     * nenhum configurado ainda. Mesmo cuidado de setorMasterId(): DE
+     * PROPÓSITO só isMaster(), não temPermissaoMaster().
+     */
+    public static function setorMasterIds(): array
+    {
+        if (!self::isMaster()) {
+            return [];
+        }
+        return setores_do_cliente_master(Database::connection(), self::clienteId());
     }
 
     /** Nome do setor logado (busca fresca -- pode ter sido renomeado), ou null se for o master. */

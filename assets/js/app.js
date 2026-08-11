@@ -41,8 +41,12 @@
         listaNav.querySelectorAll('.nav-link').forEach(function (l) { l.classList.remove('active'); });
         link.classList.add('active');
 
+        // :scope > .tab-pane (não .tab-pane sem escopo) -- senão isso também
+        // desativa qualquer sub-aba ANINHADA dentro do painel (ex.: as abas
+        // Configurações/Calendário/... de cada setor, na aba Setores),
+        // deixando a sub-aba em branco até clicar nela de novo manualmente.
         var conteudo = painel.closest('.tab-content') || document;
-        conteudo.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.remove('show', 'active'); });
+        conteudo.querySelectorAll(':scope > .tab-pane').forEach(function (p) { p.classList.remove('show', 'active'); });
         painel.classList.add('show', 'active');
 
         link.dispatchEvent(new CustomEvent('shown.bs.tab', { bubbles: true, detail: { target: href } }));

@@ -19,7 +19,9 @@ ClienteAuth::requireLogin();
 $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
 $ehMaster = ClienteAuth::temPermissaoMaster();
-$setorIdLogado = ClienteAuth::setorId();
+// Uma pessoa pode estar em vários setores agora (ver ClienteAuth::setorIds())
+// -- precisa ver evento de QUALQUER um deles, não só do "principal".
+$idsSetoresLogadoCalendario = ClienteAuth::setorIds();
 
 if ($ehMaster) {
     $treinamentos = $pdo->prepare('
@@ -30,15 +32,25 @@ if ($ehMaster) {
         ORDER BY t.data_inicio DESC, t.hora_inicio ASC
     ');
     $treinamentos->execute([$clienteId]);
+} elseif ($idsSetoresLogadoCalendario) {
+    $placeholdersSetorCalendario = implode(',', array_fill(0, count($idsSetoresLogadoCalendario), '?'));
+    $treinamentos = $pdo->prepare("
+        SELECT t.*, s.nome AS setor_nome
+        FROM treinamentos t
+        LEFT JOIN setores s ON s.id = t.setor_id
+        WHERE t.cliente_id = ? AND (t.setor_id IN ($placeholdersSetorCalendario) OR t.setor_id IS NULL)
+        ORDER BY t.data_inicio DESC, t.hora_inicio ASC
+    ");
+    $treinamentos->execute([$clienteId, ...$idsSetoresLogadoCalendario]);
 } else {
     $treinamentos = $pdo->prepare('
         SELECT t.*, s.nome AS setor_nome
         FROM treinamentos t
         LEFT JOIN setores s ON s.id = t.setor_id
-        WHERE t.cliente_id = ? AND (t.setor_id = ? OR t.setor_id IS NULL)
+        WHERE t.cliente_id = ? AND t.setor_id IS NULL
         ORDER BY t.data_inicio DESC, t.hora_inicio ASC
     ');
-    $treinamentos->execute([$clienteId, $setorIdLogado]);
+    $treinamentos->execute([$clienteId]);
 }
 $treinamentos = $treinamentos->fetchAll();
 

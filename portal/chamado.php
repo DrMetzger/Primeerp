@@ -21,8 +21,17 @@ if (ClienteAuth::temPermissaoMaster()) {
     $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ?');
     $stmt->execute([$chamadoId, $clienteId]);
 } else {
-    $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ? AND c.setor_id = ?');
-    $stmt->execute([$chamadoId, $clienteId, ClienteAuth::setorId()]);
+    // Uma pessoa pode estar em vários setores agora (ver ClienteAuth::setorIds())
+    // -- precisa poder ver/responder chamado de QUALQUER um deles.
+    $idsSetoresLogadoPortal = ClienteAuth::setorIds();
+    if ($idsSetoresLogadoPortal) {
+        $placeholdersSetorLogadoPortal = implode(',', array_fill(0, count($idsSetoresLogadoPortal), '?'));
+        $stmt = $pdo->prepare("SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ? AND c.setor_id IN ($placeholdersSetorLogadoPortal)");
+        $stmt->execute([$chamadoId, $clienteId, ...$idsSetoresLogadoPortal]);
+    } else {
+        $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ? AND c.setor_id = ?');
+        $stmt->execute([$chamadoId, $clienteId, ClienteAuth::setorId()]);
+    }
 }
 $chamado = $stmt->fetch();
 
@@ -55,13 +64,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
         $stmtSetorAlvoPortal->execute([$novoSetorId, $clienteId]);
         $setorAlvoPortal = $stmtSetorAlvoPortal->fetch();
 
-        $stmtMembrosAlvoPortal = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+        $stmtMembrosAlvoPortal = $pdo->prepare('
+            SELECT sr.* FROM setor_responsaveis sr
+            INNER JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+            WHERE srs.setor_id = ?
+        ');
         $stmtMembrosAlvoPortal->execute([$novoSetorId]);
         $membrosAlvoPortal = $stmtMembrosAlvoPortal->fetchAll();
 
-        $stmtSetorMasterPortal = $pdo->prepare('SELECT setor_id FROM clientes WHERE id = ?');
-        $stmtSetorMasterPortal->execute([$clienteId]);
-        $masterNesseSetorPortal = (int) $stmtSetorMasterPortal->fetchColumn() === $novoSetorId;
+        $masterNesseSetorPortal = in_array($novoSetorId, setores_do_cliente_master($pdo, $clienteId), true);
 
         if (!$setorAlvoPortal || (!$membrosAlvoPortal && !$masterNesseSetorPortal)) {
             flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- relacione um usuário antes de atribuir chamados a ele.');
@@ -229,10 +240,10 @@ foreach ($respostas as $r) {
 $setoresPortal = [];
 if (ClienteAuth::temPermissaoMaster()) {
     $stmtSetoresPortal = $pdo->prepare('
-        SELECT s.id, s.nome, (c.setor_id = s.id) AS eh_setor_master,
-            EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id) AS tem_responsavel
+        SELECT s.id, s.nome,
+            EXISTS(SELECT 1 FROM cliente_setores cs WHERE cs.cliente_id = s.cliente_id AND cs.setor_id = s.id) AS eh_setor_master,
+            EXISTS(SELECT 1 FROM setor_responsavel_setores srs WHERE srs.setor_id = s.id) AS tem_responsavel
         FROM setores s
-        INNER JOIN clientes c ON c.id = s.cliente_id
         WHERE s.cliente_id = ?
         ORDER BY s.nome ASC
     ');

@@ -77,15 +77,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
-            $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
             $indiceAvatarNovoPortal = (int) ($_POST['avatar'] ?? 0);
             $avatarNovoPortal = ($indiceAvatarNovoPortal >= 1 && $indiceAvatarNovoPortal <= QUANTIDADE_AVATARES_PREDEFINIDOS)
                 ? 'assets/img/avatares/avatar-' . $indiceAvatarNovoPortal . '.svg'
                 : null;
             $ehMasterRespPortal = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovoPortal, $ehMasterRespPortal]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovoPortal, $ehMasterRespPortal]);
+                substituir_setores_do_responsavel($pdo, $clienteId, (int) $pdo->lastInsertId(), $_POST['setor_ids'] ?? []);
                 flash_set('sucesso', 'Usuário cadastrado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível cadastrar (e-mail já usado por outro usuário desse cliente?).');
@@ -140,11 +140,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('erro', 'Informe o telefone -- é por ele que a pessoa recebe aviso no WhatsApp quando um chamado cai no setor dela.');
         } else {
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
-            $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
             $ehMasterRespPortal = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=?, eh_master=? WHERE id=?')
-                    ->execute([$nomeResp, $emailResp, $telefoneRespEditar, $documentoResp, $setorIdResp, $ehMasterRespPortal, $responsavelId]);
+                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, eh_master=? WHERE id=?')
+                    ->execute([$nomeResp, $emailResp, $telefoneRespEditar, $documentoResp, $ehMasterRespPortal, $responsavelId]);
+                substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, $_POST['setor_ids'] ?? []);
                 flash_set('sucesso', 'Usuário atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro usuário desse cliente?).');
@@ -152,17 +152,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($acao === 'relacionar_responsavel_setor') {
+    // Multi-select da linha/modal de usuário -- substitui de uma vez TODOS
+    // os setores dessa pessoa pelo conjunto marcado (ela pode estar em mais
+    // de um agora, ver substituir_setores_do_responsavel() em helpers.php).
+    if ($acao === 'definir_setores_responsavel') {
         $responsavelId = (int) $_POST['responsavel_id'];
-        $novoSetorId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
         $confereResp = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE id = ? AND cliente_id = ?');
         $confereResp->execute([$responsavelId, $clienteId]);
 
         if (!$confereResp->fetchColumn()) {
             flash_set('erro', 'Usuário não encontrado.');
         } else {
-            $pdo->prepare('UPDATE setor_responsaveis SET setor_id = ? WHERE id = ?')->execute([$novoSetorId, $responsavelId]);
-            flash_set('sucesso', $novoSetorId ? 'Usuário relacionado ao setor.' : 'Usuário desvinculado do setor.');
+            substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, $_POST['setor_ids'] ?? []);
+            flash_set('sucesso', 'Setores atualizados.');
         }
     }
 
@@ -221,6 +223,24 @@ $setores = $setores->fetchAll();
 $usuariosCliente = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE cliente_id = ? ORDER BY nome ASC');
 $usuariosCliente->execute([$clienteId]);
 $usuariosCliente = $usuariosCliente->fetchAll();
+
+// TODOS os setores de cada pessoa (não só o "principal" em setor_id) --
+// junta numa única query pra não fazer 1 SELECT por pessoa na tabela.
+$nomesSetoresPorId = array_column($setores, 'nome', 'id');
+if ($usuariosCliente) {
+    $idsResponsaveisPortal = array_column($usuariosCliente, 'id');
+    $placeholdersResponsaveisPortal = implode(',', array_fill(0, count($idsResponsaveisPortal), '?'));
+    $stmtSetoresPorResponsavelPortal = $pdo->prepare("SELECT setor_responsavel_id, setor_id FROM setor_responsavel_setores WHERE setor_responsavel_id IN ($placeholdersResponsaveisPortal) ORDER BY setor_id ASC");
+    $stmtSetoresPorResponsavelPortal->execute($idsResponsaveisPortal);
+    $setorIdsPorResponsavelIdPortal = [];
+    foreach ($stmtSetoresPorResponsavelPortal->fetchAll() as $vinculoPortal) {
+        $setorIdsPorResponsavelIdPortal[$vinculoPortal['setor_responsavel_id']][] = (int) $vinculoPortal['setor_id'];
+    }
+    foreach ($usuariosCliente as &$ucComSetoresPortal) {
+        $ucComSetoresPortal['setor_ids'] = $setorIdsPorResponsavelIdPortal[$ucComSetoresPortal['id']] ?? [];
+    }
+    unset($ucComSetoresPortal);
+}
 
 $tituloPagina = 'Setores e Usuários';
 $larguraPortalPx = 1200; // tabela de usuários tem várias colunas + botões de ação -- 900px forçava rolagem horizontal feia
@@ -310,12 +330,17 @@ require __DIR__ . '/../templates/portal_header.php';
                     <div class="col-md-4"><input type="text" name="telefone" class="form-control input-telefone" placeholder="Telefone (WhatsApp) *" required></div>
                     <div class="col-md-6"><input type="text" name="documento" class="form-control" placeholder="CPF (só números)"></div>
                     <div class="col-md-6">
-                        <select name="setor_id" class="form-select">
-                            <option value="">Sem setor por enquanto</option>
+                        <label class="form-label">Setor(es)</label>
+                        <?php if ($setores): ?>
                             <?php foreach ($setores as $s): ?>
-                                <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="setor_ids[]" value="<?= $s['id'] ?>" id="novoUsuarioPortalSetor<?= $s['id'] ?>">
+                                    <label class="form-check-label" for="novoUsuarioPortalSetor<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+                                </div>
                             <?php endforeach; ?>
-                        </select>
+                        <?php else: ?>
+                            <p class="text-muted small mb-0">Sem setor cadastrado ainda -- pode deixar em branco por enquanto.</p>
+                        <?php endif; ?>
                     </div>
                     <div class="col-12 form-check">
                         <input type="checkbox" name="eh_master" id="novoUsuarioPortalEhMaster" class="form-check-input" value="1">
@@ -338,8 +363,8 @@ require __DIR__ . '/../templates/portal_header.php';
                     <?php foreach ($usuariosCliente as $uc):
                         $avatarUc = avatar_html($uc['nome'], resolver_avatar_por_email($pdo, $uc['email'], $uc['foto_perfil']), 'cliente');
                         $ucComAvatar = $uc + ['avatar_html' => $avatarUc];
-                        $nomeSetorUc = array_values(array_filter($setores, fn ($s) => (int) $s['id'] === (int) $uc['setor_id']))[0]['nome'] ?? 'Sem setor';
-                        $buscaUc = mb_strtolower($uc['nome'] . ' ' . $uc['email'] . ' ' . $uc['telefone'] . ' ' . $nomeSetorUc);
+                        $nomesSetoresUc = array_map(fn ($sid) => $nomesSetoresPorId[$sid] ?? '?', $uc['setor_ids']);
+                        $buscaUc = mb_strtolower($uc['nome'] . ' ' . $uc['email'] . ' ' . $uc['telefone'] . ' ' . implode(' ', $nomesSetoresUc));
                     ?>
                         <tr data-busca="<?= e($buscaUc) ?>">
                             <td><?= $avatarUc ?></td>
@@ -347,17 +372,9 @@ require __DIR__ . '/../templates/portal_header.php';
                             <td data-rotulo="E-mail"><?= e($uc['email']) ?></td>
                             <td class="telefone-linha" data-rotulo="Telefone"><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
                             <td data-rotulo="Setor">
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="relacionar_responsavel_setor">
-                                    <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                    <select name="setor_id" class="form-select form-select-sm select-setor-linha" onchange="this.form.submit()">
-                                        <option value="">Sem setor</option>
-                                        <?php foreach ($setores as $s): ?>
-                                            <option value="<?= $s['id'] ?>" <?= (int) $uc['setor_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-outline-dark botao-editar-setores-usuario-portal w-100 text-start" data-responsavel-id="<?= $uc['id'] ?>" data-nome="<?= e($uc['nome']) ?>" data-setores-atuais='<?= e(json_encode($uc['setor_ids'])) ?>' <?= $setores ? '' : 'disabled title="Cadastre um setor primeiro"' ?>>
+                                    <?= $nomesSetoresUc ? e(implode(', ', $nomesSetoresUc)) : 'Sem setor' ?>
+                                </button>
                             </td>
                             <td data-rotulo="Portal"><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
                             <td class="text-end">
@@ -439,13 +456,17 @@ require __DIR__ . '/../templates/portal_header.php';
                 <div class="mb-3"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioPortalEmail" class="form-control" required></div>
                 <div class="mb-3"><label class="form-label">Telefone (WhatsApp) *</label><input type="text" name="telefone" id="editarUsuarioPortalTelefone" class="form-control input-telefone" required></div>
                 <div class="mb-3"><label class="form-label">CPF</label><input type="text" name="documento" id="editarUsuarioPortalDocumento" class="form-control"></div>
-                <div class="mb-3"><label class="form-label">Setor</label>
-                    <select name="setor_id" id="editarUsuarioPortalSetor" class="form-select">
-                        <option value="">Sem setor</option>
+                <div class="mb-3"><label class="form-label">Setor(es)</label>
+                    <?php if ($setores): ?>
                         <?php foreach ($setores as $s): ?>
-                            <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                            <div class="form-check">
+                                <input class="form-check-input checkbox-editar-usuario-portal-setor" type="checkbox" name="setor_ids[]" value="<?= $s['id'] ?>" id="editarUsuarioPortalSetor<?= $s['id'] ?>">
+                                <label class="form-check-label" for="editarUsuarioPortalSetor<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+                            </div>
                         <?php endforeach; ?>
-                    </select>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Sem setor cadastrado ainda.</p>
+                    <?php endif; ?>
                 </div>
                 <div class="mb-3 form-check">
                     <input type="checkbox" name="eh_master" id="editarUsuarioPortalEhMaster" class="form-check-input" value="1">
@@ -456,6 +477,36 @@ require __DIR__ . '/../templates/portal_header.php';
                     <button type="submit" class="btn btn-dark">Salvar</button>
                 </div>
             </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Setor(es) de um usuário -- pedido do Kleber: uma pessoa pode estar em
+     mais de um setor ao mesmo tempo agora, mesma tela usada na aba Usuários
+     de cliente.php do lado admin. -->
+<div class="modal fade" id="modalSetoresUsuarioPortal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Setores de <span id="modalSetoresUsuarioPortalNome"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <?php if ($setores): ?>
+            <?php foreach ($setores as $s): ?>
+            <div class="form-check">
+                <input class="form-check-input checkbox-setor-modal-usuario-portal" type="checkbox" value="<?= $s['id'] ?>" id="modalSetorUsuarioPortal<?= $s['id'] ?>">
+                <label class="form-check-label" for="modalSetorUsuarioPortal<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+            </div>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <p class="text-muted small mb-0">Cadastre um setor primeiro.</p>
+        <?php endif; ?>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-dark" id="botaoConfirmarSetoresUsuarioPortal">Salvar</button>
       </div>
     </div>
   </div>
@@ -480,7 +531,10 @@ document.querySelectorAll('.botao-editar-usuario-portal').forEach(function (bota
         document.getElementById('editarUsuarioPortalEmail').value = dados.email || '';
         document.getElementById('editarUsuarioPortalTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarUsuarioPortalDocumento').value = dados.documento || '';
-        document.getElementById('editarUsuarioPortalSetor').value = dados.setor_id || '';
+        var setorIdsAtuaisPortal = (dados.setor_ids || []).map(String);
+        document.querySelectorAll('.checkbox-editar-usuario-portal-setor').forEach(function (chk) {
+            chk.checked = setorIdsAtuaisPortal.indexOf(chk.value) !== -1;
+        });
         document.getElementById('editarUsuarioPortalEhMaster').checked = !!parseInt(dados.eh_master || 0, 10);
         document.getElementById('editarUsuarioPortalAvatar').innerHTML = dados.avatar_html || '';
         document.querySelectorAll('.editar-usuario-portal-id-campo').forEach(function (campo) { campo.value = dados.id; });
@@ -519,6 +573,41 @@ document.querySelectorAll('.seletor-icone-setor').forEach(function (grupo) {
         });
     });
 });
+
+// Botão "Setor(es)" de cada linha -- abre o modal de marcar/desmarcar
+// setores (uma pessoa pode estar em mais de um agora) e salva tudo de uma
+// vez em 'definir_setores_responsavel'.
+var responsavelIdSetoresPendentePortal = '';
+document.querySelectorAll('.botao-editar-setores-usuario-portal').forEach(function (botao) {
+    botao.addEventListener('click', function () {
+        responsavelIdSetoresPendentePortal = botao.getAttribute('data-responsavel-id') || '';
+        var setorIdsAtuaisUsuarioPortal = (JSON.parse(botao.getAttribute('data-setores-atuais') || '[]')).map(String);
+        document.querySelectorAll('.checkbox-setor-modal-usuario-portal').forEach(function (chk) {
+            chk.checked = setorIdsAtuaisUsuarioPortal.indexOf(chk.value) !== -1;
+        });
+        document.getElementById('modalSetoresUsuarioPortalNome').textContent = botao.getAttribute('data-nome') || '';
+        PrimeUI.openModal(document.getElementById('modalSetoresUsuarioPortal'));
+    });
+});
+
+var botaoConfirmarSetoresUsuarioPortal = document.getElementById('botaoConfirmarSetoresUsuarioPortal');
+if (botaoConfirmarSetoresUsuarioPortal) {
+    botaoConfirmarSetoresUsuarioPortal.addEventListener('click', function () {
+        var setorIdsMarcadosPortal = [];
+        document.querySelectorAll('.checkbox-setor-modal-usuario-portal:checked').forEach(function (chk) { setorIdsMarcadosPortal.push(chk.value); });
+
+        var formTempPortal = document.createElement('form');
+        formTempPortal.method = 'post';
+        formTempPortal.action = window.location.href;
+        var camposOcultosPortal = '<?= csrf_field() ?>'
+            + '<input type="hidden" name="acao" value="definir_setores_responsavel">'
+            + '<input type="hidden" name="responsavel_id" value="' + responsavelIdSetoresPendentePortal + '">';
+        setorIdsMarcadosPortal.forEach(function (sid) { camposOcultosPortal += '<input type="hidden" name="setor_ids[]" value="' + sid + '">'; });
+        formTempPortal.innerHTML = camposOcultosPortal;
+        document.body.appendChild(formTempPortal);
+        formTempPortal.submit();
+    });
+}
 </script>
 
 <?php require __DIR__ . '/../templates/portal_footer.php'; ?>

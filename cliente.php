@@ -910,22 +910,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confereSetor->execute([$setorId, $clienteId]);
         if ($confereSetor->fetchColumn()) {
             $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE setor_id = ?')->execute([$setorId]);
-            $pdo->prepare('UPDATE setor_responsaveis SET setor_id = NULL WHERE setor_id = ?')->execute([$setorId]);
-            if ((int) $cliente['setor_id'] === $setorId) {
-                $pdo->prepare('UPDATE clientes SET setor_id = NULL WHERE id = ?')->execute([$clienteId]);
-            }
+
+            // Precisa saber QUEM tinha esse setor antes de apagar -- o
+            // próprio DELETE FROM setores abaixo já limpa em cascata as
+            // linhas correspondentes em setor_responsavel_setores/
+            // cliente_setores (ver FKs em Migrations.php), mas isso não
+            // recalcula por conta própria o "setor principal" de cada um
+            // (ver sincronizar_setor_principal_*() em helpers.php).
+            $stmtAfetados = $pdo->prepare('SELECT setor_responsavel_id FROM setor_responsavel_setores WHERE setor_id = ?');
+            $stmtAfetados->execute([$setorId]);
+            $responsaveisAfetados = $stmtAfetados->fetchAll(PDO::FETCH_COLUMN);
+            $masterAfetado = in_array($setorId, setores_do_cliente_master($pdo, $clienteId), true);
+
             $pdo->prepare('DELETE FROM setores WHERE id = ?')->execute([$setorId]);
+
+            foreach ($responsaveisAfetados as $respIdAfetado) {
+                sincronizar_setor_principal_responsavel($pdo, (int) $respIdAfetado);
+            }
+            if ($masterAfetado) {
+                sincronizar_setor_principal_master($pdo, $clienteId);
+            }
+
             flash_set('sucesso', 'Setor excluído. Os chamados e responsáveis dele continuam salvos, só sem setor vinculado.');
         }
     }
 
-    // O master pertence a UM setor só (normalmente TI, que costuma tocar os
-    // chamados) -- ele já vê/gerencia todos os setores independente disso,
-    // então não precisa "participar" de vários como antes.
-    if ($acao === 'definir_setor_master') {
-        $novoSetorMasterId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
-        $pdo->prepare('UPDATE clientes SET setor_id = ? WHERE id = ?')->execute([$novoSetorMasterId, $clienteId]);
-        flash_set('sucesso', 'Setor do master atualizado.');
+    // O master já vê/gerencia todos os setores independente disso -- esse
+    // vínculo é só "de quais setores ele é considerado responsável" (conta
+    // como responsável nos cards da aba Setores, entra na notificação de
+    // chamado novo daquele setor). Pedido do Kleber: a Ananda (master da
+    // SGT Forjados) precisa ficar em mais de um setor ao mesmo tempo, não
+    // só um -- substitui o antigo setor único por um conjunto qualquer
+    // (0, 1 ou vários), via cliente_setores.
+    if ($acao === 'definir_setores_master') {
+        substituir_setores_do_cliente_master($pdo, $clienteId, $_POST['setor_ids'] ?? []);
+        flash_set('sucesso', 'Setores do master atualizados.');
     }
 
     // --- Usuários do cliente (aba Usuários) ------------------------------
@@ -941,7 +960,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
-            $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
             $indiceAvatarNovo = (int) ($_POST['avatar'] ?? 0);
             $avatarNovo = ($indiceAvatarNovo >= 1 && $indiceAvatarNovo <= QUANTIDADE_AVATARES_PREDEFINIDOS)
                 ? 'assets/img/avatares/avatar-' . $indiceAvatarNovo . '.svg'
@@ -950,9 +968,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ehMasterResp = isset($_POST['eh_master']) ? 1 : 0;
 
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovo, $ehMasterResp]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovo, $ehMasterResp]);
                 $responsavelId = (int) $pdo->lastInsertId();
+                substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, $_POST['setor_ids'] ?? []);
 
                 // Mesma pessoa que já é o contato master desse cliente,
                 // cadastrada também como usuário (mesmo e-mail) -- sincroniza
@@ -984,11 +1003,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
-            $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
             $ehMasterResp = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=?, eh_master=? WHERE id=?')
-                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $setorIdResp, $ehMasterResp, $responsavelId]);
+                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, eh_master=? WHERE id=?')
+                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $ehMasterResp, $responsavelId]);
+                substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, $_POST['setor_ids'] ?? []);
                 flash_set('sucesso', 'Usuário atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro usuário desse cliente?).');
@@ -1027,20 +1046,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Liberação de horário do WhatsApp atualizada.');
     }
 
-    // Vincula (ou desvincula, se setor_id vier vazio) um usuário JÁ
-    // cadastrado a um setor específico -- é isso que "Gerenciar setores"
-    // usa pra buscar/relacionar em vez de cadastrar uma pessoa nova.
+    // Vincula um usuário JÁ cadastrado a MAIS um setor -- aditivo, não tira
+    // os outros setores que ele já tinha (uma pessoa pode estar em vários
+    // ao mesmo tempo agora) -- é isso que "Gerenciar setores" usa pra
+    // buscar/relacionar em vez de cadastrar uma pessoa nova. Pra desvincular
+    // de um setor específico, ver 'desvincular_responsavel_setor'.
     if ($acao === 'relacionar_responsavel_setor') {
         $responsavelId = (int) $_POST['responsavel_id'];
-        $novoSetorId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+        $novoSetorId = (int) ($_POST['setor_id'] ?? 0);
+        $confereResp = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE id = ? AND cliente_id = ?');
+        $confereResp->execute([$responsavelId, $clienteId]);
+
+        if (!$confereResp->fetchColumn() || !$novoSetorId) {
+            flash_set('erro', 'Usuário não encontrado.');
+        } else {
+            $setoresAtuaisResp = setores_do_responsavel($pdo, $responsavelId);
+            substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, [...$setoresAtuaisResp, $novoSetorId]);
+            flash_set('sucesso', 'Usuário relacionado ao setor.');
+        }
+    }
+
+    // Remove o vínculo de um usuário com UM setor específico, sem tirar os
+    // outros setores que ele tenha -- botão "Desvincular" de cada card na
+    // aba Setores.
+    if ($acao === 'desvincular_responsavel_setor') {
+        $responsavelId = (int) $_POST['responsavel_id'];
+        $setorId = (int) $_POST['setor_id'];
+        $pdo->prepare('DELETE FROM setor_responsavel_setores WHERE setor_responsavel_id = ? AND setor_id = ?')->execute([$responsavelId, $setorId]);
+        sincronizar_setor_principal_responsavel($pdo, $responsavelId);
+        flash_set('sucesso', 'Usuário desvinculado do setor.');
+    }
+
+    // Multi-select da aba Usuários (linha da pessoa OU do master) -- substitui
+    // de uma vez TODOS os setores dessa pessoa pelo conjunto marcado.
+    if ($acao === 'definir_setores_responsavel') {
+        $responsavelId = (int) $_POST['responsavel_id'];
         $confereResp = $pdo->prepare('SELECT id FROM setor_responsaveis WHERE id = ? AND cliente_id = ?');
         $confereResp->execute([$responsavelId, $clienteId]);
 
         if (!$confereResp->fetchColumn()) {
             flash_set('erro', 'Usuário não encontrado.');
         } else {
-            $pdo->prepare('UPDATE setor_responsaveis SET setor_id = ? WHERE id = ?')->execute([$novoSetorId, $responsavelId]);
-            flash_set('sucesso', $novoSetorId ? 'Usuário relacionado ao setor.' : 'Usuário desvinculado do setor.');
+            substituir_setores_do_responsavel($pdo, $clienteId, $responsavelId, $_POST['setor_ids'] ?? []);
+            flash_set('sucesso', 'Setores atualizados.');
         }
     }
 
@@ -1245,11 +1293,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmtSetorAlvo->execute([$novoSetorId, $clienteId]);
             $setorAlvo = $stmtSetorAlvo->fetch();
 
-            $stmtMembrosAlvo = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+            $stmtMembrosAlvo = $pdo->prepare('
+                SELECT sr.* FROM setor_responsaveis sr
+                INNER JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+                WHERE srs.setor_id = ?
+            ');
             $stmtMembrosAlvo->execute([$novoSetorId]);
             $membrosSetorAlvo = $stmtMembrosAlvo->fetchAll();
 
-            $masterNesseSetor = (int) $cliente['setor_id'] === $novoSetorId;
+            $masterNesseSetor = in_array($novoSetorId, setores_do_cliente_master($pdo, $clienteId), true);
 
             if (!$setorAlvo || (!$membrosSetorAlvo && !$masterNesseSetor)) {
                 flash_set('erro', 'Esse setor ainda não tem nenhum responsável cadastrado -- relacione um usuário em "Gerenciar setores" antes de atribuir chamados a ele.');
@@ -1593,6 +1645,23 @@ $usuariosCliente = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE cliente
 $usuariosCliente->execute([$clienteId]);
 $usuariosCliente = $usuariosCliente->fetchAll();
 
+// TODOS os setores de cada pessoa (não só o "principal" em setor_id) --
+// junta numa única query pra não fazer 1 SELECT por pessoa na tabela.
+$setorIdsPorResponsavelId = [];
+if ($usuariosCliente) {
+    $idsResponsaveisCliente = array_column($usuariosCliente, 'id');
+    $placeholdersResponsaveis = implode(',', array_fill(0, count($idsResponsaveisCliente), '?'));
+    $stmtSetoresPorResponsavel = $pdo->prepare("SELECT setor_responsavel_id, setor_id FROM setor_responsavel_setores WHERE setor_responsavel_id IN ($placeholdersResponsaveis) ORDER BY setor_id ASC");
+    $stmtSetoresPorResponsavel->execute($idsResponsaveisCliente);
+    foreach ($stmtSetoresPorResponsavel->fetchAll() as $vinculo) {
+        $setorIdsPorResponsavelId[$vinculo['setor_responsavel_id']][] = (int) $vinculo['setor_id'];
+    }
+    foreach ($usuariosCliente as &$ucComSetores) {
+        $ucComSetores['setor_ids'] = $setorIdsPorResponsavelId[$ucComSetores['id']] ?? [];
+    }
+    unset($ucComSetores);
+}
+
 // Setores (departamentos) cadastrados pra esse cliente, com o responsável
 // (se já tiver um) e insights próprios -- ver Migrations (setores,
 // setor_responsaveis) e ClienteAuth (login separado pra cada setor). Cliente
@@ -1614,10 +1683,9 @@ $setores->execute([$clienteId]);
 $setores = $setores->fetchAll();
 $nomesSetoresPorId = array_column($setores, 'nome', 'id');
 
-// Qual o ÚNICO setor do contato master (substitui o antigo master_participa,
-// que permitia "participar" de vários ao mesmo tempo) -- editado na aba
-// Usuários, ver ação 'definir_setor_master'.
-$idSetorMaster = $cliente['setor_id'] ? (int) $cliente['setor_id'] : null;
+// TODOS os setores do contato master (o master pode estar em vários agora,
+// não só um) -- editado na aba Usuários, ver ação 'definir_setores_master'.
+$idsSetoresMaster = setores_do_cliente_master($pdo, $clienteId);
 
 // Última sugestão de IA gerada pra cada setor (histórico completo fica só
 // no banco -- a tela sempre mostra a mais recente). ORDER BY criado_em DESC
@@ -1643,13 +1711,22 @@ $responsaveisPorSetorId = [];
 if ($setores) {
     $idsSetores = array_column($setores, 'id');
     $placeholdersSetores = implode(',', array_fill(0, count($idsSetores), '?'));
-    $stmtResponsaveis = $pdo->prepare("SELECT * FROM setor_responsaveis WHERE setor_id IN ($placeholdersSetores) ORDER BY nome ASC");
+    // JOIN com setor_responsavel_setores (não mais setor_id direto) --
+    // uma pessoa pode estar em vários setores agora, então aparece nas
+    // listas de TODOS eles, não só no que é o "principal" dela.
+    $stmtResponsaveis = $pdo->prepare("
+        SELECT sr.*, srs.setor_id AS setor_id_membro
+        FROM setor_responsaveis sr
+        INNER JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+        WHERE srs.setor_id IN ($placeholdersSetores)
+        ORDER BY sr.nome ASC
+    ");
     $stmtResponsaveis->execute($idsSetores);
     foreach ($stmtResponsaveis->fetchAll() as $sr) {
-        $responsaveisPorSetorId[$sr['setor_id']][] = $sr;
+        $responsaveisPorSetorId[$sr['setor_id_membro']][] = $sr;
     }
     foreach ($setores as $s) {
-        if ($idSetorMaster === (int) $s['id']) {
+        if (in_array((int) $s['id'], $idsSetoresMaster, true)) {
             $responsaveisPorSetorId[$s['id']] ??= [];
             array_unshift($responsaveisPorSetorId[$s['id']], [
                 'id' => null,
@@ -2287,7 +2364,7 @@ require __DIR__ . '/templates/header.php';
                                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                                     <select name="setor_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
                                         <option value="" <?= !$c['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
-                                        <?php foreach ($setores as $s): $temResponsavel = $idSetorMaster === (int) $s['id'] || !empty($responsaveisPorSetorId[$s['id']]); ?>
+                                        <?php foreach ($setores as $s): $temResponsavel = !empty($responsaveisPorSetorId[$s['id']]); ?>
                                             <option value="<?= $s['id'] ?>" <?= (int) $c['setor_id'] === (int) $s['id'] ? 'selected' : '' ?> <?= !$temResponsavel ? 'disabled' : '' ?>><?= e($s['nome']) ?><?= !$temResponsavel ? ' (sem responsável)' : '' ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -2506,7 +2583,7 @@ require __DIR__ . '/templates/header.php';
             $propostasSetor = $propostasPorSetorId[$idSetorAtual] ?? [];
             $kpisSetor = $kpisPorSetorId[$idSetorAtual] ?? [];
             $sugestaoIaSetor = $ultimaSugestaoIaPorSetorId[$idSetorAtual] ?? null;
-            $candidatosRelacionar = array_filter($usuariosCliente, fn ($u) => (int) $u['setor_id'] !== $idSetorAtual);
+            $candidatosRelacionar = array_filter($usuariosCliente, fn ($u) => !in_array($idSetorAtual, $u['setor_ids'], true));
         ?>
         <details class="setor-detalhe" style="border-left-color: <?= cor_setor($idSetorAtual) ?>" <?= $indiceSetor === 0 ? 'open' : '' ?>>
             <summary>
@@ -2514,7 +2591,7 @@ require __DIR__ . '/templates/header.php';
                 <span class="fw-semibold"><?= e($s['nome']) ?></span>
                 <?php if (!$s['ativo']): ?><span class="badge bg-secondary">Inativo</span><?php endif; ?>
                 <span class="text-muted small">
-                    — <?= count($membrosReais) ?> <?= count($membrosReais) === 1 ? 'responsável' : 'responsáveis' ?><?= $idSetorMaster === $idSetorAtual ? ' + master' : '' ?>
+                    — <?= count($membrosReais) ?> <?= count($membrosReais) === 1 ? 'responsável' : 'responsáveis' ?><?= in_array($idSetorAtual, $idsSetoresMaster, true) ? ' + master' : '' ?>
                 </span>
             </summary>
             <div class="setor-detalhe-corpo">
@@ -2552,7 +2629,7 @@ require __DIR__ . '/templates/header.php';
                         <hr>
                         <p class="text-muted small mb-2"><i class="bi bi-people"></i> Responsáveis (cada um com login próprio no portal, só desse setor)</p>
                         <?php if (!$membrosReais): ?>
-                            <p class="text-muted small">Nenhum responsável relacionado ainda<?= $idSetorMaster === $idSetorAtual ? ' (o master já cobre esse setor, mas fica à vontade pra relacionar mais alguém)' : '' ?>.</p>
+                            <p class="text-muted small">Nenhum responsável relacionado ainda<?= in_array($idSetorAtual, $idsSetoresMaster, true) ? ' (o master já cobre esse setor, mas fica à vontade pra relacionar mais alguém)' : '' ?>.</p>
                         <?php endif; ?>
                         <?php foreach ($membrosReais as $m): ?>
                         <div class="responsavel-setor-item d-flex align-items-center gap-3 mb-2">
@@ -2586,12 +2663,12 @@ require __DIR__ . '/templates/header.php';
                                     <button type="submit" class="btn btn-sm btn-outline-danger">Desativar acesso</button>
                                 </form>
                                 <?php endif; ?>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Desvincular <?= e($m['nome']) ?> desse setor? A pessoa continua cadastrada na aba Usuários.');">
+                                <form method="post" class="d-inline" onsubmit="return confirm('Desvincular <?= e($m['nome']) ?> desse setor? A pessoa continua cadastrada na aba Usuários (e em outros setores que ela tenha).');">
                                     <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="relacionar_responsavel_setor">
+                                    <input type="hidden" name="acao" value="desvincular_responsavel_setor">
                                     <input type="hidden" name="aba_retorno" value="setores">
                                     <input type="hidden" name="responsavel_id" value="<?= $m['id'] ?>">
-                                    <input type="hidden" name="setor_id" value="">
+                                    <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                                     <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Desvincular</button>
                                 </form>
                             </div>
@@ -2609,7 +2686,8 @@ require __DIR__ . '/templates/header.php';
                                 <select name="responsavel_id" class="form-select form-select-sm" required>
                                     <option value="" disabled selected>Selecione...</option>
                                     <?php foreach ($candidatosRelacionar as $cand): ?>
-                                        <option value="<?= $cand['id'] ?>"><?= e($cand['nome']) ?> (<?= e($cand['email']) ?>)<?= $cand['setor_id'] ? ' — hoje em ' . e($nomesSetoresPorId[$cand['setor_id']] ?? '?') : '' ?></option>
+                                        <?php $nomesSetoresDoCandidato = array_map(fn ($sid) => $nomesSetoresPorId[$sid] ?? '?', $cand['setor_ids']); ?>
+                                        <option value="<?= $cand['id'] ?>"><?= e($cand['nome']) ?> (<?= e($cand['email']) ?>)<?= $nomesSetoresDoCandidato ? ' — hoje em ' . e(implode(', ', $nomesSetoresDoCandidato)) : '' ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -2879,18 +2957,10 @@ require __DIR__ . '/templates/header.php';
                             <td class="fw-semibold"><?= e($cliente['contato_nome'] ?: $cliente['nome']) ?> <span class="badge bg-dark">Master</span></td>
                             <td><?= $cliente['contato_email'] ? e($cliente['contato_email']) : '<span class="text-muted">— sem e-mail —</span>' ?></td>
                             <td class="telefone-linha"><?= e(formatar_telefone($cliente['contato_telefone']) ?: '-') ?></td>
-                            <td>
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="definir_setor_master">
-                                    <input type="hidden" name="aba_retorno" value="usuarios">
-                                    <select name="setor_id" class="form-select form-select-sm select-setor-linha" onchange="this.form.submit()" <?= $setores ? '' : 'disabled title="Cadastre um setor primeiro"' ?>>
-                                        <option value="">Nenhum setor</option>
-                                        <?php foreach ($setores as $s): ?>
-                                            <option value="<?= $s['id'] ?>" <?= $idSetorMaster === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </form>
+                            <td onclick="event.stopPropagation()">
+                                <button type="button" class="btn btn-sm btn-outline-dark botao-editar-setores-usuario w-100 text-start" data-responsavel-id="" data-nome="<?= e($cliente['contato_nome'] ?: $cliente['nome']) ?>" data-setores-atuais='<?= e(json_encode($idsSetoresMaster)) ?>' <?= $setores ? '' : 'disabled title="Cadastre um setor primeiro"' ?>>
+                                    <?= $idsSetoresMaster ? e(implode(', ', array_map(fn ($sid) => $nomesSetoresPorId[$sid] ?? '?', $idsSetoresMaster))) : 'Nenhum setor' ?>
+                                </button>
                             </td>
                             <td><span class="badge bg-<?= $cliente['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $cliente['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
                             <td>
@@ -2923,18 +2993,9 @@ require __DIR__ . '/templates/header.php';
                             <td><?= e($uc['email']) ?></td>
                             <td class="telefone-linha"><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
                             <td onclick="event.stopPropagation()">
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="acao" value="relacionar_responsavel_setor">
-                                    <input type="hidden" name="aba_retorno" value="usuarios">
-                                    <input type="hidden" name="responsavel_id" value="<?= $uc['id'] ?>">
-                                    <select name="setor_id" class="form-select form-select-sm select-setor-linha" onchange="this.form.submit()">
-                                        <option value="">Sem setor</option>
-                                        <?php foreach ($setores as $s): ?>
-                                            <option value="<?= $s['id'] ?>" <?= (int) $uc['setor_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-outline-dark botao-editar-setores-usuario w-100 text-start" data-responsavel-id="<?= $uc['id'] ?>" data-nome="<?= e($uc['nome']) ?>" data-setores-atuais='<?= e(json_encode($uc['setor_ids'])) ?>' <?= $setores ? '' : 'disabled title="Cadastre um setor primeiro"' ?>>
+                                    <?= $uc['setor_ids'] ? e(implode(', ', array_map(fn ($sid) => $nomesSetoresPorId[$sid] ?? '?', $uc['setor_ids']))) : 'Sem setor' ?>
+                                </button>
                             </td>
                             <td><span class="badge bg-<?= $uc['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $uc['portal_ativo'] ? 'Ativo' : 'Sem acesso' ?></span></td>
                             <td onclick="event.stopPropagation()">
@@ -3377,13 +3438,17 @@ require __DIR__ . '/templates/header.php';
             <div class="row g-2">
                 <div class="col-6"><label class="form-label">Telefone</label><input type="text" name="telefone" class="form-control input-telefone" placeholder="(00) 00000-0000"></div>
                 <div class="col-6"><label class="form-label">CPF</label><input type="text" name="documento" class="form-control" placeholder="Só números"></div>
-                <div class="col-12"><label class="form-label">Setor</label>
-                    <select name="setor_id" class="form-select">
-                        <option value="">Sem setor por enquanto</option>
+                <div class="col-12"><label class="form-label">Setor(es)</label>
+                    <?php if ($setores): ?>
                         <?php foreach ($setores as $s): ?>
-                            <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="setor_ids[]" value="<?= $s['id'] ?>" id="novoUsuarioClienteSetor<?= $s['id'] ?>">
+                                <label class="form-check-label" for="novoUsuarioClienteSetor<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+                            </div>
                         <?php endforeach; ?>
-                    </select>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Sem setor cadastrado ainda -- pode deixar em branco por enquanto.</p>
+                    <?php endif; ?>
                 </div>
                 <div class="col-12 form-check">
                     <input type="checkbox" name="eh_master" id="novoUsuarioClienteEhMaster" class="form-check-input" value="1">
@@ -3448,13 +3513,17 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-md-6"><label class="form-label">E-mail *</label><input type="email" name="email" id="editarUsuarioClienteEmail" class="form-control" required></div>
                 <div class="col-md-6"><label class="form-label">Telefone</label><input type="text" name="telefone" id="editarUsuarioClienteTelefone" class="form-control input-telefone" placeholder="(00) 00000-0000"></div>
                 <div class="col-md-6"><label class="form-label">CPF</label><input type="text" name="documento" id="editarUsuarioClienteDocumento" class="form-control" placeholder="Só números"></div>
-                <div class="col-md-6"><label class="form-label">Setor</label>
-                    <select name="setor_id" id="editarUsuarioClienteSetor" class="form-select">
-                        <option value="">Sem setor</option>
+                <div class="col-md-6"><label class="form-label">Setor(es)</label>
+                    <?php if ($setores): ?>
                         <?php foreach ($setores as $s): ?>
-                            <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                            <div class="form-check">
+                                <input class="form-check-input checkbox-editar-usuario-cliente-setor" type="checkbox" name="setor_ids[]" value="<?= $s['id'] ?>" id="editarUsuarioClienteSetor<?= $s['id'] ?>">
+                                <label class="form-check-label" for="editarUsuarioClienteSetor<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+                            </div>
                         <?php endforeach; ?>
-                    </select>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Sem setor cadastrado ainda.</p>
+                    <?php endif; ?>
                 </div>
                 <div class="col-12 form-check">
                     <input type="checkbox" name="eh_master" id="editarUsuarioClienteEhMaster" class="form-check-input" value="1">
@@ -3466,6 +3535,38 @@ require __DIR__ . '/templates/header.php';
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Setor(es) de uma pessoa (aba Usuários -- linha do master ou de um
+     usuário) -- pedido do Kleber: uma pessoa pode estar em mais de um setor
+     ao mesmo tempo agora (ex.: Eliete/Ananda na SGT Forjados). Modal único,
+     reaproveitado tanto pra master (responsavel_id vazio, grava em
+     cliente_setores) quanto pra usuário (grava em setor_responsavel_setores). -->
+<div class="modal fade" id="modalSetoresUsuario" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Setores de <span id="modalSetoresUsuarioNome"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <?php if ($setores): ?>
+            <?php foreach ($setores as $s): ?>
+            <div class="form-check">
+                <input class="form-check-input checkbox-setor-modal-usuario" type="checkbox" value="<?= $s['id'] ?>" id="modalSetorUsuario<?= $s['id'] ?>">
+                <label class="form-check-label" for="modalSetorUsuario<?= $s['id'] ?>"><?= e($s['nome']) ?></label>
+            </div>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <p class="text-muted small mb-0">Cadastre um setor primeiro (aba Setores).</p>
+        <?php endif; ?>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-dark" id="botaoConfirmarSetoresUsuario">Salvar</button>
       </div>
     </div>
   </div>
@@ -3618,7 +3719,10 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarUsuarioClienteEmail').value = dados.email;
         document.getElementById('editarUsuarioClienteTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarUsuarioClienteDocumento').value = dados.documento || '';
-        document.getElementById('editarUsuarioClienteSetor').value = dados.setor_id || '';
+        var setorIdsAtuais = (dados.setor_ids || []).map(String);
+        document.querySelectorAll('.checkbox-editar-usuario-cliente-setor').forEach(function (chk) {
+            chk.checked = setorIdsAtuais.indexOf(chk.value) !== -1;
+        });
         document.getElementById('editarUsuarioClienteEhMaster').checked = !!parseInt(dados.eh_master || 0, 10);
         document.querySelectorAll('.avatar-usuario-cliente-id-campo').forEach(function (campo) { campo.value = dados.id; });
         PrimeUI.openModal(document.getElementById('modalUsuarioCliente'));
@@ -3632,6 +3736,48 @@ document.addEventListener('DOMContentLoaded', function () {
             if (e.key === 'Enter') linha.click();
         });
     });
+
+    // Botão "Setor(es)" de cada linha da aba Usuários (master ou usuário) --
+    // abre o modal único de marcar/desmarcar setores. responsavelIdSetoresPendente
+    // vazio = é a linha do master (grava em cliente_setores via
+    // 'definir_setores_master'); com valor = é um usuário (grava em
+    // setor_responsavel_setores via 'definir_setores_responsavel').
+    var responsavelIdSetoresPendente = '';
+    document.querySelectorAll('.botao-editar-setores-usuario').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            responsavelIdSetoresPendente = botao.getAttribute('data-responsavel-id') || '';
+            var setorIdsAtuaisUsuario = (JSON.parse(botao.getAttribute('data-setores-atuais') || '[]')).map(String);
+            document.querySelectorAll('.checkbox-setor-modal-usuario').forEach(function (chk) {
+                chk.checked = setorIdsAtuaisUsuario.indexOf(chk.value) !== -1;
+            });
+            document.getElementById('modalSetoresUsuarioNome').textContent = botao.getAttribute('data-nome') || '';
+            PrimeUI.openModal(document.getElementById('modalSetoresUsuario'));
+        });
+    });
+
+    var botaoConfirmarSetoresUsuario = document.getElementById('botaoConfirmarSetoresUsuario');
+    if (botaoConfirmarSetoresUsuario) {
+        botaoConfirmarSetoresUsuario.addEventListener('click', function () {
+            var setorIdsMarcados = [];
+            document.querySelectorAll('.checkbox-setor-modal-usuario:checked').forEach(function (chk) { setorIdsMarcados.push(chk.value); });
+
+            var formTemp = document.createElement('form');
+            formTemp.method = 'post';
+            formTemp.action = window.location.href;
+            var camposOcultos = '<?= csrf_field() ?>'
+                + '<input type="hidden" name="aba_retorno" value="usuarios">';
+            if (responsavelIdSetoresPendente) {
+                camposOcultos += '<input type="hidden" name="acao" value="definir_setores_responsavel">'
+                    + '<input type="hidden" name="responsavel_id" value="' + responsavelIdSetoresPendente + '">';
+            } else {
+                camposOcultos += '<input type="hidden" name="acao" value="definir_setores_master">';
+            }
+            setorIdsMarcados.forEach(function (sid) { camposOcultos += '<input type="hidden" name="setor_ids[]" value="' + sid + '">'; });
+            formTemp.innerHTML = camposOcultos;
+            document.body.appendChild(formTemp);
+            formTemp.submit();
+        });
+    }
 
     // "Gerenciar setores" / "Configurar setores" (aba Chamados) -- antes
     // abria um modal, agora só troca pra aba Setores.

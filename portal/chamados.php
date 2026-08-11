@@ -24,7 +24,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
     // master), pode escolher um setor (opcional) entre os cadastrados desse
     // cliente, senão fica sem setor.
     if (!ClienteAuth::temPermissaoMaster()) {
-        $setorIdNovoChamado = ClienteAuth::setorId();
+        // Pessoa em mais de um setor agora (ver ClienteAuth::setorIds()) --
+        // deixa escolher entre os PRÓPRIOS setores, em vez de mandar sempre
+        // pro "principal" sem chance de escolha (só quem tem 1 setor só
+        // continua sem picker nenhum, comportamento de sempre).
+        $idsSetoresProprios = ClienteAuth::setorIds();
+        if (count($idsSetoresProprios) > 1 && !empty($_POST['setor_id']) && in_array((int) $_POST['setor_id'], $idsSetoresProprios, true)) {
+            $setorIdNovoChamado = (int) $_POST['setor_id'];
+        } else {
+            $setorIdNovoChamado = ClienteAuth::setorId();
+        }
     } else {
         $setorIdNovoChamado = null;
         if (!empty($_POST['setor_id'])) {
@@ -91,10 +100,31 @@ if (ClienteAuth::temPermissaoMaster()) {
     $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC');
     $stmt->execute([$clienteId]);
 } else {
-    $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? AND setor_id = ? ORDER BY criado_em DESC');
-    $stmt->execute([$clienteId, ClienteAuth::setorId()]);
+    // Uma pessoa pode estar em vários setores agora (ver ClienteAuth::setorIds())
+    // -- precisa ver chamado de QUALQUER um deles, não só do "principal".
+    $idsSetoresLogado = ClienteAuth::setorIds();
+    if ($idsSetoresLogado) {
+        $placeholdersSetorLogado = implode(',', array_fill(0, count($idsSetoresLogado), '?'));
+        $stmt = $pdo->prepare("SELECT * FROM chamados WHERE cliente_id = ? AND setor_id IN ($placeholdersSetorLogado) ORDER BY criado_em DESC");
+        $stmt->execute([$clienteId, ...$idsSetoresLogado]);
+    } else {
+        $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? AND setor_id = ? ORDER BY criado_em DESC');
+        $stmt->execute([$clienteId, ClienteAuth::setorId()]);
+    }
 }
 $chamados = $stmt->fetchAll();
+
+// Setores da PRÓPRIA pessoa logada (não-master, quando está em mais de um)
+// -- alimenta o picker de "Setor" no modal de abrir chamado, restrito só
+// aos dela (diferente de $setoresPortal abaixo, que é TODOS os setores da
+// empresa e só existe pro login com permissão de master).
+$setoresProprios = [];
+if (!ClienteAuth::temPermissaoMaster() && count($idsSetoresLogado ?? []) > 1) {
+    $placeholdersProprios = implode(',', array_fill(0, count($idsSetoresLogado), '?'));
+    $setoresProprios = $pdo->prepare("SELECT id, nome FROM setores WHERE id IN ($placeholdersProprios) ORDER BY nome ASC");
+    $setoresProprios->execute($idsSetoresLogado);
+    $setoresProprios = $setoresProprios->fetchAll();
+}
 
 // Painel de cards por setor -- só existe pro login com permissão de master
 // (quem já vê tudo) e só aparece se esse cliente tiver algum setor
@@ -123,16 +153,23 @@ if (ClienteAuth::temPermissaoMaster()) {
     if ($setoresPortal) {
         $idsSetoresPortal = array_column($setoresPortal, 'id');
         $placeholdersSetoresPortal = implode(',', array_fill(0, count($idsSetoresPortal), '?'));
-        $stmtRespPortal = $pdo->prepare("SELECT * FROM setor_responsaveis WHERE setor_id IN ($placeholdersSetoresPortal) ORDER BY nome ASC");
+        $stmtRespPortal = $pdo->prepare("
+            SELECT sr.*, srs.setor_id AS setor_id_membro
+            FROM setor_responsaveis sr
+            INNER JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+            WHERE srs.setor_id IN ($placeholdersSetoresPortal)
+            ORDER BY sr.nome ASC
+        ");
         $stmtRespPortal->execute($idsSetoresPortal);
         foreach ($stmtRespPortal->fetchAll() as $sr) {
-            $responsaveisPorSetorIdPortal[$sr['setor_id']][] = $sr;
+            $responsaveisPorSetorIdPortal[$sr['setor_id_membro']][] = $sr;
         }
-        $stmtClienteInfoPortal = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil, setor_id FROM clientes WHERE id = ?');
+        $stmtClienteInfoPortal = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil FROM clientes WHERE id = ?');
         $stmtClienteInfoPortal->execute([$clienteId]);
         $clienteInfoPortal = $stmtClienteInfoPortal->fetch();
+        $idsSetoresMasterPortal = setores_do_cliente_master($pdo, $clienteId);
         foreach ($setoresPortal as $s) {
-            if ((int) $clienteInfoPortal['setor_id'] === (int) $s['id']) {
+            if (in_array((int) $s['id'], $idsSetoresMasterPortal, true)) {
                 $responsaveisPorSetorIdPortal[$s['id']] ??= [];
                 array_unshift($responsaveisPorSetorIdPortal[$s['id']], [
                     'nome' => $clienteInfoPortal['contato_nome'] ?: $clienteInfoPortal['nome'],
@@ -326,6 +363,15 @@ require __DIR__ . '/../templates/portal_header.php';
                 <?php if ($setorPadraoMasterNovoChamado): ?>
                     <small class="text-muted">Já vem selecionado o seu setor padrão -- pode trocar pra abrir num outro setor, se for o caso.</small>
                 <?php endif; ?>
+            </div>
+            <?php elseif ($setoresProprios): ?>
+            <div class="mb-3"><label class="form-label">Setor *</label>
+                <select name="setor_id" class="form-select" required>
+                    <?php foreach ($setoresProprios as $s): ?>
+                        <option value="<?= $s['id'] ?>" <?= ClienteAuth::setorId() === (int) $s['id'] ? 'selected' : '' ?>><?= e($s['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">Você está em mais de um setor -- escolha em qual esse chamado se encaixa.</small>
             </div>
             <?php endif; ?>
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="4" required></textarea></div>

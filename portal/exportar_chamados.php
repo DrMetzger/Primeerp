@@ -52,8 +52,16 @@ if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
 // entre setores aplicada aqui. Login master (ou setor com permissão de
 // master) exporta de todos os setores de uma vez, sem esse filtro.
 if (!ClienteAuth::temPermissaoMaster()) {
-    $sql .= ' AND c.setor_id = ?';
-    $params[] = ClienteAuth::setorId();
+    // Uma pessoa pode estar em vários setores agora -- exporta de QUALQUER
+    // um deles, não só do "principal".
+    $idsSetoresLogadoExport = ClienteAuth::setorIds();
+    if ($idsSetoresLogadoExport) {
+        $sql .= ' AND c.setor_id IN (' . implode(',', array_fill(0, count($idsSetoresLogadoExport), '?')) . ')';
+        array_push($params, ...$idsSetoresLogadoExport);
+    } else {
+        $sql .= ' AND c.setor_id = ?';
+        $params[] = ClienteAuth::setorId();
+    }
 }
 $sql .= ' ORDER BY c.criado_em DESC';
 

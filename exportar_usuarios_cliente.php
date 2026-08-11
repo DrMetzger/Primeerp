@@ -25,13 +25,18 @@ if (!$cliente) {
     die('Cliente não encontrado.');
 }
 
-$usuarios = $pdo->prepare('
-    SELECT sr.nome, sr.email, sr.telefone, sr.documento, sr.portal_ativo, s.nome AS setor_nome
+// GROUP_CONCAT junta os nomes de TODOS os setores dessa pessoa (não só o
+// "principal") -- ela pode estar em mais de um agora.
+$usuarios = $pdo->prepare("
+    SELECT sr.nome, sr.email, sr.telefone, sr.documento, sr.portal_ativo,
+        GROUP_CONCAT(s.nome ORDER BY s.nome ASC SEPARATOR ', ') AS setores_nomes
     FROM setor_responsaveis sr
-    LEFT JOIN setores s ON s.id = sr.setor_id
+    LEFT JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+    LEFT JOIN setores s ON s.id = srs.setor_id
     WHERE sr.cliente_id = ?
+    GROUP BY sr.id
     ORDER BY sr.nome ASC
-');
+");
 $usuarios->execute([$clienteId]);
 $usuarios = $usuarios->fetchAll();
 
@@ -60,7 +65,7 @@ foreach ($usuarios as $u) {
         $u['email'],
         $u['telefone'] ? formatar_telefone($u['telefone']) : '',
         $u['documento'] ?? '',
-        $u['setor_nome'] ?? 'Sem setor',
+        $u['setores_nomes'] ?? 'Sem setor',
         $u['portal_ativo'] ? 'Ativo' : 'Sem acesso',
     ], ';', '"', '\\');
 }

@@ -158,6 +158,97 @@ function icone_setor_html(array $setor): string
 }
 
 /**
+ * Todos os setor_id que um responsável de setor pertence hoje (ver tabela
+ * setor_responsavel_setores em Migrations.php -- um responsável agora pode
+ * estar em vários setores ao mesmo tempo, não só um). Vazio = sem setor
+ * nenhum ainda.
+ */
+function setores_do_responsavel(\PDO $pdo, int $responsavelId): array
+{
+    $stmt = $pdo->prepare('SELECT setor_id FROM setor_responsavel_setores WHERE setor_responsavel_id = ? ORDER BY setor_id ASC');
+    $stmt->execute([$responsavelId]);
+    return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+}
+
+/** Mesma ideia de setores_do_responsavel(), só que pro contato MASTER do cliente. */
+function setores_do_cliente_master(\PDO $pdo, int $clienteId): array
+{
+    $stmt = $pdo->prepare('SELECT setor_id FROM cliente_setores WHERE cliente_id = ? ORDER BY setor_id ASC');
+    $stmt->execute([$clienteId]);
+    return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+}
+
+/**
+ * setor_responsaveis.setor_id continua existindo como "setor principal" --
+ * é o que o login, o bot do WhatsApp e o pré-preenchimento de "abrir
+ * chamado" leem (não precisaram mudar pra saber lidar com vários setores).
+ * Chame isso depois de QUALQUER alteração em setor_responsavel_setores pra
+ * manter esse valor em sincronia (o menor setor_id do conjunto atual, ou
+ * NULL se a pessoa não estiver em setor nenhum).
+ */
+function sincronizar_setor_principal_responsavel(\PDO $pdo, int $responsavelId): void
+{
+    $setores = setores_do_responsavel($pdo, $responsavelId);
+    $pdo->prepare('UPDATE setor_responsaveis SET setor_id = ? WHERE id = ?')->execute([$setores[0] ?? null, $responsavelId]);
+}
+
+/** Mesma ideia de sincronizar_setor_principal_responsavel(), pro contato MASTER. */
+function sincronizar_setor_principal_master(\PDO $pdo, int $clienteId): void
+{
+    $setores = setores_do_cliente_master($pdo, $clienteId);
+    $pdo->prepare('UPDATE clientes SET setor_id = ? WHERE id = ?')->execute([$setores[0] ?? null, $clienteId]);
+}
+
+/**
+ * Filtra uma lista bruta de setor_id (vinda de $_POST, ex.: setor_ids[])
+ * pra só os que realmente pertencem a esse cliente -- sem isso, alguém
+ * poderia forjar o id de um setor de OUTRO cliente no formulário e vincular
+ * uma pessoa a ele.
+ */
+function validar_setor_ids_do_cliente(\PDO $pdo, int $clienteId, array $setorIdsBrutos): array
+{
+    $setorIds = array_values(array_unique(array_map('intval', $setorIdsBrutos)));
+    if (!$setorIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($setorIds), '?'));
+    $stmt = $pdo->prepare("SELECT id FROM setores WHERE cliente_id = ? AND id IN ($placeholders)");
+    $stmt->execute([$clienteId, ...$setorIds]);
+    return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+}
+
+/**
+ * Substitui de uma vez TODOS os setores de um responsável pelo conjunto
+ * informado (usado pelo multi-select da aba Usuários -- manda a lista
+ * completa desejada a cada salvamento, não um delta). Retorna a lista já
+ * validada/aplicada.
+ */
+function substituir_setores_do_responsavel(\PDO $pdo, int $clienteId, int $responsavelId, array $setorIdsBrutos): array
+{
+    $setorIds = validar_setor_ids_do_cliente($pdo, $clienteId, $setorIdsBrutos);
+    $pdo->prepare('DELETE FROM setor_responsavel_setores WHERE setor_responsavel_id = ?')->execute([$responsavelId]);
+    $stmt = $pdo->prepare('INSERT INTO setor_responsavel_setores (setor_responsavel_id, setor_id) VALUES (?, ?)');
+    foreach ($setorIds as $setorId) {
+        $stmt->execute([$responsavelId, $setorId]);
+    }
+    sincronizar_setor_principal_responsavel($pdo, $responsavelId);
+    return $setorIds;
+}
+
+/** Mesma ideia de substituir_setores_do_responsavel(), pro contato MASTER. */
+function substituir_setores_do_cliente_master(\PDO $pdo, int $clienteId, array $setorIdsBrutos): array
+{
+    $setorIds = validar_setor_ids_do_cliente($pdo, $clienteId, $setorIdsBrutos);
+    $pdo->prepare('DELETE FROM cliente_setores WHERE cliente_id = ?')->execute([$clienteId]);
+    $stmt = $pdo->prepare('INSERT INTO cliente_setores (cliente_id, setor_id) VALUES (?, ?)');
+    foreach ($setorIds as $setorId) {
+        $stmt->execute([$clienteId, $setorId]);
+    }
+    sincronizar_setor_principal_master($pdo, $clienteId);
+    return $setorIds;
+}
+
+/**
  * Resolve o avatar "efetivo" de uma pessoa pelo E-MAIL -- pedido do Kleber
  * depois de cadastrar um responsável de setor com o mesmo e-mail do contato
  * master do cliente (a mesma pessoa, usando dois logins diferentes) e ver

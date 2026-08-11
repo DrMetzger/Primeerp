@@ -808,6 +808,41 @@ class Migrations
         self::vincularAutorRespostasAntigas($pdo);
         self::atribuirResponsavelPadrao($pdo);
         self::migrarSetorMasterAntigo($pdo);
+
+        // Um responsável (ou o próprio master) agora pode pertencer a VÁRIOS
+        // setores ao mesmo tempo -- pedido do Kleber: a Eliete/Ananda da SGT
+        // Forjados precisam acompanhar mais de um setor. setor_responsaveis.setor_id
+        // e clientes.setor_id continuam existindo como um "setor principal"
+        // (mantido em sincronia, ver sincronizarSetorPrincipalResponsavel() e
+        // sincronizarSetorPrincipalMaster() em helpers.php) -- é o que o login,
+        // o bot do WhatsApp e o pré-preenchimento de "abrir chamado" continuam
+        // lendo sem precisar de nenhuma mudança neles. Essas duas tabelas
+        // novas são a fonte de verdade de TODOS os setores de cada pessoa;
+        // quem precisa saber "quais setores essa pessoa vê" (visibilidade de
+        // chamado, notificação, cards de responsáveis) passa a consultar elas.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setor_responsavel_setores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setor_responsavel_id INT NOT NULL,
+                setor_id INT NOT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_setor_responsavel_setor (setor_responsavel_id, setor_id),
+                CONSTRAINT fk_srs_responsavel FOREIGN KEY (setor_responsavel_id) REFERENCES setor_responsaveis(id) ON DELETE CASCADE,
+                CONSTRAINT fk_srs_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_setores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                setor_id INT NOT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_cliente_setor (cliente_id, setor_id),
+                CONSTRAINT fk_cs_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_cs_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        self::migrarSetorUnicoParaMuitosParaMuitos($pdo);
     }
 
     /**
@@ -995,6 +1030,28 @@ class Migrations
         ");
 
         $pdo->exec('ALTER TABLE setores DROP COLUMN master_participa');
+    }
+
+    /**
+     * Backfill idempotente: joga o setor_id (único) que cada responsável e
+     * cada master já tinham pras tabelas novas de muitos-para-muitos
+     * (setor_responsavel_setores / cliente_setores), pra quem já estava
+     * relacionado a um setor não "perder" esse vínculo quando a tela de
+     * Usuários passar a somar mais setores em cima dele. INSERT ... ON
+     * DUPLICATE KEY UPDATE = no-op faz rodar em toda requisição sem duplicar.
+     */
+    private static function migrarSetorUnicoParaMuitosParaMuitos(PDO $pdo): void
+    {
+        $pdo->exec("
+            INSERT INTO setor_responsavel_setores (setor_responsavel_id, setor_id)
+            SELECT id, setor_id FROM setor_responsaveis WHERE setor_id IS NOT NULL
+            ON DUPLICATE KEY UPDATE setor_responsavel_id = setor_responsavel_id
+        ");
+        $pdo->exec("
+            INSERT INTO cliente_setores (cliente_id, setor_id)
+            SELECT id, setor_id FROM clientes WHERE setor_id IS NOT NULL
+            ON DUPLICATE KEY UPDATE cliente_id = cliente_id
+        ");
     }
 
     /**

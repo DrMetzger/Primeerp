@@ -62,12 +62,18 @@ if ($ehMaster) {
     $emailDaPessoa = $cliente['contato_email'] ?? '';
     $fotoDaPessoa = resolver_avatar_por_email($pdo, $emailDaPessoa, $cliente['foto_perfil'] ?? null);
 } else {
-    $stmtSetor = $pdo->prepare('SELECT sr.*, s.nome AS setor_nome FROM setor_responsaveis sr JOIN setores s ON s.id = sr.setor_id WHERE sr.id = ?');
+    $stmtSetor = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE id = ?');
     $stmtSetor->execute([$idAlvoFoto]);
     $setorResponsavel = $stmtSetor->fetch();
     $nomeDaPessoa = $setorResponsavel['nome'];
     $emailDaPessoa = $setorResponsavel['email'] ?? '';
     $fotoDaPessoa = resolver_avatar_por_email($pdo, $emailDaPessoa, $setorResponsavel['foto_perfil'] ?? null);
+
+    // Nome de TODOS os setores dessa pessoa (não só o "principal") --
+    // ela pode estar em mais de um agora.
+    $stmtNomesSetoresPessoa = $pdo->prepare('SELECT s.nome FROM setores s INNER JOIN setor_responsavel_setores srs ON srs.setor_id = s.id WHERE srs.setor_responsavel_id = ? ORDER BY s.nome ASC');
+    $stmtNomesSetoresPessoa->execute([$idAlvoFoto]);
+    $nomesSetoresPessoa = $stmtNomesSetoresPessoa->fetchAll(\PDO::FETCH_COLUMN);
 }
 
 $tituloPagina = 'Meu perfil';
@@ -81,7 +87,7 @@ require __DIR__ . '/../templates/portal_header.php';
         <div class="perfil-avatar d-inline-block"><?= avatar_html($nomeDaPessoa, $fotoDaPessoa, 'cliente') ?></div>
         <div class="mt-3">
             <h6 class="mb-0"><?= e($nomeDaPessoa) ?></h6>
-            <p class="text-muted small mb-0"><?= $ehMaster ? e($cliente['nome']) : e($setorResponsavel['setor_nome']) . ' · ' . e($cliente['nome']) ?> &middot; <?= e($emailDaPessoa) ?></p>
+            <p class="text-muted small mb-0"><?= $ehMaster ? e($cliente['nome']) : e($nomesSetoresPessoa ? implode(', ', $nomesSetoresPessoa) : 'Sem setor') . ' · ' . e($cliente['nome']) ?> &middot; <?= e($emailDaPessoa) ?></p>
         </div>
 
         <form method="post" enctype="multipart/form-data" class="mt-4 mx-auto" style="max-width: 360px;">

@@ -55,7 +55,14 @@ class Notificacoes
 
         $abertoPorSetorResponsavelId = (int) ($chamado['aberto_por_setor_responsavel_id'] ?? 0);
 
-        $stmtMembros = $pdo->prepare('SELECT * FROM setor_responsaveis WHERE setor_id = ?');
+        // JOIN com setor_responsavel_setores (não mais setor_id direto) --
+        // uma pessoa pode estar em vários setores agora, e precisa ser
+        // avisada de chamado novo em QUALQUER um deles, não só no "principal".
+        $stmtMembros = $pdo->prepare('
+            SELECT sr.* FROM setor_responsaveis sr
+            INNER JOIN setor_responsavel_setores srs ON srs.setor_responsavel_id = sr.id
+            WHERE srs.setor_id = ?
+        ');
         $stmtMembros->execute([$setorId]);
         foreach ($stmtMembros->fetchAll() as $membro) {
             if ($abertoPorSetorResponsavelId && (int) $membro['id'] === $abertoPorSetorResponsavelId) {
@@ -64,7 +71,7 @@ class Notificacoes
             self::chamadoAtribuidoSetor($chamado, $membro, $nomeSetor);
         }
 
-        $ehSetorPadraoMaster = (int) $cliente['setor_id'] === $setorId;
+        $ehSetorPadraoMaster = in_array($setorId, setores_do_cliente_master($pdo, (int) $cliente['id']), true);
         $abertoPeloMaster = ($chamado['aberto_por_tipo'] ?? '') === 'master';
         if ($ehSetorPadraoMaster && !$abertoPeloMaster) {
             self::chamadoAtribuidoSetor($chamado, [
