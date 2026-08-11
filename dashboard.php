@@ -664,6 +664,24 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // --- Tempo médio de atendimento por mês (linha, em horas) ---
+    // O dado vem em horas com 1 casa decimal (ver $tempoMedioPorMes), mas
+    // mostrar cru vira "1390,8h" quando um mês teve algum chamado que ficou
+    // muito tempo aberto -- ilegível e sem separador de milhar. Formata
+    // igual ao formatar_duracao_minutos() do PHP (dias/horas/min), a mesma
+    // linguagem usada no resto do sistema pra duração.
+    function formatarDuracaoPorHoras(horasComDecimal) {
+        var minutos = Math.round(horasComDecimal * 60);
+        if (minutos < 60) return minutos + ' min';
+        var horas = Math.floor(minutos / 60);
+        if (horas < 24) {
+            var restoMin = minutos % 60;
+            return horas + 'h' + (restoMin > 0 ? ' ' + restoMin + 'min' : '');
+        }
+        var dias = Math.floor(horas / 24);
+        var restoHoras = horas % 24;
+        return dias + ' dia' + (dias > 1 ? 's' : '') + (restoHoras > 0 ? ' e ' + restoHoras + 'h' : '');
+    }
+
     var elTempoMedio = document.getElementById('graficoTempoMedio');
     if (elTempoMedio) {
         new Chart(elTempoMedio, {
@@ -671,7 +689,7 @@ document.addEventListener('DOMContentLoaded', function () {
             data: {
                 labels: <?= json_encode($mesesLabels, JSON_UNESCAPED_UNICODE) ?>,
                 datasets: [{
-                    label: 'Tempo médio (horas)',
+                    label: 'Tempo médio',
                     data: <?= json_encode(array_values($tempoMedioPorMes)) ?>,
                     borderColor: corTempoMedio, backgroundColor: corTempoMedio + '1a',
                     borderWidth: 2, pointRadius: 4, pointBackgroundColor: corTempoMedio,
@@ -682,10 +700,22 @@ document.addEventListener('DOMContentLoaded', function () {
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function (contexto) {
+                                return 'Tempo médio: ' + formatarDuracaoPorHoras(contexto.parsed.y);
+                            }
+                        }
+                    }
+                },
                 scales: {
                     x: { grid: { display: false } },
-                    y: { beginAtZero: true, grid: { color: corGrid }, ticks: { callback: function (v) { return v + 'h'; } } }
+                    y: {
+                        beginAtZero: true, grid: { color: corGrid },
+                        ticks: { callback: function (v) { return v.toLocaleString('pt-BR') + 'h'; } }
+                    }
                 }
             }
         });
