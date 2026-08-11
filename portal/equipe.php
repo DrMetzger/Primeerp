@@ -272,7 +272,7 @@ require __DIR__ . '/../templates/portal_header.php';
                         <input type="checkbox" name="ativo" id="setorAtivo<?= $s['id'] ?>" class="form-check-input" value="1" <?= $s['ativo'] ? 'checked' : '' ?>>
                         <label class="form-check-label" for="setorAtivo<?= $s['id'] ?>">Ativo</label>
                     </div>
-                    <div class="col-md-4 d-flex justify-content-end"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar</button></div>
+                    <div class="col-md-4"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar</button></div>
                 </form>
                 <div class="seletor-icone-setor mt-2" data-campo-destino="setorIconePortal<?= $s['id'] ?>">
                     <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
