@@ -759,6 +759,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Salva o texto da sugestão como está na textarea (inclui qualquer edição
+    // manual feita depois de gerada) -- sem isso, editar o texto e não fazer
+    // mais nada faz a edição se perder no próximo reload (a textarea nunca
+    // tinha sido persistida, só vivia no navegador). Vira uma nova entrada no
+    // histórico (mesma tabela/uso de "gerar_sugestao_implantacao"), então
+    // aparece como a versão mais recente. OBS: isso não altera as seções por
+    // documento (implantacao_sugestoes_ia_secoes) -- gerar de novo a partir
+    // de algum documento ainda reconstrói o texto a partir delas, então uma
+    // edição manual livre pode ser sobrescrita por uma geração futura.
+    if ($acao === 'salvar_edicao_sugestao_implantacao') {
+        $tipoSalvarEdicaoImplantacaoIa = $_POST['tipo'] ?? '';
+        $textoSalvarEdicaoImplantacaoIa = trim($_POST['texto'] ?? '');
+        $tiposValidosImplantacaoIa = ['treinamento', 'teste', 'boas_praticas', 'migracao_dados', 'comunicacao', 'riscos', 'go_live'];
+
+        if (!in_array($tipoSalvarEdicaoImplantacaoIa, $tiposValidosImplantacaoIa, true)) {
+            flash_set('erro', 'Tipo de sugestão inválido.');
+        } elseif ($textoSalvarEdicaoImplantacaoIa === '') {
+            flash_set('erro', 'Não tem texto pra salvar.');
+        } else {
+            $pdo->prepare('INSERT INTO implantacao_sugestoes_ia (cliente_id, tipo, sugestao, criado_por) VALUES (?, ?, ?, ?)')
+                ->execute([$clienteId, $tipoSalvarEdicaoImplantacaoIa, $textoSalvarEdicaoImplantacaoIa, Auth::userId()]);
+            flash_set('sucesso', 'Alterações salvas.');
+        }
+    }
+
     if ($acao === 'enviar_convite_portal') {
         if (!$cliente['contato_email']) {
             flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
@@ -2109,7 +2134,8 @@ require __DIR__ . '/templates/header.php';
                             <p class="text-muted small mb-1">Gerado em <?= formatar_data($sugestaoExistente['criado_em']) ?></p>
                             <textarea class="form-control form-control-sm textarea-sugestao-implantacao mb-2" rows="8"><?= e($sugestaoExistente['sugestao']) ?></textarea>
                             <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-implantacao" data-tipo="<?= $tipoSugestao ?>" data-label="<?= e($labelSugestao) ?>"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>
-                            <form method="post" class="d-inline form-limpar-sugestao-implantacao" onsubmit="return confirm('Apagar tudo que já foi gerado pra &quot;<?= e($labelSugestao) ?>&quot;? Não tem como desfazer -- vai precisar gerar de novo do zero.');">
+                            <button type="button" class="btn btn-sm btn-outline-primary botao-salvar-edicao-implantacao" data-tipo="<?= $tipoSugestao ?>"><i class="bi bi-save"></i> Salvar alterações</button>
+                            <form method="post" class="d-inline form-limpar-sugestao-implantacao" data-label="<?= e($labelSugestao) ?>">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="acao" value="limpar_sugestao_implantacao">
                                 <input type="hidden" name="aba_retorno" value="implantacao">
@@ -3736,9 +3762,23 @@ document.addEventListener('DOMContentLoaded', function () {
     function renderizarResultadoSugestaoImplantacao(tipo, label, json) {
         var alvo = document.getElementById('resultadoSugestaoImplantacao' + tipo);
         if (!alvo) return;
+        // Mesmos botões (Exportar PDF, Salvar alterações, Limpar) do
+        // template PHP inicial -- precisa ficar em sincronia com aquele
+        // bloco (ver <?= $tipoSugestao ?> na aba Implantação), senão eles
+        // somem depois da primeira geração via AJAX (bug real: só o Exportar
+        // PDF tinha sido replicado aqui, Limpar e Salvar sumiam da tela
+        // assim que a sugestão terminava de gerar).
         alvo.innerHTML = '<p class="text-muted small mb-1">Gerado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
             + '<textarea class="form-control form-control-sm textarea-sugestao-implantacao mb-2" rows="8">' + escaparHtmlCalendario(json.sugestao) + '</textarea>'
-            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-implantacao" data-tipo="' + tipo + '" data-label="' + escaparHtmlCalendario(label) + '"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>';
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-implantacao" data-tipo="' + tipo + '" data-label="' + escaparHtmlCalendario(label) + '"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>'
+            + '<button type="button" class="btn btn-sm btn-outline-primary botao-salvar-edicao-implantacao" data-tipo="' + tipo + '"><i class="bi bi-save"></i> Salvar alterações</button>'
+            + '<form method="post" class="d-inline form-limpar-sugestao-implantacao" data-label="' + escaparHtmlCalendario(label) + '">'
+                + '<?= csrf_field() ?>'
+                + '<input type="hidden" name="acao" value="limpar_sugestao_implantacao">'
+                + '<input type="hidden" name="aba_retorno" value="implantacao">'
+                + '<input type="hidden" name="tipo" value="' + tipo + '">'
+                + '<button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3"></i> Limpar</button>'
+            + '</form>';
     }
 
     // Manda UM documento por chamada ao Gemini (não mais todos juntos numa
@@ -3894,6 +3934,44 @@ document.addEventListener('DOMContentLoaded', function () {
         document.body.appendChild(formTemp);
         formTemp.submit();
         formTemp.remove();
+    });
+
+    // "Salvar alterações" -- persiste o texto da textarea (com qualquer
+    // edição manual) como a versão mais atual, senão editar o texto e só
+    // sair da página faz a edição se perder (a textarea nunca era salva por
+    // conta própria). Mesmo truque de form temporário do Exportar PDF, só
+    // que sem target="_blank" -- é pra voltar pra mesma tela com o flash de
+    // sucesso, não abrir uma aba nova.
+    document.addEventListener('click', function (e) {
+        var botao = e.target.closest('.botao-salvar-edicao-implantacao');
+        if (!botao) return;
+        var tipo = botao.getAttribute('data-tipo');
+        var textarea = document.querySelector('#resultadoSugestaoImplantacao' + tipo + ' .textarea-sugestao-implantacao');
+        if (!textarea) return;
+
+        var formTemp = document.createElement('form');
+        formTemp.method = 'post';
+        formTemp.action = window.location.href;
+        formTemp.innerHTML = '<?= csrf_field() ?>'
+            + '<input type="hidden" name="acao" value="salvar_edicao_sugestao_implantacao">'
+            + '<input type="hidden" name="aba_retorno" value="implantacao">'
+            + '<input type="hidden" name="tipo" value="' + tipo + '">'
+            + '<input type="hidden" name="texto">';
+        formTemp.querySelector('[name="texto"]').value = textarea.value;
+        document.body.appendChild(formTemp);
+        formTemp.submit();
+    });
+
+    // Confirmação do "Limpar" -- delegado no document porque o form também é
+    // criado dinamicamente depois de gerar uma sugestão (ver
+    // renderizarResultadoSugestaoImplantacao() acima).
+    document.addEventListener('submit', function (e) {
+        var form = e.target.closest('.form-limpar-sugestao-implantacao');
+        if (!form) return;
+        var label = form.getAttribute('data-label') || 'essa sugestão';
+        if (!confirm('Apagar tudo que já foi gerado pra "' + label + '"? Não tem como desfazer -- vai precisar gerar de novo do zero.')) {
+            e.preventDefault();
+        }
     });
 
     document.querySelectorAll('.form-pesquisar-perfil-empresa').forEach(function (form) {
