@@ -83,6 +83,8 @@ body > footer {
     color: #e0e7ff;
     margin-top: 2rem;
 }
+.rodape-gradiente .rodape-link { color: #fff; font-weight: 500; }
+.rodape-gradiente .rodape-link:hover { color: #fff; text-decoration: underline; }
 
 a { color: var(--ph-primary); text-decoration: none; }
 a:hover { color: var(--ph-primary-dark); text-decoration: underline; }

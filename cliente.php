@@ -1971,8 +1971,8 @@ require __DIR__ . '/templates/header.php';
                         </select>
                     </div>
                     <div class="col-md-2"><input type="date" name="data_prevista" class="form-control form-control-sm" value="<?= e($etapa['data_prevista']) ?>" title="Data prevista"></div>
-                    <div class="col-md-3 d-flex gap-1">
-                        <button type="submit" class="btn btn-sm btn-outline-dark flex-grow-1"><i class="bi bi-check2"></i> Salvar</button>
+                    <div class="col-md-3 d-flex justify-content-end gap-1">
+                        <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar</button>
                     </div>
                     <div class="col-12"><textarea name="descricao" class="form-control form-control-sm" rows="1" placeholder="Descrição (opcional)"><?= e($etapa['descricao']) ?></textarea></div>
                 </form>
@@ -2478,7 +2478,7 @@ require __DIR__ . '/templates/header.php';
                                 <input type="checkbox" name="ativo" id="setorAtivo<?= $idSetorAtual ?>" class="form-check-input" value="1" <?= $s['ativo'] ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="setorAtivo<?= $idSetorAtual ?>">Ativo</label>
                             </div>
-                            <div class="col-md-3"><button type="submit" class="btn btn-sm btn-outline-dark w-100"><i class="bi bi-check2"></i> Salvar</button></div>
+                            <div class="col-md-3 d-flex justify-content-end"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-check2"></i> Salvar</button></div>
                         </form>
                         <div class="seletor-icone-setor mb-3" data-campo-destino="setorIcone<?= $idSetorAtual ?>">
                             <?php foreach (ICONES_SETOR_DISPONIVEIS as $ic): ?>
