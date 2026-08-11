@@ -516,24 +516,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($acao === 'upload_documento_implantacao' && isset($_FILES['arquivo'])) {
-        $erroUploadImplantacao = null;
+    if ($acao === 'upload_documento_implantacao' && !empty($_FILES['arquivos']['name'][0])) {
         $etapaIdAnexo = $_POST['etapa_id'] !== '' ? (int) $_POST['etapa_id'] : null;
-        $idDocImplantacao = salvar_documento_upload(
-            $pdo,
-            $clienteId,
-            null,
-            trim($_POST['titulo'] ?? ''),
-            null,
-            'Implantação',
-            $_FILES['arquivo'],
-            Auth::userId(),
-            $erroUploadImplantacao
-        );
-        if ($idDocImplantacao) {
-            $pdo->prepare('UPDATE documentos SET implantacao_etapa_id = ? WHERE id = ?')->execute([$etapaIdAnexo, $idDocImplantacao]);
-        }
-        flash_set($idDocImplantacao ? 'sucesso' : 'erro', $idDocImplantacao ? 'Anexo enviado.' : $erroUploadImplantacao);
+        $errosUploadImplantacao = salvar_documentos_implantacao($pdo, $clienteId, $etapaIdAnexo, $_FILES['arquivos'], Auth::userId());
+        flash_set($errosUploadImplantacao ? 'erro' : 'sucesso', $errosUploadImplantacao ? implode(' ', $errosUploadImplantacao) : 'Anexo(s) enviado(s).');
     }
 
     // IA: várias sugestões diferentes pro processo de implantação (não só
@@ -2018,7 +2004,7 @@ require __DIR__ . '/templates/header.php';
                         <input type="hidden" name="acao" value="upload_documento_implantacao">
                         <input type="hidden" name="aba_retorno" value="implantacao">
                         <input type="hidden" name="etapa_id" value="<?= $idEtapaAtual ?>">
-                        <input type="file" name="arquivo" class="form-control form-control-sm" required style="max-width:220px;">
+                        <input type="file" name="arquivos[]" class="form-control form-control-sm" multiple required style="max-width:260px;">
                         <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Anexar</button>
                     </form>
                 </div>
@@ -2038,7 +2024,7 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="acao" value="upload_documento_implantacao">
                     <input type="hidden" name="aba_retorno" value="implantacao">
                     <input type="hidden" name="etapa_id" value="">
-                    <input type="file" name="arquivo" class="form-control form-control-sm" required style="max-width:260px;">
+                    <input type="file" name="arquivos[]" class="form-control form-control-sm" multiple required style="max-width:300px;">
                     <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> Anexar</button>
                 </form>
             </div>

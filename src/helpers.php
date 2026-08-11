@@ -683,6 +683,49 @@ function salvar_documento_upload(\PDO $pdo, int $clienteId, ?int $setorId, strin
 }
 
 /**
+ * Mesma ideia de salvar_documento_upload(), mas pra VÁRIOS arquivos de uma
+ * vez (categoria fixa "Implantação") -- usado tanto pela equipe em
+ * cliente.php quanto pelo próprio cliente no portal (portal/implantacao.php).
+ * Antes só dava pra anexar um arquivo por vez nos anexos gerais e por etapa,
+ * o que obrigava repetir o formulário várias vezes pra um lote de
+ * documentos (pedido do Kleber). Espera o formato multi-arquivo do PHP
+ * ($_FILES['arquivos'] com name[]/tmp_name[]/etc, ver <input multiple>).
+ * Retorna um array de mensagens de erro (vazio = tudo certo).
+ */
+function salvar_documentos_implantacao(\PDO $pdo, int $clienteId, ?int $etapaId, array $arquivosFiles, ?int $criadoPor): array
+{
+    $erros = [];
+    $quantidade = count($arquivosFiles['name'] ?? []);
+
+    for ($i = 0; $i < $quantidade; $i++) {
+        if ($arquivosFiles['error'][$i] === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+
+        $arquivoUnico = [
+            'name' => $arquivosFiles['name'][$i],
+            'type' => $arquivosFiles['type'][$i],
+            'tmp_name' => $arquivosFiles['tmp_name'][$i],
+            'error' => $arquivosFiles['error'][$i],
+            'size' => $arquivosFiles['size'][$i],
+        ];
+
+        $erroUnico = null;
+        $idDoc = salvar_documento_upload($pdo, $clienteId, null, $arquivoUnico['name'], null, 'Implantação', $arquivoUnico, $criadoPor, $erroUnico);
+
+        if ($idDoc && $etapaId) {
+            $pdo->prepare('UPDATE documentos SET implantacao_etapa_id = ? WHERE id = ?')->execute([$etapaId, $idDoc]);
+        }
+
+        if (!$idDoc) {
+            $erros[] = $erroUnico ?: ('Não foi possível enviar "' . $arquivoUnico['name'] . '".');
+        }
+    }
+
+    return $erros;
+}
+
+/**
  * Formata telefone brasileiro pra exibição/preenchimento inicial de campo
  * (a máscara ENQUANTO a pessoa digita é feita em JS, ver assets/js/app.js
  * -- essa função aqui é só pra quando o valor já vem do banco sem máscara,
