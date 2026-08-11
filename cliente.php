@@ -836,7 +836,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['responsavel_id'] ?: null,
                     $_POST['setor_id'] ?: null,
                 ]);
-                flash_set('sucesso', 'Chamado registrado.');
+                // resposta_id = null -- anexo entra vinculado à mensagem de
+                // abertura (ver comentário "resposta_id NULL = anexo da
+                // mensagem de abertura" mais abaixo, onde os anexos são
+                // agrupados pra exibição).
+                $errosAnexoNovoChamado = processar_anexos_chamado($pdo, (int) $pdo->lastInsertId(), null, 'equipe');
+                flash_set($errosAnexoNovoChamado ? 'erro' : 'sucesso', $errosAnexoNovoChamado ? 'Chamado registrado, mas houve problema com anexo(s): ' . implode(' ', $errosAnexoNovoChamado) : 'Chamado registrado.');
             }
         }
     }
@@ -2971,7 +2976,7 @@ require __DIR__ . '/templates/header.php';
 <div class="modal fade" id="modalNovoChamado" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form method="post">
+      <form method="post" enctype="multipart/form-data">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" value="criar_chamado_equipe">
         <input type="hidden" name="aba_retorno" value="chamados">
@@ -3012,6 +3017,17 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <?php endif; ?>
             </div>
+            <div class="anexos-stager mt-3" data-max-arquivos="<?= ANEXO_CHAMADO_MAX_QUANTIDADE ?>" data-max-tamanho-bytes="<?= ANEXO_CHAMADO_MAX_SIZE ?>">
+                <input type="file" name="anexos[]" class="anexos-stager-input" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+                <div class="anexos-stager-controles">
+                    <button type="button" class="btn btn-outline-dark btn-sm anexos-stager-escolher"><i class="bi bi-paperclip"></i> Escolher anexos</button>
+                    <button type="button" class="btn btn-dark btn-sm anexos-stager-enviar" disabled><i class="bi bi-plus-lg"></i> Enviar anexos</button>
+                    <span class="anexos-stager-pendente text-muted"></span>
+                </div>
+                <div class="anexos-stager-erro alert alert-danger d-none"></div>
+                <ul class="anexos-stager-lista list-unstyled"></ul>
+            </div>
+            <p class="anexos-upload-preview">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP). Também pode colar (Ctrl+V) um print direto aqui.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
