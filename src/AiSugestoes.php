@@ -26,12 +26,21 @@ class AiSugestoes
     // ele ainda existindo de fato pra chave antiga -- a aposentadoria é por
     // PROJETO, não global, o que faz um número fixo virar bomba-relógio).
     // "-latest" sempre aponta pro modelo estável mais atual daquela
-    // categoria (hoje resolve pra "gemini-3.6-flash"/"gemini-3.5-flash-lite"
-    // por baixo, sem precisar trocar o código de novo quando o Google lançar
-    // a próxima geração). Lite como reserva: mais rápido/leve, ainda
-    // gratuito, não é outro preview.
-    private const MODELO = 'gemini-flash-latest';
-    private const MODELO_RESERVA = 'gemini-flash-lite-latest';
+    // categoria, sem precisar trocar código de novo quando o Google lançar a
+    // próxima geração.
+    //
+    // "flash-lite" como PRINCIPAL (não o "flash" cheio) -- testado na prática
+    // com o PDF real que travou em produção: "flash" cheio usa "thinking"
+    // (raciocínio estendido) por padrão nesses modelos mais novos e levou
+    // 12-38s por chamada (às vezes 503 de tanta demanda, sendo um modelo mais
+    // "na moda"), o que é tempo suficiente pra bater no limite de timeout do
+    // proxy da hospedagem e devolver resposta cortada pro navegador antes do
+    // PHP terminar. "flash-lite" respondeu em 4-5s consistentemente, LENDO
+    // o PDF de verdade (citou item/página específicos do documento, não
+    // genérico) -- mais rápido E mais confiável pra essa tarefa. "flash"
+    // cheio fica como reserva, pra quando o lite falhar de verdade.
+    private const MODELO = 'gemini-flash-lite-latest';
+    private const MODELO_RESERVA = 'gemini-flash-latest';
     // Pouco tempo de espera/tentativa de propósito -- isso tudo roda dentro
     // de uma requisição HTTP síncrona (cliente.php aguardando), e hospedagem
     // compartilhada normalmente mata o PHP em 30-60s. Errar pra menos aqui
