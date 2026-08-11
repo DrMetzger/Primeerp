@@ -741,6 +741,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // Apaga TODO o conteúdo já gerado (todas as seções por documento + todo
+    // o histórico) pra esse tipo de sugestão, pra poder recomeçar do zero --
+    // pedido do Kleber pra quando o roteiro acumulado ficar bagunçado.
+    if ($acao === 'limpar_sugestao_implantacao') {
+        $tipoLimparImplantacaoIa = $_POST['tipo'] ?? '';
+        $tiposValidosImplantacaoIa = ['treinamento', 'teste', 'boas_praticas', 'migracao_dados', 'comunicacao', 'riscos', 'go_live'];
+
+        if (!in_array($tipoLimparImplantacaoIa, $tiposValidosImplantacaoIa, true)) {
+            flash_set('erro', 'Tipo de sugestão inválido.');
+        } else {
+            $pdo->prepare('DELETE FROM implantacao_sugestoes_ia_secoes WHERE cliente_id = ? AND tipo = ?')
+                ->execute([$clienteId, $tipoLimparImplantacaoIa]);
+            $pdo->prepare('DELETE FROM implantacao_sugestoes_ia WHERE cliente_id = ? AND tipo = ?')
+                ->execute([$clienteId, $tipoLimparImplantacaoIa]);
+            flash_set('sucesso', 'Sugestão limpa. Pode gerar de novo do zero.');
+        }
+    }
+
     if ($acao === 'enviar_convite_portal') {
         if (!$cliente['contato_email']) {
             flash_set('erro', 'Cadastre um e-mail de contato para o cliente antes de enviar o convite.');
@@ -2086,6 +2104,13 @@ require __DIR__ . '/templates/header.php';
                             <p class="text-muted small mb-1">Gerado em <?= formatar_data($sugestaoExistente['criado_em']) ?></p>
                             <textarea class="form-control form-control-sm textarea-sugestao-implantacao mb-2" rows="8"><?= e($sugestaoExistente['sugestao']) ?></textarea>
                             <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-implantacao" data-tipo="<?= $tipoSugestao ?>" data-label="<?= e($labelSugestao) ?>"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>
+                            <form method="post" class="d-inline form-limpar-sugestao-implantacao" onsubmit="return confirm('Apagar tudo que já foi gerado pra &quot;<?= e($labelSugestao) ?>&quot;? Não tem como desfazer -- vai precisar gerar de novo do zero.');">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="limpar_sugestao_implantacao">
+                                <input type="hidden" name="aba_retorno" value="implantacao">
+                                <input type="hidden" name="tipo" value="<?= $tipoSugestao ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3"></i> Limpar</button>
+                            </form>
                         <?php endif; ?>
                         </div>
                     </div>
