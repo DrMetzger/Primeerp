@@ -324,6 +324,30 @@
             });
         }
 
+        // Valida e efetiva a entrada de um lote de arquivos na lista de
+        // verdade -- usado tanto pelo botão "Enviar anexos" (arquivos
+        // escolhidos pelo seletor nativo) quanto por colar uma imagem da
+        // área de transferência (ver listener de "paste" abaixo), que não
+        // passa pelo <input type="file"> nenhum.
+        function tentarAdicionar(novosArquivos) {
+            var combinados = arquivosNaLista.concat(novosArquivos);
+            if (combinados.length > maxArquivos) {
+                mostrarErro('Envie no máximo ' + maxArquivos + ' arquivos por vez.');
+                return;
+            }
+
+            var grandeDemais = combinados.find(function (f) { return f.size > maxTamanho; });
+            if (grandeDemais) {
+                mostrarErro('"' + grandeDemais.name + '" passa do limite de ' + Math.round(maxTamanho / 1024 / 1024) + 'MB por arquivo.');
+                return;
+            }
+
+            limparErro();
+            arquivosNaLista = combinados;
+            renderizarLista();
+            sincronizarInput();
+        }
+
         widget.addEventListener('click', function (e) {
             if (e.target.closest('.anexos-stager-escolher')) {
                 input.click();
@@ -340,26 +364,8 @@
 
             if (e.target.closest('.anexos-stager-enviar')) {
                 if (!pendentes.length) return;
-
-                var combinados = arquivosNaLista.concat(pendentes);
-                if (combinados.length > maxArquivos) {
-                    mostrarErro('Envie no máximo ' + maxArquivos + ' arquivos por vez.');
-                    limparPendentes();
-                    return;
-                }
-
-                var grandeDemais = combinados.find(function (f) { return f.size > maxTamanho; });
-                if (grandeDemais) {
-                    mostrarErro('"' + grandeDemais.name + '" passa do limite de ' + Math.round(maxTamanho / 1024 / 1024) + 'MB por arquivo.');
-                    limparPendentes();
-                    return;
-                }
-
-                limparErro();
-                arquivosNaLista = combinados;
+                tentarAdicionar(pendentes);
                 limparPendentes();
-                renderizarLista();
-                sincronizarInput();
             }
         });
 
@@ -375,6 +381,51 @@
                 ? pendentes.length + ' arquivo(s) selecionado(s) -- clique em "Enviar anexos"'
                 : '';
         });
+
+        // Colar imagem da área de transferência (Ctrl+V/Cmd+V) direto na
+        // resposta do chamado -- pedido do Kleber: print de tela é o anexo
+        // mais comum num chamado de suporte, e ficar salvando arquivo pra
+        // depois escolher no seletor toda vez era o passo mais chato do
+        // fluxo. Adiciona direto na lista (sem passar pelo botão "Enviar
+        // anexos", que só existe pro fluxo de escolher arquivo no disco).
+        // Ouve no FORM inteiro (não só no widget) porque o cursor costuma
+        // estar no campo de mensagem, não dentro do widget de anexo, na
+        // hora de colar.
+        var formDoWidget = widget.closest('form');
+        if (formDoWidget) {
+            formDoWidget.addEventListener('paste', function (e) {
+                var itens = (e.clipboardData || window.clipboardData || {}).items;
+                if (!itens) return;
+
+                var imagens = [];
+                for (var i = 0; i < itens.length; i++) {
+                    if (itens[i].kind === 'file' && itens[i].type.indexOf('image/') === 0) {
+                        var arquivo = itens[i].getAsFile();
+                        if (arquivo) imagens.push(arquivo);
+                    }
+                }
+                if (!imagens.length) return;
+
+                // Cola de verdade num campo de texto normal continua
+                // funcionando (não existe imagem pra colar como texto) --
+                // só evita o comportamento padrão do navegador de tentar
+                // colar a imagem como conteúdo do campo (alguns navegadores
+                // fazem isso em campo contenteditable, não em <textarea>,
+                // mas não custa garantir).
+                e.preventDefault();
+
+                // Nome genérico do clipboard (ex. "image.png") não diz nada
+                // -- carimba com data/hora pra dar pra diferenciar duas
+                // capturas de tela coladas na mesma resposta.
+                imagens = imagens.map(function (img, indice) {
+                    var extensao = (img.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+                    var nomeArquivo = 'print-colado-' + Date.now() + (indice ? '-' + indice : '') + '.' + extensao;
+                    return new File([img], nomeArquivo, { type: img.type });
+                });
+
+                tentarAdicionar(imagens);
+            });
+        }
     }
 
     document.querySelectorAll('.anexos-stager').forEach(inicializarAnexoStager);
