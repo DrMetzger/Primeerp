@@ -12,3 +12,19 @@ RedirectMatch 404 /\.git
 </FilesMatch>
 
 Options -Indexes
+
+# Limites de upload de arquivo -- sem isso o PRÓPRIO PHP corta o arquivo
+# bem antes de chegar nas validações de UPLOADS_MAX_SIZE/ANEXO_CHAMADO_MAX_SIZE
+# de config/config.php (500MB), com um erro genérico feio pro cliente ver.
+# post_max_size fica acima de upload_max_filesize (o POST inteiro inclui o
+# arquivo + os outros campos do formulário). Duplicado em .user.ini (Hostinger
+# roda PHP via LiteSpeed/lsphp, que lê .user.ini -- não mod_php) só pra
+# garantir que pelo menos um dos dois mecanismos funcione, sem quebrar o site
+# se o outro não for suportado (por isso o <IfModule>, que vira um no-op).
+<IfModule mod_php.c>
+    php_value upload_max_filesize 500M
+    php_value post_max_size 520M
+    php_value memory_limit 1024M
+    php_value max_execution_time 300
+    php_value max_input_time 300
+</IfModule>

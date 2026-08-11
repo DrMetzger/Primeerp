@@ -37,4 +37,18 @@ class Database
 
         return self::$instance;
     }
+
+    /**
+     * Descarta a conexão atual e abre uma nova -- usado depois de um erro que
+     * mata a conexão no meio (ex.: INSERT de anexo grande passando do
+     * max_allowed_packet do MySQL, que faz o servidor fechar a conexão --
+     * "MySQL server has gone away"). Sem isso, qualquer tentativa de usar o
+     * mesmo $pdo depois desse erro falha de novo, mesmo numa query pequena.
+     */
+    public static function reconnect(): PDO
+    {
+        self::$instance = null;
+
+        return self::connection();
+    }
 }

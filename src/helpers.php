@@ -731,14 +731,14 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
  * documento criado, ou null se o upload falhar (erro fica em $erro, por
  * referência, pra quem chamou decidir a mensagem de flash).
  */
-function salvar_documento_upload(\PDO $pdo, int $clienteId, ?int $setorId, string $titulo, ?string $descricao, ?string $categoria, array $arquivo, ?int $criadoPor, ?string &$erro = null): ?int
+function salvar_documento_upload(\PDO &$pdo, int $clienteId, ?int $setorId, string $titulo, ?string $descricao, ?string $categoria, array $arquivo, ?int $criadoPor, ?string &$erro = null): ?int
 {
     if ($arquivo['error'] !== UPLOAD_ERR_OK) {
         $erro = 'Falha no upload do arquivo.';
         return null;
     }
     if ($arquivo['size'] > UPLOADS_MAX_SIZE) {
-        $erro = 'Arquivo maior que o limite permitido (15MB).';
+        $erro = 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).';
         return null;
     }
 
@@ -756,19 +756,43 @@ function salvar_documento_upload(\PDO $pdo, int $clienteId, ?int $setorId, strin
     }
 
     // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().
-    $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([
-        $clienteId,
-        $setorId,
-        $titulo ?: $arquivo['name'],
-        $descricao,
-        $categoria,
-        $arquivo['name'],
-        'clientes/' . $clienteId . '/' . $nomeArmazenado,
-        $arquivo['size'],
-        $criadoPor,
-        file_get_contents($destino),
-    ]);
+    // Arquivo grande (até 500MB) pode passar do max_allowed_packet configurado
+    // no MySQL da hospedagem (fora do nosso controle) -- se acontecer, o
+    // arquivo já está salvo em disco (linha acima), então não trava a
+    // requisição por causa só do backup: grava sem o backup e loga o motivo.
+    try {
+        $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por, dados) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([
+            $clienteId,
+            $setorId,
+            $titulo ?: $arquivo['name'],
+            $descricao,
+            $categoria,
+            $arquivo['name'],
+            'clientes/' . $clienteId . '/' . $nomeArmazenado,
+            $arquivo['size'],
+            $criadoPor,
+            file_get_contents($destino),
+        ]);
+    } catch (\Throwable $e) {
+        error_log('salvar_documento_upload: falha ao gravar backup do arquivo no banco (' . $e->getMessage() . ')');
+        // Erro de max_allowed_packet derruba a conexão ("MySQL server has
+        // gone away") -- reconecta antes de tentar de novo, senão a query
+        // abaixo falha igual mesmo sem o BLOB.
+        $pdo = \AdminPrime\Database::reconnect();
+        $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([
+            $clienteId,
+            $setorId,
+            $titulo ?: $arquivo['name'],
+            $descricao,
+            $categoria,
+            $arquivo['name'],
+            'clientes/' . $clienteId . '/' . $nomeArmazenado,
+            $arquivo['size'],
+            $criadoPor,
+        ]);
+    }
 
     return (int) $pdo->lastInsertId();
 }
@@ -1010,7 +1034,7 @@ function recalcular_status_chamado(\PDO $pdo, int $chamadoId): void
  * mensagens de erro (vazio = tudo certo, mesmo que nenhum arquivo tenha
  * sido enviado -- anexo é sempre opcional).
  */
-function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $campoArquivo = 'anexos'): array
+function processar_anexos_chamado(\PDO &$pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $campoArquivo = 'anexos'): array
 {
     $erros = [];
 
@@ -1061,16 +1085,36 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
             // apagou foto/logo antes (Hostinger recria a pasta do zero, não
             // é protegido por .gitignore); sem esse backup o anexo se perde
             // pra sempre no próximo deploy.
-            $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                ->execute([
-                    $chamadoId,
-                    $respostaId,
-                    $enviadoPor,
-                    $arquivos['name'][$i],
-                    'chamados/' . $chamadoId . '/' . $nomeArmazenado,
-                    $arquivos['size'][$i],
-                    file_get_contents($destino),
-                ]);
+            try {
+                $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([
+                        $chamadoId,
+                        $respostaId,
+                        $enviadoPor,
+                        $arquivos['name'][$i],
+                        'chamados/' . $chamadoId . '/' . $nomeArmazenado,
+                        $arquivos['size'][$i],
+                        file_get_contents($destino),
+                    ]);
+            } catch (\Throwable $e) {
+                // Arquivo grande demais pro max_allowed_packet do MySQL da
+                // hospedagem (fora do nosso controle) -- o anexo já está
+                // salvo em disco (linha acima), então grava sem o backup em
+                // vez de travar a resposta/chamado inteiro por causa disso.
+                // Esse erro derruba a conexão ("MySQL server has gone away"),
+                // por isso reconecta antes de tentar de novo.
+                error_log('processar_anexos_chamado: falha ao gravar backup do anexo no banco (' . $e->getMessage() . ')');
+                $pdo = \AdminPrime\Database::reconnect();
+                $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho) VALUES (?, ?, ?, ?, ?, ?)')
+                    ->execute([
+                        $chamadoId,
+                        $respostaId,
+                        $enviadoPor,
+                        $arquivos['name'][$i],
+                        'chamados/' . $chamadoId . '/' . $nomeArmazenado,
+                        $arquivos['size'][$i],
+                    ]);
+            }
         } else {
             $erros[] = 'Não foi possível salvar "' . $arquivos['name'][$i] . '" no servidor.';
         }
@@ -1085,7 +1129,7 @@ function processar_anexos_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, s
  * que baixa a mídia da API da Meta antes de ter qualquer $_FILES. Retorna
  * uma mensagem de erro, ou null se salvou certo.
  */
-function salvar_bytes_como_anexo_chamado(\PDO $pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $nomeOriginal, string $mime, string $bytes): ?string
+function salvar_bytes_como_anexo_chamado(\PDO &$pdo, int $chamadoId, ?int $respostaId, string $enviadoPor, string $nomeOriginal, string $mime, string $bytes): ?string
 {
     $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$mime] ?? null;
     if (!$extensaoPermitida) {
@@ -1107,8 +1151,15 @@ function salvar_bytes_como_anexo_chamado(\PDO $pdo, int $chamadoId, ?int $respos
         return 'Não foi possível salvar "' . $nomeOriginal . '" no servidor.';
     }
 
-    $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$chamadoId, $respostaId, $enviadoPor, $nomeOriginal, 'chamados/' . $chamadoId . '/' . $nomeArmazenado, strlen($bytes), $bytes]);
+    try {
+        $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$chamadoId, $respostaId, $enviadoPor, $nomeOriginal, 'chamados/' . $chamadoId . '/' . $nomeArmazenado, strlen($bytes), $bytes]);
+    } catch (\Throwable $e) {
+        error_log('salvar_bytes_como_anexo_chamado: falha ao gravar backup do anexo no banco (' . $e->getMessage() . ')');
+        $pdo = \AdminPrime\Database::reconnect();
+        $pdo->prepare('INSERT INTO chamado_anexos (chamado_id, resposta_id, enviado_por, arquivo_nome_original, arquivo_caminho, arquivo_tamanho) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$chamadoId, $respostaId, $enviadoPor, $nomeOriginal, 'chamados/' . $chamadoId . '/' . $nomeArmazenado, strlen($bytes)]);
+    }
 
     return null;
 }

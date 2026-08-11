@@ -288,7 +288,7 @@
         var elErro = widget.querySelector('.anexos-stager-erro');
         var lista = widget.querySelector('.anexos-stager-lista');
         var maxArquivos = parseInt(widget.getAttribute('data-max-arquivos'), 10) || 5;
-        var maxTamanho = parseInt(widget.getAttribute('data-max-tamanho-bytes'), 10) || (10 * 1024 * 1024);
+        var maxTamanho = parseInt(widget.getAttribute('data-max-tamanho-bytes'), 10) || (500 * 1024 * 1024);
 
         var arquivosNaLista = [];
         var pendentes = [];
@@ -433,6 +433,90 @@
     }
 
     document.querySelectorAll('.anexos-stager').forEach(inicializarAnexoStager);
+
+    // -------------------------------------------- Barra de progresso de upload
+    // Um <input type="file"> num <form> normal (POST full-page) não dá
+    // NENHUM aviso de progresso pro navegador mostrar -- pedido do Kleber
+    // depois de levantar o limite de anexo/arquivo pra 500MB: sem isso a
+    // pessoa não tem como saber se um arquivo grande travou ou só está
+    // subindo. Intercepta TODO submit de formulário que tenha um arquivo de
+    // verdade selecionado (funciona pro anexos-stager E pra qualquer outro
+    // <input type="file"> "solto" da plataforma -- foto de perfil, logo,
+    // documento etc. -- sem precisar tocar em cada template) e reenvia via
+    // XMLHttpRequest, que expõe xhr.upload.onprogress. Mantém EXATAMENTE o
+    // mesmo método/campos/action do form original (FormData(form) captura
+    // tudo, inclusive campos ocultos como csrf_token); só troca COMO o
+    // navegador manda. Ao terminar, navega pra URL final da resposta (que já
+    // segue qualquer redirect do padrão POST-redirect-GET do backend) --
+    // efeito idêntico a um submit nativo, só que com barra de progresso.
+    var overlayUploadEl = null;
+    function garantirOverlayUpload() {
+        if (overlayUploadEl) return overlayUploadEl;
+        overlayUploadEl = document.createElement('div');
+        overlayUploadEl.className = 'overlay-upload-progresso';
+        overlayUploadEl.innerHTML = '<div class="overlay-upload-progresso-caixa">'
+            + '<div class="overlay-upload-progresso-titulo">Enviando arquivo...</div>'
+            + '<div class="progress"><div class="progress-bar" role="progressbar">0%</div></div>'
+            + '<div class="overlay-upload-progresso-detalhe"></div>'
+            + '</div>';
+        document.body.appendChild(overlayUploadEl);
+        return overlayUploadEl;
+    }
+
+    function temArquivoDeVerdadeSelecionado(form) {
+        var inputs = form.querySelectorAll('input[type="file"]');
+        for (var i = 0; i < inputs.length; i++) {
+            if (inputs[i].files && inputs[i].files.length) return true;
+        }
+        return false;
+    }
+
+    document.addEventListener('submit', function (e) {
+        // Formulário próprio já cancelou o submit por conta dele (ex.:
+        // confirm() recusado, ou um handler específico como o de "gerar
+        // sugestão de IA" que faz seu próprio fetch) -- não faz sentido
+        // hijackar de novo por cima.
+        if (e.defaultPrevented) return;
+
+        var form = e.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (!temArquivoDeVerdadeSelecionado(form)) return;
+
+        e.preventDefault();
+
+        var overlay = garantirOverlayUpload();
+        var barra = overlay.querySelector('.progress-bar');
+        var detalhe = overlay.querySelector('.overlay-upload-progresso-detalhe');
+        barra.style.width = '0%';
+        barra.textContent = '0%';
+        detalhe.textContent = '';
+        overlay.classList.add('show');
+
+        var dados = new FormData(form);
+        var xhr = new XMLHttpRequest();
+        xhr.open((form.getAttribute('method') || 'POST').toUpperCase(), form.getAttribute('action') || window.location.href);
+        xhr.upload.addEventListener('progress', function (ev) {
+            if (!ev.lengthComputable) return;
+            var pct = Math.round((ev.loaded / ev.total) * 100);
+            barra.style.width = pct + '%';
+            barra.textContent = pct + '%';
+            detalhe.textContent = formatarTamanhoArquivo(ev.loaded) + ' de ' + formatarTamanhoArquivo(ev.total);
+        });
+        xhr.addEventListener('load', function () {
+            // Deixa a barra em 100% visível por um instante antes de trocar
+            // de página -- senão o salto de "90%" pra tela nova parece que
+            // travou nos últimos por cento (upload termina antes do server
+            // processar/responder).
+            barra.style.width = '100%';
+            barra.textContent = '100%';
+            window.location.href = xhr.responseURL || window.location.href;
+        });
+        xhr.addEventListener('error', function () {
+            overlay.classList.remove('show');
+            alert('Falha ao enviar o arquivo. Verifique sua conexão e tente novamente.');
+        });
+        xhr.send(dados);
+    });
 
     // API mínima exposta pra scripts inline de cada página (ex.: ativar a
     // aba certa com base no hash da URL).
