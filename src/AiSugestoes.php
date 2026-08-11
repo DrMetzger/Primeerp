@@ -19,13 +19,19 @@ namespace AdminPrime;
  */
 class AiSugestoes
 {
-    // 2.5 Flash é o modelo ESTÁVEL (GA) recomendado pelo próprio Google pro
-    // plano gratuito -- trocado de propósito do antigo "3.0 preview" (que
-    // tem MENOS capacidade reservada e devolvia 503 "alta demanda" com
-    // muito mais frequência em hora de pico). 2.0 Flash como reserva: outra
-    // geração estável e também gratuita, não outro preview.
-    private const MODELO = 'gemini-2.5-flash';
-    private const MODELO_RESERVA = 'gemini-2.0-flash';
+    // ALIAS ("-latest"), não versão fixa com número -- o Google vai
+    // aposentando modelo antigo com o tempo (foi o que aconteceu com o
+    // "gemini-2.5-flash" fixo que usávamos antes: passou a devolver HTTP 404
+    // "no longer available to new users" pra chave/projeto mais novo, mesmo
+    // ele ainda existindo de fato pra chave antiga -- a aposentadoria é por
+    // PROJETO, não global, o que faz um número fixo virar bomba-relógio).
+    // "-latest" sempre aponta pro modelo estável mais atual daquela
+    // categoria (hoje resolve pra "gemini-3.6-flash"/"gemini-3.5-flash-lite"
+    // por baixo, sem precisar trocar o código de novo quando o Google lançar
+    // a próxima geração). Lite como reserva: mais rápido/leve, ainda
+    // gratuito, não é outro preview.
+    private const MODELO = 'gemini-flash-latest';
+    private const MODELO_RESERVA = 'gemini-flash-lite-latest';
     // Pouco tempo de espera/tentativa de propósito -- isso tudo roda dentro
     // de uma requisição HTTP síncrona (cliente.php aguardando), e hospedagem
     // compartilhada normalmente mata o PHP em 30-60s. Errar pra menos aqui
@@ -106,6 +112,14 @@ class AiSugestoes
         // ser passageiro, ver comentário na const) e, se nem assim
         // conseguir, cai pro modelo de reserva antes de desistir de vez --
         // sem isso, um pico de demanda no Google derrubava a geração toda.
+        // IMPORTANTE: cair pro modelo de reserva precisa acontecer pra
+        // QUALQUER falha do modelo principal, não só pra erro "passageiro"
+        // (tentar_de_novo) -- um erro definitivo (ex.: HTTP 404 porque esse
+        // modelo específico saiu do ar pra essa chave, como já aconteceu)
+        // é justamente o caso em que trocar de MODELO ajuda, ao contrário de
+        // insistir no mesmo. Só não vale repetir o MESMO modelo de novo
+        // nesse caso (por isso o "break", não um retry) -- só o Google sabe
+        // se um 429/503 vale a pena tentar de novo com o mesmo modelo.
         foreach ([self::MODELO, self::MODELO_RESERVA] as $indiceModelo => $modelo) {
             $ehUltimoModelo = $indiceModelo === 1;
             $tentativas = $ehUltimoModelo ? 1 : self::TENTATIVAS_POR_MODELO;
@@ -113,8 +127,12 @@ class AiSugestoes
             for ($tentativa = 1; $tentativa <= $tentativas; $tentativa++) {
                 $resultado = self::chamarModelo($modelo, $chave, $corpo);
 
-                if ($resultado['ok'] || !$resultado['tentar_de_novo']) {
-                    return ['ok' => $resultado['ok'], 'texto' => $resultado['texto'], 'erro' => $resultado['erro'], 'arquivos_com_falha' => $arquivosComFalha];
+                if ($resultado['ok']) {
+                    return ['ok' => true, 'texto' => $resultado['texto'], 'erro' => null, 'arquivos_com_falha' => $arquivosComFalha];
+                }
+
+                if (!$resultado['tentar_de_novo']) {
+                    break; // não vale repetir ESSE modelo -- tenta o próximo modelo da lista (se ainda tiver)
                 }
 
                 $ultimaTentativaDesseModelo = $tentativa === $tentativas;
