@@ -125,7 +125,7 @@ define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: ($isLocal ? 'teste-loc
 
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
-define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
+define('UPLOADS_MAX_SIZE', 500 * 1024 * 1024); // 500MB por arquivo (pedido do Kleber -- 15MB não dava pra nada)
 
 // Anexos de chamado (portal, admin e WhatsApp). Cliente manda de tudo --
 // Excel, Word, PowerPoint, fonte .prw do Protheus, .zip -- então a lista
@@ -137,7 +137,7 @@ define('UPLOADS_MAX_SIZE', 15 * 1024 * 1024); // 15MB por arquivo
 // enganar só renomeando a extensão), e o download sempre força
 // "application/octet-stream" + anexo pra baixar (ver download_anexo_chamado.php),
 // então mesmo um arquivo aceito aqui nunca é executado/aberto direto pelo navegador.
-define('ANEXO_CHAMADO_MAX_SIZE', 10 * 1024 * 1024); // 10MB por arquivo
+define('ANEXO_CHAMADO_MAX_SIZE', 500 * 1024 * 1024); // 500MB por arquivo (pedido do Kleber -- 10MB não dava pra nada)
 define('ANEXO_CHAMADO_MAX_QUANTIDADE', 5);
 define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
     // Imagens

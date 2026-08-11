@@ -1668,3 +1668,72 @@ a.card-cliente, a.card-cliente:hover {
 }
 
 .resultado-sugestao-ia .alert { margin-bottom: 0; }
+
+/* ---------------------------------------------------- Barra de progresso
+   Genérica (classes .progress/.progress-bar, ex.: % do checklist de
+   implantação em cliente.php) -- reaproveitada também pelo overlay de
+   upload abaixo. */
+.progress {
+    background-color: var(--ph-border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+    background-color: var(--ph-primary);
+    color: #fff;
+    font-size: .7rem;
+    font-weight: 600;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    transition: width .2s ease;
+}
+.progress-bar.bg-success { background-color: var(--ph-success); }
+
+/* ------------------------------------------- Overlay de progresso de upload
+   Mostrado enquanto um arquivo está subindo (barra com % de verdade, não só
+   um spinner) -- pedido do Kleber depois de levantar o limite de anexo pra
+   500MB: sem isso a pessoa não tem ideia se um arquivo grande travou ou só
+   está subindo (ver inicializarAnexoStager()/listener de "submit" genérico
+   em app.js). Fica por cima de qualquer outro overlay da página (ver
+   .overlay-carregando em cliente.php, z-index 2000). */
+.overlay-upload-progresso {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(15, 23, 42, .55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s ease;
+}
+.overlay-upload-progresso.show { opacity: 1; pointer-events: all; }
+
+.overlay-upload-progresso-caixa {
+    background-color: var(--ph-surface);
+    border-radius: var(--ph-radius);
+    padding: 1.75rem 2.25rem;
+    text-align: center;
+    box-shadow: var(--ph-elev-3);
+    max-width: 90vw;
+    width: 22rem;
+}
+
+.overlay-upload-progresso-titulo {
+    font-weight: 600;
+    color: var(--ph-text);
+    margin-bottom: .75rem;
+}
+
+.overlay-upload-progresso .progress { height: 20px; }
+
+.overlay-upload-progresso-detalhe {
+    margin-top: .5rem;
+    font-size: .8rem;
+    color: var(--ph-text-muted);
+}
