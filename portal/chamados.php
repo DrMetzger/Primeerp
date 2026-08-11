@@ -308,7 +308,14 @@ require __DIR__ . '/../templates/portal_header.php';
                 </select>
             </div>
             <?php if ($setoresPortal): ?>
-            <?php $setorPadraoMasterNovoChamado = ClienteAuth::setorMasterId(); ?>
+            <?php
+                // Master de verdade: setor padrão pessoal dele (setorMasterId()).
+                // Responsável de setor com permissão de master (eh_master):
+                // o próprio setor dele, NUNCA o padrão da empresa -- isso
+                // causou chamado da Renata (LQF) nascendo pré-marcado pro
+                // setor do Gabriel (Qualidade) só porque ela também é master.
+                $setorPadraoMasterNovoChamado = ClienteAuth::isMaster() ? ClienteAuth::setorMasterId() : ClienteAuth::setorId();
+            ?>
             <div class="mb-3"><label class="form-label">Setor</label>
                 <select name="setor_id" class="form-select">
                     <option value="" <?= !$setorPadraoMasterNovoChamado ? 'selected' : '' ?>>Sem setor</option>

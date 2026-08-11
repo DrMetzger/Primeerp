@@ -161,16 +161,27 @@ class ClienteAuth
 
     /**
      * Setor PADRÃO do master (clientes.setor_id, editado na aba Usuários do
-     * cliente) -- null se for login de setor, ou se o master ainda não tiver
-     * nenhum setor configurado. Não é uma restrição: o master continua
-     * vendo e podendo abrir chamado em QUALQUER setor da empresa, isso aqui
-     * só decide pra qual setor um chamado ABERTO POR ELE vai por padrão,
-     * quando ele não escolher outro explicitamente. SEMPRE busca no banco
-     * (mesmo motivo de clienteFoto()/podeAcessarForaDoHorario()).
+     * cliente) -- null se não for o login MASTER de verdade (isMaster(),
+     * não temPermissaoMaster()) ou se o master ainda não tiver nenhum setor
+     * configurado. Não é uma restrição: o master continua vendo e podendo
+     * abrir chamado em QUALQUER setor da empresa, isso aqui só decide pra
+     * qual setor um chamado ABERTO POR ELE vai por padrão, quando ele não
+     * escolher outro explicitamente. SEMPRE busca no banco (mesmo motivo de
+     * clienteFoto()/podeAcessarForaDoHorario()).
+     *
+     * DE PROPÓSITO só isMaster() aqui, não temPermissaoMaster() -- esse
+     * valor (clientes.setor_id) é a preferência PESSOAL do contato master
+     * de verdade, não faz sentido nenhum aplicar pra um responsável de
+     * setor com a flag "É MASTER?" (ver eh_master): esse continua tendo o
+     * PRÓPRIO setor (setorId()) como o óbvio, senão o chamado dele nasce
+     * pré-marcado pro setor ERRADO -- foi exatamente o bug que aconteceu
+     * com a Renata (LQF): virou "master" e o chamado que ela abria vinha
+     * pré-selecionado pro setor padrão da EMPRESA (Qualidade, do Gabriel),
+     * não pro setor dela.
      */
     public static function setorMasterId(): ?int
     {
-        if (!self::temPermissaoMaster()) {
+        if (!self::isMaster()) {
             return null;
         }
         $stmt = Database::connection()->prepare('SELECT setor_id FROM clientes WHERE id = ?');
