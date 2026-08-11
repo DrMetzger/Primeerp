@@ -573,6 +573,16 @@ class Migrations
         // Notificacoes::novaRespostaEquipe()).
         $pdo->exec("ALTER TABLE chamados ADD COLUMN IF NOT EXISTS telefone_whatsapp VARCHAR(20) NULL COMMENT 'wa_id de quem abriu esse chamado pelo bot do WhatsApp' AFTER origem_canal");
 
+        // Responsável de setor que também é MASTER -- pedido do Victor Alvim
+        // (Vitapet): tem gente no TI dele que precisa acompanhar chamado de
+        // TODOS os setores, não só o próprio. Marcando essa flag, o login
+        // dessa pessoa passa a ter as mesmas permissões de master (ver
+        // ClienteAuth::temPermissaoMaster()) SEM perder a identidade própria
+        // (nome/foto continuam do registro dela em setor_responsaveis, não
+        // do contato master da empresa -- por isso não reaproveitamos o
+        // login master existente, ver ClienteAuth::iniciarSessaoSetor()).
+        $pdo->exec("ALTER TABLE setor_responsaveis ADD COLUMN IF NOT EXISTS eh_master TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Responsável de setor com permissões de master (vê/gerencia todos os setores)' AFTER portal_ativo");
+
         // Continuidade de atendimento -- quando a pessoa já tem chamado
         // aberto, o bot pergunta se é sobre ele ou um assunto novo antes de
         // sair pedindo categoria/prioridade de novo (chamado_continuar_id

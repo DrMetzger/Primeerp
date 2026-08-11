@@ -85,6 +85,13 @@ class ClienteAuth
         $_SESSION['portal_cliente_nome'] = $setorResp['nome'];
         $_SESSION['portal_cliente_empresa'] = $setorResp['empresa_nome'];
         $_SESSION['portal_cliente_email'] = $setorResp['email'];
+        // Ver temPermissaoMaster() -- responsável de setor marcado como
+        // "É MASTER?" (setor_responsaveis.eh_master) ganha as mesmas
+        // permissões do master (vê/gerencia todos os setores), mas
+        // continua com a PRÓPRIA identidade (isMaster() aqui embaixo
+        // continua false de propósito, pra nome/foto/atribuição de
+        // mensagem nunca trocar pro contato master da empresa).
+        $_SESSION['portal_setor_eh_master'] = (bool) ($setorResp['eh_master'] ?? false);
     }
 
     public static function logout(): void
@@ -96,7 +103,8 @@ class ClienteAuth
             $_SESSION['portal_setor_responsavel_id'],
             $_SESSION['portal_cliente_nome'],
             $_SESSION['portal_cliente_empresa'],
-            $_SESSION['portal_cliente_email']
+            $_SESSION['portal_cliente_email'],
+            $_SESSION['portal_setor_eh_master']
         );
     }
 
@@ -122,6 +130,23 @@ class ClienteAuth
         return ($_SESSION['portal_tipo'] ?? 'master') === 'master';
     }
 
+    /**
+     * true = tem PERMISSÃO de master (vê e gerencia todos os setores da
+     * empresa), seja por ser o contato principal (isMaster()) OU por ser
+     * um responsável de setor marcado como "É MASTER?" (pedido do Victor
+     * Alvim/Vitapet -- ter mais de uma pessoa acompanhando chamado de todo
+     * setor, não só um). Usar isso (e não isMaster() puro) em qualquer
+     * decisão de ESCOPO/PERMISSÃO (quais chamados ver, exportar, reatribuir
+     * setor, gerenciar equipe...). Onde importa a IDENTIDADE de quem está
+     * logado (nome, foto, autoria de mensagem no chat) continua usando
+     * isMaster() puro -- essa pessoa é e continua sendo ela mesma, só ganhou
+     * mais visão/permissão, não "virou" o contato master da empresa.
+     */
+    public static function temPermissaoMaster(): bool
+    {
+        return self::isMaster() || (bool) ($_SESSION['portal_setor_eh_master'] ?? false);
+    }
+
     /** Id do setor logado, ou null se for o master. */
     public static function setorId(): ?int
     {
@@ -145,7 +170,7 @@ class ClienteAuth
      */
     public static function setorMasterId(): ?int
     {
-        if (!self::isMaster()) {
+        if (!self::temPermissaoMaster()) {
             return null;
         }
         $stmt = Database::connection()->prepare('SELECT setor_id FROM clientes WHERE id = ?');
@@ -238,13 +263,15 @@ class ClienteAuth
 
     /**
      * Telas de gestão (Setores/Usuários do próprio cliente, ver
-     * portal/equipe.php) são só do MASTER -- um responsável de setor
-     * logado nunca deveria conseguir cadastrar setor ou outro usuário.
-     * Chamar depois de requireLogin(), no topo da página.
+     * portal/equipe.php) são do MASTER -- ou de um responsável de setor
+     * com permissão de master (ver temPermissaoMaster()). Um responsável
+     * de setor comum, sem essa permissão, nunca deveria conseguir
+     * cadastrar setor ou outro usuário. Chamar depois de requireLogin(),
+     * no topo da página.
      */
     public static function exigirMaster(): void
     {
-        if (!self::isMaster()) {
+        if (!self::temPermissaoMaster()) {
             header('Location: ' . APP_BASE_PATH . '/portal/chamados.php');
             exit;
         }
@@ -260,7 +287,7 @@ class ClienteAuth
      */
     public static function podeGerenciarEquipe(): bool
     {
-        if (!self::check() || !self::isMaster()) {
+        if (!self::check() || !self::temPermissaoMaster()) {
             return false;
         }
         $stmt = Database::connection()->prepare('SELECT portal_permite_gerenciar_equipe FROM clientes WHERE id = ?');

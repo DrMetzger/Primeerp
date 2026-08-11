@@ -82,9 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $avatarNovoPortal = ($indiceAvatarNovoPortal >= 1 && $indiceAvatarNovoPortal <= QUANTIDADE_AVATARES_PREDEFINIDOS)
                 ? 'assets/img/avatares/avatar-' . $indiceAvatarNovoPortal . '.svg'
                 : null;
+            $ehMasterRespPortal = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovoPortal]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovoPortal, $ehMasterRespPortal]);
                 flash_set('sucesso', 'Usuário cadastrado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível cadastrar (e-mail já usado por outro usuário desse cliente?).');
@@ -140,9 +141,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
             $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+            $ehMasterRespPortal = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=? WHERE id=?')
-                    ->execute([$nomeResp, $emailResp, $telefoneRespEditar, $documentoResp, $setorIdResp, $responsavelId]);
+                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=?, eh_master=? WHERE id=?')
+                    ->execute([$nomeResp, $emailResp, $telefoneRespEditar, $documentoResp, $setorIdResp, $ehMasterRespPortal, $responsavelId]);
                 flash_set('sucesso', 'Usuário atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro usuário desse cliente?).');
@@ -315,6 +317,10 @@ require __DIR__ . '/../templates/portal_header.php';
                             <?php endforeach; ?>
                         </select>
                     </div>
+                    <div class="col-12 form-check">
+                        <input type="checkbox" name="eh_master" id="novoUsuarioPortalEhMaster" class="form-check-input" value="1">
+                        <label class="form-check-label" for="novoUsuarioPortalEhMaster">Este usuário é MASTER? (vê e gerencia todos os setores, igual a você)</label>
+                    </div>
                     <div class="col-12"><button type="submit" class="btn btn-dark"><i class="bi bi-plus-lg"></i> Cadastrar</button></div>
                 </form>
             </div>
@@ -337,7 +343,7 @@ require __DIR__ . '/../templates/portal_header.php';
                     ?>
                         <tr data-busca="<?= e($buscaUc) ?>">
                             <td><?= $avatarUc ?></td>
-                            <td class="fw-semibold" data-rotulo="Nome"><?= e($uc['nome']) ?></td>
+                            <td class="fw-semibold" data-rotulo="Nome"><?= e($uc['nome']) ?> <?= $uc['eh_master'] ? '<span class="badge bg-primary">Master</span>' : '' ?></td>
                             <td data-rotulo="E-mail"><?= e($uc['email']) ?></td>
                             <td class="telefone-linha" data-rotulo="Telefone"><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
                             <td data-rotulo="Setor">
@@ -441,6 +447,10 @@ require __DIR__ . '/../templates/portal_header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" name="eh_master" id="editarUsuarioPortalEhMaster" class="form-check-input" value="1">
+                    <label class="form-check-label" for="editarUsuarioPortalEhMaster">Este usuário é MASTER? (vê e gerencia todos os setores, igual a você)</label>
+                </div>
                 <div class="modal-footer px-0">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                     <button type="submit" class="btn btn-dark">Salvar</button>
@@ -471,6 +481,7 @@ document.querySelectorAll('.botao-editar-usuario-portal').forEach(function (bota
         document.getElementById('editarUsuarioPortalTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarUsuarioPortalDocumento').value = dados.documento || '';
         document.getElementById('editarUsuarioPortalSetor').value = dados.setor_id || '';
+        document.getElementById('editarUsuarioPortalEhMaster').checked = !!parseInt(dados.eh_master || 0, 10);
         document.getElementById('editarUsuarioPortalAvatar').innerHTML = dados.avatar_html || '';
         document.querySelectorAll('.editar-usuario-portal-id-campo').forEach(function (campo) { campo.value = dados.id; });
         PrimeUI.openModal(document.getElementById('modalEditarUsuarioPortal'));

@@ -20,9 +20,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
 
     // Quem abre é o login de um setor -- o chamado já nasce vinculado a esse
     // setor, sem depender do que vier do POST (não dá pra confiar em input
-    // escondido pra isso). Quem abre é o master, pode escolher um setor
-    // (opcional) entre os cadastrados desse cliente, senão fica sem setor.
-    if (!ClienteAuth::isMaster()) {
+    // escondido pra isso). Quem abre é o master (ou setor com permissão de
+    // master), pode escolher um setor (opcional) entre os cadastrados desse
+    // cliente, senão fica sem setor.
+    if (!ClienteAuth::temPermissaoMaster()) {
         $setorIdNovoChamado = ClienteAuth::setorId();
     } else {
         $setorIdNovoChamado = null;
@@ -84,9 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
 }
 
 // Login de setor só vê os chamados do PRÓPRIO setor (independência entre
-// setores é o pedido original) -- login master continua vendo tudo, de
-// todos os setores, igual sempre foi.
-if (ClienteAuth::isMaster()) {
+// setores é o pedido original) -- login master, ou setor com permissão de
+// master (Victor Alvim/Vitapet), continua vendo tudo, de todos os setores.
+if (ClienteAuth::temPermissaoMaster()) {
     $stmt = $pdo->prepare('SELECT * FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC');
     $stmt->execute([$clienteId]);
 } else {
@@ -95,12 +96,13 @@ if (ClienteAuth::isMaster()) {
 }
 $chamados = $stmt->fetchAll();
 
-// Painel de cards por setor -- só existe pro login MASTER (quem já vê tudo)
-// e só aparece se esse cliente tiver algum setor cadastrado. Mesma ideia
-// (e mesmas subconsultas de insight) do painel espelho em cliente.php.
+// Painel de cards por setor -- só existe pro login com permissão de master
+// (quem já vê tudo) e só aparece se esse cliente tiver algum setor
+// cadastrado. Mesma ideia (e mesmas subconsultas de insight) do painel
+// espelho em cliente.php.
 $setoresPortal = [];
 $responsaveisPorSetorIdPortal = [];
-if (ClienteAuth::isMaster()) {
+if (ClienteAuth::temPermissaoMaster()) {
     $setoresPortal = $pdo->prepare('
         SELECT
             s.*,
@@ -141,7 +143,7 @@ if (ClienteAuth::isMaster()) {
         }
     }
 }
-$chamadosSemSetorPortal = ClienteAuth::isMaster() ? count(array_filter($chamados, fn ($c) => $c['setor_id'] === null)) : 0;
+$chamadosSemSetorPortal = ClienteAuth::temPermissaoMaster() ? count(array_filter($chamados, fn ($c) => $c['setor_id'] === null)) : 0;
 
 // Visão geral em 4 cards -- mapeado 1:1 nos 4 status reais que já existem
 // (nenhum "atrasado" novo inventado): Abertos = ninguém respondeu ainda,

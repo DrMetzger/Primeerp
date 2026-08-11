@@ -18,7 +18,7 @@ ClienteAuth::requireLogin();
 
 $pdo = Database::connection();
 $clienteId = ClienteAuth::clienteId();
-$ehMaster = ClienteAuth::isMaster();
+$ehMaster = ClienteAuth::temPermissaoMaster();
 $setorIdLogado = ClienteAuth::setorId();
 
 if ($ehMaster) {

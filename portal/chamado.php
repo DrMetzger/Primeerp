@@ -15,9 +15,9 @@ $chamadoId = (int) ($_GET['id'] ?? 0);
 // Login de setor só pode ver/responder chamado do PRÓPRIO setor -- sem essa
 // trava, um responsável de setor poderia ver chamado de outro setor da
 // mesma empresa só trocando o id na URL (o que quebraria a independência
-// entre setores que é o pedido original). Login master continua vendo
-// qualquer chamado da empresa, de qualquer setor.
-if (ClienteAuth::isMaster()) {
+// entre setores que é o pedido original). Login master, ou setor com
+// permissão de master, continua vendo qualquer chamado da empresa.
+if (ClienteAuth::temPermissaoMaster()) {
     $stmt = $pdo->prepare('SELECT c.*, u.nome AS responsavel_nome, u.foto_perfil AS responsavel_foto FROM chamados c LEFT JOIN usuarios u ON u.id = c.responsavel_id WHERE c.id = ? AND c.cliente_id = ?');
     $stmt->execute([$chamadoId, $clienteId]);
 } else {
@@ -37,12 +37,13 @@ if (!$chamado) {
     die('Chamado não encontrado.');
 }
 
-// Trocar o setor de um chamado -- só o login MASTER pode (é quem vê/gerencia
-// todos os setores; login de setor não deveria conseguir mandar o próprio
-// chamado pra outro setor, senão perderia acesso a ele na mesma hora). Exige
-// que o setor de destino já tenha responsável cadastrado, senão bloqueia
-// (mesma trava e mesmo aviso por e-mail de cliente.php, do lado da equipe).
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribuir_setor_chamado' && ClienteAuth::isMaster()) {
+// Trocar o setor de um chamado -- só quem tem permissão de master pode (é
+// quem vê/gerencia todos os setores; login de setor comum não deveria
+// conseguir mandar o próprio chamado pra outro setor, senão perderia acesso
+// a ele na mesma hora). Exige que o setor de destino já tenha responsável
+// cadastrado, senão bloqueia (mesma trava e mesmo aviso por e-mail de
+// cliente.php, do lado da equipe).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribuir_setor_chamado' && ClienteAuth::temPermissaoMaster()) {
     csrf_verify();
     $novoSetorId = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
 
@@ -221,11 +222,12 @@ foreach ($respostas as $r) {
     ];
 }
 
-// Setores pra montar o select de reatribuição -- só usado pelo master (ver
-// header abaixo), mas fica fora do "if" pra não duplicar a query nos dois
-// lugares se um dia precisar dela em mais de um ponto da página.
+// Setores pra montar o select de reatribuição -- só usado por quem tem
+// permissão de master (ver header abaixo), mas fica fora do "if" pra não
+// duplicar a query nos dois lugares se um dia precisar dela em mais de um
+// ponto da página.
 $setoresPortal = [];
-if (ClienteAuth::isMaster()) {
+if (ClienteAuth::temPermissaoMaster()) {
     $stmtSetoresPortal = $pdo->prepare('
         SELECT s.id, s.nome, (c.setor_id = s.id) AS eh_setor_master,
             EXISTS(SELECT 1 FROM setor_responsaveis sr WHERE sr.setor_id = s.id) AS tem_responsavel

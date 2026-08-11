@@ -881,9 +881,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'assets/img/avatares/avatar-' . $indiceAvatarNovo . '.svg'
                 : null;
 
+            $ehMasterResp = isset($_POST['eh_master']) ? 1 : 0;
+
             try {
-                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovo]);
+                $pdo->prepare('INSERT INTO setor_responsaveis (cliente_id, setor_id, nome, email, telefone, documento, foto_perfil, eh_master) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdResp, $nomeResp, $emailResp, $telefoneResp, $documentoResp, $avatarNovo, $ehMasterResp]);
                 $responsavelId = (int) $pdo->lastInsertId();
 
                 // Mesma pessoa que já é o contato master desse cliente,
@@ -917,9 +919,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $telefoneResp = apenas_digitos($_POST['telefone'] ?? '');
             $documentoResp = normalizar_documento($_POST['documento'] ?? '');
             $setorIdResp = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+            $ehMasterResp = isset($_POST['eh_master']) ? 1 : 0;
             try {
-                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=? WHERE id=?')
-                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $setorIdResp, $responsavelId]);
+                $pdo->prepare('UPDATE setor_responsaveis SET nome=?, email=?, telefone=?, documento=?, setor_id=?, eh_master=? WHERE id=?')
+                    ->execute([$nomeResp, $emailResp, $telefoneResp, $documentoResp, $setorIdResp, $ehMasterResp, $responsavelId]);
                 flash_set('sucesso', 'Usuário atualizado.');
             } catch (\PDOException $e) {
                 flash_set('erro', 'Não foi possível salvar (e-mail já usado por outro usuário desse cliente?).');
@@ -2842,7 +2845,7 @@ require __DIR__ . '/templates/header.php';
                         <?php foreach ($usuariosCliente as $uc): ?>
                         <tr class="linha-usuario-cliente" role="button" tabindex="0" data-usuario='<?= e(json_encode($uc, JSON_UNESCAPED_UNICODE)) ?>'>
                             <td><?= avatar_html($uc['nome'], resolver_avatar_por_email($pdo, $uc['email'], $uc['foto_perfil']), 'cliente') ?></td>
-                            <td class="fw-semibold"><?= e($uc['nome']) ?></td>
+                            <td class="fw-semibold"><?= e($uc['nome']) ?> <?= $uc['eh_master'] ? '<span class="badge bg-primary">Master</span>' : '' ?></td>
                             <td><?= e($uc['email']) ?></td>
                             <td class="telefone-linha"><?= e(formatar_telefone($uc['telefone']) ?: '-') ?></td>
                             <td onclick="event.stopPropagation()">
@@ -3297,6 +3300,10 @@ require __DIR__ . '/templates/header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="col-12 form-check">
+                    <input type="checkbox" name="eh_master" id="novoUsuarioClienteEhMaster" class="form-check-input" value="1">
+                    <label class="form-check-label" for="novoUsuarioClienteEhMaster">Este usuário é MASTER? (vê e gerencia todos os setores, igual ao contato principal)</label>
+                </div>
             </div>
         </div>
         <div class="modal-footer">
@@ -3363,6 +3370,10 @@ require __DIR__ . '/templates/header.php';
                             <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+                <div class="col-12 form-check">
+                    <input type="checkbox" name="eh_master" id="editarUsuarioClienteEhMaster" class="form-check-input" value="1">
+                    <label class="form-check-label" for="editarUsuarioClienteEhMaster">Este usuário é MASTER? (vê e gerencia todos os setores, igual ao contato principal)</label>
                 </div>
             </div>
             <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar dados</button>
@@ -3523,6 +3534,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarUsuarioClienteTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarUsuarioClienteDocumento').value = dados.documento || '';
         document.getElementById('editarUsuarioClienteSetor').value = dados.setor_id || '';
+        document.getElementById('editarUsuarioClienteEhMaster').checked = !!parseInt(dados.eh_master || 0, 10);
         document.querySelectorAll('.avatar-usuario-cliente-id-campo').forEach(function (campo) { campo.value = dados.id; });
         PrimeUI.openModal(document.getElementById('modalUsuarioCliente'));
     }

@@ -49,9 +49,9 @@ if ($statusFiltro !== '' && $statusFiltro !== 'todos') {
     $params[] = $statusFiltro;
 }
 // Login de setor só exporta os PRÓPRIOS chamados -- mesma independência
-// entre setores aplicada aqui. Login master exporta de todos os setores de
-// uma vez, sem esse filtro (é o pedido original do master).
-if (!ClienteAuth::isMaster()) {
+// entre setores aplicada aqui. Login master (ou setor com permissão de
+// master) exporta de todos os setores de uma vez, sem esse filtro.
+if (!ClienteAuth::temPermissaoMaster()) {
     $sql .= ' AND c.setor_id = ?';
     $params[] = ClienteAuth::setorId();
 }
