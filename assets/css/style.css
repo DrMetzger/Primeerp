@@ -73,12 +73,14 @@ body > footer {
     flex-shrink: 0;
 }
 
-/* Rodapé do portal do cliente -- antes era só um texto cinza solto, com o
-   mesmo fundo do resto da página, sem nenhuma linha separando onde a tela
-   termina e o rodapé começa (print/reclamação do Kleber). */
-.portal-footer {
-    background-color: var(--ph-surface);
-    border-top: 1px solid var(--ph-border);
+/* Rodapé (portal do cliente e administração) -- antes era só um texto cinza
+   solto, com o mesmo fundo do resto da página, sem nenhuma linha separando
+   onde a tela termina e o rodapé começa (print/reclamação do Kleber). Usa o
+   MESMO gradiente do navbar (.navbar-dark.bg-dark), pra fechar a página com
+   a mesma identidade visual do topo. */
+.rodape-gradiente {
+    background: linear-gradient(100deg, #1e1b4b 0%, #3730a3 55%, #6d28d9 100%);
+    color: #e0e7ff;
     margin-top: 2rem;
 }
 

@@ -1,6 +1,6 @@
 </main>
-<footer class="text-center text-muted small py-3">
-    Prime Hub &middot; PrimeERP &middot; <?= date('Y') ?>
+<footer class="rodape-gradiente text-center small py-3">
+    &copy; <?= date('Y') ?> Prime Hub &middot; PrimeERP
 </footer>
 <script src="<?= asset_url('assets/js/app.js') ?>"></script>
 </body>

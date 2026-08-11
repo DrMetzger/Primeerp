@@ -45,7 +45,15 @@ use AdminPrime\ClienteAuth;
   </div>
 </nav>
 <?php endif; ?>
-<main class="container-fluid px-4 py-4" style="max-width: 900px;">
+<?php
+// Largura padrão pensada pra tela de chat (chamado.php) -- página que
+// precisa de mais espaço (ex.: tabela de usuários com várias colunas +
+// botões de ação) pode definir $larguraPortalPx antes de dar require nesse
+// arquivo, senão ficava tudo espremido numa barra de rolagem horizontal
+// feia (print do Kleber em equipe.php).
+$larguraPortalPx = $larguraPortalPx ?? 900;
+?>
+<main class="container-fluid px-4 py-4" style="max-width: <?= (int) $larguraPortalPx ?>px;">
 <?php
 $erro = flash_get('erro');
 $sucesso = flash_get('sucesso');

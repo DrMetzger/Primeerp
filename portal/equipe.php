@@ -221,6 +221,7 @@ $usuariosCliente->execute([$clienteId]);
 $usuariosCliente = $usuariosCliente->fetchAll();
 
 $tituloPagina = 'Setores e Usuários';
+$larguraPortalPx = 1200; // tabela de usuários tem várias colunas + botões de ação -- 900px forçava rolagem horizontal feia
 require __DIR__ . '/../templates/portal_header.php';
 ?>
 
