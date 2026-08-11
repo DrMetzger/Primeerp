@@ -321,7 +321,16 @@ require __DIR__ . '/../templates/portal_header.php';
             <div class="mb-3"><label class="form-label">Descrição *</label><textarea name="descricao" class="form-control" rows="4" required></textarea></div>
             <div class="mb-3">
                 <label class="form-label">Anexos (opcional)</label>
-                <input type="file" name="anexos[]" class="form-control" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+                <div class="anexos-stager" data-max-arquivos="<?= ANEXO_CHAMADO_MAX_QUANTIDADE ?>" data-max-tamanho-bytes="<?= ANEXO_CHAMADO_MAX_SIZE ?>">
+                    <input type="file" name="anexos[]" class="anexos-stager-input" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+                    <div class="anexos-stager-controles">
+                        <button type="button" class="btn btn-outline-dark btn-sm anexos-stager-escolher"><i class="bi bi-paperclip"></i> Escolher anexos</button>
+                        <button type="button" class="btn btn-dark btn-sm anexos-stager-enviar" disabled><i class="bi bi-plus-lg"></i> Enviar anexos</button>
+                        <span class="anexos-stager-pendente text-muted"></span>
+                    </div>
+                    <div class="anexos-stager-erro alert alert-danger d-none"></div>
+                    <ul class="anexos-stager-lista list-unstyled"></ul>
+                </div>
                 <small class="text-muted">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</small>
             </div>
         </div>

@@ -1002,6 +1002,32 @@ function render_anexos_html(array $anexos): string
 }
 
 /**
+ * Ícone (classe do Bootstrap Icons) mais próximo do tipo real de arquivo,
+ * pela extensão -- antes TODO anexo não-imagem usava o mesmo
+ * "bi-file-earmark-pdf" fixo, então RAR/ZIP/Word/etc apareciam com o ícone
+ * errado (ou, dependendo da fonte de ícone carregada, em branco -- print do
+ * Kleber). Mesma tabela é espelhada em assets/js/app.js pro widget de
+ * anexos pendentes (ainda não salvos no banco, então sem passar por aqui).
+ */
+function icone_bootstrap_por_extensao(string $extensao): string
+{
+    $porExtensao = [
+        'pdf' => 'bi-filetype-pdf',
+        'doc' => 'bi-filetype-doc', 'docx' => 'bi-filetype-docx',
+        'xls' => 'bi-filetype-xls', 'xlsx' => 'bi-filetype-xlsx',
+        'ppt' => 'bi-filetype-ppt', 'pptx' => 'bi-filetype-pptx',
+        'txt' => 'bi-filetype-txt', 'csv' => 'bi-filetype-csv',
+        'rtf' => 'bi-file-earmark-richtext',
+        'zip' => 'bi-file-earmark-zip', 'rar' => 'bi-file-earmark-zip', '7z' => 'bi-file-earmark-zip',
+        'odt' => 'bi-file-earmark-text', 'ods' => 'bi-file-earmark-spreadsheet', 'odp' => 'bi-file-earmark-slides',
+        'jpg' => 'bi-filetype-jpg', 'jpeg' => 'bi-filetype-jpg', 'png' => 'bi-filetype-png', 'gif' => 'bi-filetype-gif',
+        'webp' => 'bi-file-earmark-image',
+    ];
+
+    return $porExtensao[strtolower($extensao)] ?? 'bi-file-earmark';
+}
+
+/**
  * Um anexo (imagem ou documento) de chamado -- imagem mostra a MINIATURA de
  * verdade em vez de só nome+ícone, que obrigava abrir arquivo por arquivo
  * pra saber o que era (comparado pelo Kleber com o mesmo problema no
@@ -1029,7 +1055,7 @@ function render_anexo_item_html(array $a, string $classeExtra, bool $comLightbox
     }
 
     return '<a href="' . $url . '" class="' . $classeExtra . '" target="_blank" rel="noopener" title="' . e($a['arquivo_nome_original']) . '">'
-        . '<i class="bi bi-file-earmark-pdf"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
+        . '<i class="bi ' . icone_bootstrap_por_extensao($extensao) . '"></i> <span class="anexo-nome">' . e($a['arquivo_nome_original']) . '</span></a>';
 }
 
 /**

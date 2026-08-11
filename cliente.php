@@ -2317,11 +2317,20 @@ require __DIR__ . '/templates/header.php';
                             </select>
                         </div>
                     </div>
-                    <div class="d-flex justify-content-between align-items-center gap-2">
-                        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>" style="max-width: 320px;">
+                    <div class="anexos-stager" data-max-arquivos="<?= ANEXO_CHAMADO_MAX_QUANTIDADE ?>" data-max-tamanho-bytes="<?= ANEXO_CHAMADO_MAX_SIZE ?>">
+                        <input type="file" name="anexos[]" class="anexos-stager-input" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+                        <div class="anexos-stager-controles">
+                            <button type="button" class="btn btn-outline-dark btn-sm anexos-stager-escolher"><i class="bi bi-paperclip"></i> Escolher anexos</button>
+                            <button type="button" class="btn btn-dark btn-sm anexos-stager-enviar" disabled><i class="bi bi-plus-lg"></i> Enviar anexos</button>
+                            <span class="anexos-stager-pendente text-muted"></span>
+                        </div>
+                        <div class="anexos-stager-erro alert alert-danger d-none"></div>
+                        <ul class="anexos-stager-lista list-unstyled"></ul>
+                    </div>
+                    <p class="anexos-upload-preview">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
+                    <div class="d-flex justify-content-end">
                         <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-send"></i> Enviar resposta</button>
                     </div>
-                    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
                 </form>
             </div>
         </div>

@@ -247,6 +247,138 @@
         if (e.key === 'Escape') fecharLightbox();
     });
 
+    // --------------------------------------------------- Anexos (staging)
+    // Troca o <input type="file"> nativo (rótulo do próprio navegador --
+    // "Escolher Ficheiros" em português de Portugal, print do Kleber) por um
+    // botão próprio ("Escolher anexos") + lista de pendentes abaixo. Fluxo
+    // pedido: escolher (pode repetir em vários lotes) -> "Enviar anexos" só
+    // ADICIONA à lista, sem mandar o chamado -> escreve a mensagem por
+    // último -> "Enviar resposta" manda tudo junto de uma vez. Também
+    // valida quantidade/tamanho aqui, ANTES de qualquer envio -- sem essa
+    // trava, um arquivo grande demais só é rejeitado depois de subir tudo,
+    // caindo numa tela de erro genérica do nginx (413), feia pro cliente ver.
+    var ICONES_ANEXO_POR_EXTENSAO = {
+        pdf: 'bi-filetype-pdf', doc: 'bi-filetype-doc', docx: 'bi-filetype-docx',
+        xls: 'bi-filetype-xls', xlsx: 'bi-filetype-xlsx', ppt: 'bi-filetype-ppt', pptx: 'bi-filetype-pptx',
+        txt: 'bi-filetype-txt', csv: 'bi-filetype-csv', rtf: 'bi-file-earmark-richtext',
+        zip: 'bi-file-earmark-zip', rar: 'bi-file-earmark-zip', '7z': 'bi-file-earmark-zip',
+        odt: 'bi-file-earmark-text', ods: 'bi-file-earmark-spreadsheet', odp: 'bi-file-earmark-slides',
+        jpg: 'bi-filetype-jpg', jpeg: 'bi-filetype-jpg', png: 'bi-filetype-png', gif: 'bi-filetype-gif',
+        webp: 'bi-file-earmark-image'
+    };
+
+    function iconeAnexoPorNome(nome) {
+        var ext = (nome.split('.').pop() || '').toLowerCase();
+        return ICONES_ANEXO_POR_EXTENSAO[ext] || 'bi-file-earmark';
+    }
+
+    function formatarTamanhoArquivo(bytes) {
+        if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+    }
+
+    function inicializarAnexoStager(widget) {
+        var input = widget.querySelector('.anexos-stager-input');
+        var btnEnviar = widget.querySelector('.anexos-stager-enviar');
+        var spanPendente = widget.querySelector('.anexos-stager-pendente');
+        var elErro = widget.querySelector('.anexos-stager-erro');
+        var lista = widget.querySelector('.anexos-stager-lista');
+        var maxArquivos = parseInt(widget.getAttribute('data-max-arquivos'), 10) || 5;
+        var maxTamanho = parseInt(widget.getAttribute('data-max-tamanho-bytes'), 10) || (10 * 1024 * 1024);
+
+        var arquivosNaLista = [];
+        var pendentes = [];
+
+        function mostrarErro(msg) {
+            elErro.textContent = msg;
+            elErro.classList.remove('d-none');
+        }
+
+        function limparErro() {
+            elErro.classList.add('d-none');
+            elErro.textContent = '';
+        }
+
+        function limparPendentes() {
+            pendentes = [];
+            btnEnviar.disabled = true;
+            spanPendente.textContent = '';
+        }
+
+        function sincronizarInput() {
+            var dt = new DataTransfer();
+            arquivosNaLista.forEach(function (f) { dt.items.add(f); });
+            input.files = dt.files;
+        }
+
+        function renderizarLista() {
+            lista.innerHTML = '';
+            arquivosNaLista.forEach(function (arquivo, indice) {
+                var li = document.createElement('li');
+                li.className = 'anexos-stager-item';
+                li.innerHTML = '<i class="bi ' + iconeAnexoPorNome(arquivo.name) + '"></i>'
+                    + '<span class="anexos-stager-item-nome" title="' + arquivo.name.replace(/"/g, '&quot;') + '">' + arquivo.name + '</span>'
+                    + '<span class="anexos-stager-item-tamanho">' + formatarTamanhoArquivo(arquivo.size) + '</span>'
+                    + '<button type="button" class="anexos-stager-item-remover" aria-label="Remover" data-indice="' + indice + '">&times;</button>';
+                lista.appendChild(li);
+            });
+        }
+
+        widget.addEventListener('click', function (e) {
+            if (e.target.closest('.anexos-stager-escolher')) {
+                input.click();
+                return;
+            }
+
+            var remover = e.target.closest('.anexos-stager-item-remover');
+            if (remover) {
+                arquivosNaLista.splice(parseInt(remover.getAttribute('data-indice'), 10), 1);
+                renderizarLista();
+                sincronizarInput();
+                return;
+            }
+
+            if (e.target.closest('.anexos-stager-enviar')) {
+                if (!pendentes.length) return;
+
+                var combinados = arquivosNaLista.concat(pendentes);
+                if (combinados.length > maxArquivos) {
+                    mostrarErro('Envie no máximo ' + maxArquivos + ' arquivos por vez.');
+                    limparPendentes();
+                    return;
+                }
+
+                var grandeDemais = combinados.find(function (f) { return f.size > maxTamanho; });
+                if (grandeDemais) {
+                    mostrarErro('"' + grandeDemais.name + '" passa do limite de ' + Math.round(maxTamanho / 1024 / 1024) + 'MB por arquivo.');
+                    limparPendentes();
+                    return;
+                }
+
+                limparErro();
+                arquivosNaLista = combinados;
+                limparPendentes();
+                renderizarLista();
+                sincronizarInput();
+            }
+        });
+
+        input.addEventListener('change', function () {
+            limparErro();
+            pendentes = Array.from(input.files || []);
+            // Sai do input assim que capturado -- só entra na lista de fato
+            // ao clicar "Enviar anexos" (senão um "Enviar resposta" direto,
+            // sem passar por ali, mandaria o arquivo sem validar).
+            input.value = '';
+            btnEnviar.disabled = pendentes.length === 0;
+            spanPendente.textContent = pendentes.length
+                ? pendentes.length + ' arquivo(s) selecionado(s) -- clique em "Enviar anexos"'
+                : '';
+        });
+    }
+
+    document.querySelectorAll('.anexos-stager').forEach(inicializarAnexoStager);
+
     // API mínima exposta pra scripts inline de cada página (ex.: ativar a
     // aba certa com base no hash da URL).
     window.PrimeUI = {

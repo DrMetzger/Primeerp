@@ -73,6 +73,15 @@ body > footer {
     flex-shrink: 0;
 }
 
+/* Rodapé do portal do cliente -- antes era só um texto cinza solto, com o
+   mesmo fundo do resto da página, sem nenhuma linha separando onde a tela
+   termina e o rodapé começa (print/reclamação do Kleber). */
+.portal-footer {
+    background-color: var(--ph-surface);
+    border-top: 1px solid var(--ph-border);
+    margin-top: 2rem;
+}
+
 a { color: var(--ph-primary); text-decoration: none; }
 a:hover { color: var(--ph-primary-dark); text-decoration: underline; }
 
@@ -436,6 +445,9 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
     border-radius: var(--ph-radius);
     box-shadow: var(--ph-elev-1);
 }
+
+.card-conversa-chamado { box-shadow: var(--ph-elev-1); }
+.form-resposta-chamado { border-top: 1px solid var(--ph-border); }
 
 .card-stat .stat-value { font-size: 2rem; font-weight: 700; }
 
@@ -1065,6 +1077,41 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 .chat-anexos .anexo-link:hover { text-decoration: underline; }
 
 .anexos-upload-preview { font-size: .78rem; color: #64748b; margin-top: .25rem; }
+
+/* Widget de anexos "escolher -> enviar anexos -> lista embaixo" (ver
+   inicializarAnexoStager() em app.js) -- substitui o <input type="file">
+   nativo, que mostrava o rótulo no idioma do navegador (ex. "Escolher
+   Ficheiros", português de Portugal) e não dava pra montar vários lotes
+   antes de mandar a resposta do chamado. */
+.anexos-stager-input { display: none; }
+.anexos-stager-controles { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.anexos-stager-pendente { font-size: .8rem; }
+.anexos-stager-erro { margin-bottom: .5rem; }
+.anexos-stager-lista { display: flex; flex-direction: column; gap: .4rem; margin: 0; }
+.anexos-stager-item {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .45rem .65rem;
+    background-color: var(--ph-neutral-bg);
+    border: 1px solid var(--ph-border);
+    border-radius: var(--ph-radius-sm);
+    font-size: .85rem;
+}
+.anexos-stager-item i { font-size: 1.15rem; color: var(--ph-primary); flex-shrink: 0; }
+.anexos-stager-item-nome { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anexos-stager-item-tamanho { color: var(--ph-text-muted); font-size: .76rem; flex-shrink: 0; }
+.anexos-stager-item-remover {
+    border: none;
+    background: transparent;
+    color: var(--ph-text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 .2rem;
+    flex-shrink: 0;
+}
+.anexos-stager-item-remover:hover { color: var(--ph-danger); }
 
 /* Resumo com todos os anexos do chamado, no topo (fora de qualquer bolha de
    chat -- fundo neutro claro, então o link não pode herdar a cor branca

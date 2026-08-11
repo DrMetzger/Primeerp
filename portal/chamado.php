@@ -292,38 +292,53 @@ require __DIR__ . '/../templates/portal_header.php';
 <?= render_resumo_anexos_chamado($anexosPorLinha) ?>
 <?= render_reunioes_vinculadas_chamado($treinamentosDoChamado) ?>
 
-<h6 class="mt-4 mb-2">Conversa</h6>
-<!-- Suas próprias mensagens ficam à direita (convenção normal de chat), a
-     equipe PrimeERP à esquerda -- mas a cor da bolha segue quem escreveu
-     (você = verde, equipe = azul/roxo), não o lado. Inclui a mensagem de
-     abertura do chamado, que antes ficava sem bolha/cor/nome. -->
-<div class="chat-thread">
-<?php foreach ($linhasChat as $linha): ?>
-    <?php $ladoDireita = $linha['autor_tipo'] === 'cliente'; ?>
-    <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
-        <?= avatar_html($linha['autor_nome'], $linha['foto'], $linha['autor_tipo']) ?>
-        <div class="chat-bolha bolha-<?= e($linha['autor_tipo']) ?>">
-            <span class="chat-autor"><?= e($linha['autor_nome']) ?><?= $linha['autor_tipo'] === 'equipe' ? ' · Prime Hub' : '' ?></span>
-            <span style="white-space: pre-wrap;"><?= e($linha['mensagem']) ?></span>
-            <?= render_anexos_html($linha['anexos']) ?>
-            <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($linha['criado_em'])) ?></span>
+<div class="card card-conversa-chamado mt-4">
+    <div class="card-header bg-white">Conversa</div>
+    <div class="card-body">
+    <!-- Suas próprias mensagens ficam à direita (convenção normal de chat), a
+         equipe PrimeERP à esquerda -- mas a cor da bolha segue quem escreveu
+         (você = verde, equipe = azul/roxo), não o lado. Inclui a mensagem de
+         abertura do chamado, que antes ficava sem bolha/cor/nome. -->
+    <div class="chat-thread">
+    <?php foreach ($linhasChat as $linha): ?>
+        <?php $ladoDireita = $linha['autor_tipo'] === 'cliente'; ?>
+        <div class="chat-linha <?= $ladoDireita ? 'chat-direita' : 'chat-esquerda' ?>">
+            <?= avatar_html($linha['autor_nome'], $linha['foto'], $linha['autor_tipo']) ?>
+            <div class="chat-bolha bolha-<?= e($linha['autor_tipo']) ?>">
+                <span class="chat-autor"><?= e($linha['autor_nome']) ?><?= $linha['autor_tipo'] === 'equipe' ? ' · Prime Hub' : '' ?></span>
+                <span style="white-space: pre-wrap;"><?= e($linha['mensagem']) ?></span>
+                <?= render_anexos_html($linha['anexos']) ?>
+                <span class="chat-hora"><?= date('d/m/Y H:i', strtotime($linha['criado_em'])) ?></span>
+            </div>
         </div>
+    <?php endforeach; ?>
     </div>
-<?php endforeach; ?>
-</div>
 
-<?php if ($chamado['status'] === 'fechado'): ?>
-    <p class="text-muted small mt-3 mb-1"><i class="bi bi-info-circle"></i> Este chamado está fechado. Se responder, ele é reaberto automaticamente.</p>
-<?php endif; ?>
-<form method="post" enctype="multipart/form-data" class="mt-2">
-    <?= csrf_field() ?>
-    <input type="hidden" name="acao" value="responder">
-    <textarea name="mensagem" class="form-control mb-2" rows="3" placeholder="Escreva uma resposta..."></textarea>
-    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-        <input type="file" name="anexos[]" class="form-control form-control-sm" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>" style="max-width: 320px;">
-        <button type="submit" class="btn btn-dark">Enviar resposta</button>
+    <?php if ($chamado['status'] === 'fechado'): ?>
+        <p class="text-muted small mt-3 mb-1"><i class="bi bi-info-circle"></i> Este chamado está fechado. Se responder, ele é reaberto automaticamente.</p>
+    <?php endif; ?>
+    <form method="post" enctype="multipart/form-data" class="mt-3 pt-3 form-resposta-chamado">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="responder">
+        <textarea name="mensagem" class="form-control mb-2" rows="3" placeholder="Escreva uma resposta..."></textarea>
+
+        <div class="anexos-stager" data-max-arquivos="<?= ANEXO_CHAMADO_MAX_QUANTIDADE ?>" data-max-tamanho-bytes="<?= ANEXO_CHAMADO_MAX_SIZE ?>">
+            <input type="file" name="anexos[]" class="anexos-stager-input" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+            <div class="anexos-stager-controles">
+                <button type="button" class="btn btn-outline-dark btn-sm anexos-stager-escolher"><i class="bi bi-paperclip"></i> Escolher anexos</button>
+                <button type="button" class="btn btn-dark btn-sm anexos-stager-enviar" disabled><i class="bi bi-plus-lg"></i> Enviar anexos</button>
+                <span class="anexos-stager-pendente text-muted"></span>
+            </div>
+            <div class="anexos-stager-erro alert alert-danger d-none"></div>
+            <ul class="anexos-stager-lista list-unstyled"></ul>
+        </div>
+        <p class="anexos-upload-preview">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
+
+        <div class="d-flex justify-content-end">
+            <button type="submit" class="btn btn-dark">Enviar resposta</button>
+        </div>
+    </form>
     </div>
-    <p class="anexos-upload-preview mb-0">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada (imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).</p>
-</form>
+</div>
 
 <?php require __DIR__ . '/../templates/portal_footer.php'; ?>
