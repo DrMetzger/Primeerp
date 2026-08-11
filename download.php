@@ -3,24 +3,10 @@
 require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\Auth;
-use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
 use AdminPrime\Migrations;
 
-// Normalmente é só a equipe que baixa documento (Auth::requireLogin() puro),
-// mas o cliente no portal agora também precisa baixar os anexos da própria
-// Implantação (portal/implantacao.php) -- mesma ideia dual-auth de
-// download_anexo_chamado.php. Pra não abrir a porta pra QUALQUER documento
-// do cliente (contrato social, propostas etc. continuam só da equipe), o
-// login de portal só passa se for realmente da categoria Implantação E
-// pertencer à empresa dele.
-$staffLogado = Auth::check();
-$clienteLogado = ClienteAuth::check();
-
-if (!$staffLogado && !$clienteLogado) {
-    http_response_code(403);
-    die('Acesso não autorizado.');
-}
+Auth::requireLogin();
 
 $pdo = Database::connection();
 
@@ -32,13 +18,6 @@ $documento = $stmt->fetch();
 if (!$documento) {
     http_response_code(404);
     die('Documento não encontrado.');
-}
-
-if ($clienteLogado && !$staffLogado
-    && ((int) $documento['cliente_id'] !== ClienteAuth::clienteId() || $documento['categoria'] !== 'Implantação')
-) {
-    http_response_code(403);
-    die('Acesso não autorizado.');
 }
 
 // Restaura do backup no banco se o arquivo tiver desaparecido do disco

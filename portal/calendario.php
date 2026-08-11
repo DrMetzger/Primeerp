@@ -82,6 +82,7 @@ $mapearEventosCalendarioPortal = fn (array $lista) => array_map(fn ($t) => [
 ], $lista);
 
 $tituloPagina = 'Calendário';
+$larguraPortalPx = 1200; // grade do calendário ficava espremida em 900px (mesma reclamação de equipe.php)
 require __DIR__ . '/../templates/portal_header.php';
 ?>
 

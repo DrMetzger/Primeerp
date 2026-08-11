@@ -154,6 +154,7 @@ $totalAtrasados = count(array_filter($chamados, fn ($c) => $c['status'] === 'agu
 $totalEncerrados = count(array_filter($chamados, fn ($c) => $c['status'] === 'fechado'));
 
 $tituloPagina = 'Meus Chamados';
+$larguraPortalPx = 1200; // lista com tabela/cards de vários chamados -- 900px ficava espremido (mesma reclamação de equipe.php)
 require __DIR__ . '/../templates/portal_header.php';
 ?>
 
