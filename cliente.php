@@ -30,15 +30,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=?, portal_permite_gerenciar_equipe=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=?, portal_permite_gerenciar_equipe=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             apenas_digitos($_POST['cnpj'] ?? ''),
             $_POST['status'],
-            trim($_POST['contato_nome']) ?: null,
-            trim($_POST['contato_email']) ?: null,
-            apenas_digitos($_POST['contato_telefone'] ?? ''),
-            normalizar_documento($_POST['contato_documento'] ?? ''),
             $_POST['responsavel_interno_id'] ?: null,
             trim($_POST['observacoes']) ?: null,
             isset($_POST['acesso_fora_horario']) ? 1 : 0,
@@ -52,6 +48,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         flash_set('sucesso', 'Dados do cliente atualizados.');
+    }
+
+    // Extraído de "atualizar_cliente" -- dados do CONTATO (pessoa) numa aba
+    // própria, separada dos dados da EMPRESA, pedido do Kleber pra "juntar
+    // tudo que é do usuário/contato em um lugar só". Sem isso os dois grupos
+    // de campo ficavam misturados no mesmo form/UPDATE.
+    if ($acao === 'atualizar_contato') {
+        $stmt = $pdo->prepare('UPDATE clientes SET contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=? WHERE id=?');
+        $stmt->execute([
+            trim($_POST['contato_nome']) ?: null,
+            trim($_POST['contato_email']) ?: null,
+            apenas_digitos($_POST['contato_telefone'] ?? ''),
+            normalizar_documento($_POST['contato_documento'] ?? ''),
+            $clienteId,
+        ]);
+
+        flash_set('sucesso', 'Dados do contato atualizados.');
     }
 
     if ($acao === 'criar_kpi') {
@@ -821,17 +834,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Avatar do MASTER -- mesmas funções já usadas pelo próprio cliente em
     // portal/perfil.php, chamadas agora pelo lado da equipe (o Kleber pode
     // trocar a foto do contato sem precisar pedir pro cliente entrar no
-    // portal só pra isso).
-    if ($acao === 'atualizar_avatar_master') {
-        $erroFotoMaster = processar_upload_foto_cliente($pdo, $clienteId);
-        flash_set($erroFotoMaster ? 'erro' : 'sucesso', $erroFotoMaster ?? 'Foto atualizada.');
-    }
+    // portal só pra isso). Responde via AJAX (igual "pesquisar_perfil_empresa"
+    // acima) quando pedido -- clicar num avatar pronto era um <form> que
+    // recarregava a página inteira, o que apagava qualquer campo já
+    // preenchido (e ainda não salvo) nos outros formulários da aba, incluindo
+    // o de "Dados do contato" logo abaixo. Sem recarregar, nada se perde.
+    if ($acao === 'atualizar_avatar_master' || $acao === 'escolher_avatar_predefinido_master') {
+        $ehAjaxAvatarMaster = ($_POST['ajax'] ?? '') === '1';
 
-    if ($acao === 'escolher_avatar_predefinido_master') {
-        $indiceAvatarMaster = (int) ($_POST['avatar'] ?? 0);
-        if (definir_avatar_predefinido_cliente($pdo, $clienteId, $indiceAvatarMaster)) {
-            flash_set('sucesso', 'Avatar atualizado.');
+        if ($acao === 'atualizar_avatar_master') {
+            $erroAvatarMaster = processar_upload_foto_cliente($pdo, $clienteId);
+        } else {
+            $indiceAvatarMaster = (int) ($_POST['avatar'] ?? 0);
+            $erroAvatarMaster = definir_avatar_predefinido_cliente($pdo, $clienteId, $indiceAvatarMaster) ? null : 'Avatar inválido.';
         }
+
+        if ($ehAjaxAvatarMaster) {
+            $stmtClienteAtualizado = $pdo->prepare('SELECT contato_nome, contato_email, nome, foto_perfil FROM clientes WHERE id = ?');
+            $stmtClienteAtualizado->execute([$clienteId]);
+            $clienteAtualizado = $stmtClienteAtualizado->fetch();
+
+            header('Content-Type: application/json');
+            echo json_encode([
+                'sucesso' => !$erroAvatarMaster,
+                'mensagem' => $erroAvatarMaster ?? 'Avatar atualizado.',
+                'avatar_html' => $erroAvatarMaster ? null : avatar_html(
+                    $clienteAtualizado['contato_nome'] ?: $clienteAtualizado['nome'],
+                    resolver_avatar_por_email($pdo, $clienteAtualizado['contato_email'], $clienteAtualizado['foto_perfil']),
+                    'cliente'
+                ),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        flash_set($erroAvatarMaster ? 'erro' : 'sucesso', $erroAvatarMaster ?? 'Avatar atualizado.');
     }
 
     if ($acao === 'criar_chamado_equipe') {
@@ -1780,6 +1816,34 @@ require __DIR__ . '/templates/header.php';
     <div class="tab-pane" id="visao-geral">
         <div class="card card-stat">
             <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <strong><i class="bi bi-globe"></i> Perfil público da empresa (IA)</strong>
+                    <form method="post" class="form-pesquisar-perfil-empresa">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="acao" value="pesquisar_perfil_empresa">
+                        <input type="hidden" name="aba_retorno" value="visao-geral">
+                        <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configuradaBusca() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $cliente['perfil_ia'] ? 'Pesquisar de novo' : 'Pesquisar com IA' ?></button>
+                    </form>
+                </div>
+                <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro. Usa uma chave/projeto separado da análise interna de chamados/KPIs, de propósito (essa busca depende de faturamento ativado no Google Cloud; a análise interna continua sempre gratuita).</p>
+                <?php if (!AiSugestoes::configuradaBusca()): ?>
+                    <p class="text-muted small">Busca por IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto novo, com faturamento ativado no Google Cloud pra liberar a ferramenta de busca.</p>
+                <?php endif; ?>
+                <div class="resultado-perfil-empresa" id="resultadoPerfilEmpresa">
+                    <?php if ($cliente['perfil_ia']): ?>
+                        <div class="card card-stat"><div class="card-body">
+                            <p class="text-muted small mb-2">Pesquisado em <?= e(formatar_data($cliente['perfil_ia_gerado_em'])) ?></p>
+                            <div style="white-space: pre-wrap;"><?= e($cliente['perfil_ia']) ?></div>
+                        </div></div>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Ainda não pesquisado.</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
                 <form method="post" enctype="multipart/form-data">
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="atualizar_cliente">
@@ -1814,25 +1878,9 @@ require __DIR__ . '/templates/header.php';
                             <label class="form-label">Cliente desde</label>
                             <input type="text" class="form-control" value="<?= formatar_data($cliente['criado_em']) ?>" disabled>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <label class="form-label">CNPJ</label>
                             <input type="text" name="cnpj" class="form-control input-cnpj" value="<?= e(formatar_cnpj($cliente['cnpj'])) ?>" placeholder="00.000.000/0000-00">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Contato - nome</label>
-                            <input type="text" name="contato_nome" class="form-control" value="<?= e($cliente['contato_nome']) ?>">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Contato - e-mail</label>
-                            <input type="email" name="contato_email" class="form-control" value="<?= e($cliente['contato_email']) ?>">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Contato - telefone</label>
-                            <input type="text" name="contato_telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($cliente['contato_telefone'])) ?>" placeholder="(00) 00000-0000">
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">CPF ou RG do contato *</label>
-                            <input type="text" name="contato_documento" class="form-control" required value="<?= e($cliente['contato_documento']) ?>" placeholder="Só números (RG pode terminar em X)">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Responsável interno (equipe)</label>
@@ -1870,38 +1918,12 @@ require __DIR__ . '/templates/header.php';
 
         <div class="card card-stat mt-3">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-                    <strong><i class="bi bi-globe"></i> Perfil público da empresa (IA)</strong>
-                    <form method="post" class="form-pesquisar-perfil-empresa">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="acao" value="pesquisar_perfil_empresa">
-                        <input type="hidden" name="aba_retorno" value="visao-geral">
-                        <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configuradaBusca() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $cliente['perfil_ia'] ? 'Pesquisar de novo' : 'Pesquisar com IA' ?></button>
-                    </form>
-                </div>
-                <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro. Usa uma chave/projeto separado da análise interna de chamados/KPIs, de propósito (essa busca depende de faturamento ativado no Google Cloud; a análise interna continua sempre gratuita).</p>
-                <?php if (!AiSugestoes::configuradaBusca()): ?>
-                    <p class="text-muted small">Busca por IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto novo, com faturamento ativado no Google Cloud pra liberar a ferramenta de busca.</p>
-                <?php endif; ?>
-                <div class="resultado-perfil-empresa" id="resultadoPerfilEmpresa">
-                    <?php if ($cliente['perfil_ia']): ?>
-                        <div class="card card-stat"><div class="card-body">
-                            <p class="text-muted small mb-2">Pesquisado em <?= e(formatar_data($cliente['perfil_ia_gerado_em'])) ?></p>
-                            <div style="white-space: pre-wrap;"><?= e($cliente['perfil_ia']) ?></div>
-                        </div></div>
-                    <?php else: ?>
-                        <p class="text-muted small mb-0">Ainda não pesquisado.</p>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <div class="card card-stat mt-3">
-            <div class="card-body">
-                <strong class="d-block mb-3">Foto do contato (avatar)</strong>
+                <strong class="d-block mb-3">Dados do contato</strong>
                 <div class="d-flex align-items-center gap-3 mb-3">
-                    <?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?>
-                    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                    <div id="avatarContatoMaster">
+                        <?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?>
+                    </div>
+                    <form method="post" enctype="multipart/form-data" class="form-avatar-master d-flex gap-2 align-items-center">
                         <?= csrf_field() ?>
                         <input type="hidden" name="acao" value="atualizar_avatar_master">
                         <input type="hidden" name="aba_retorno" value="visao-geral">
@@ -1910,9 +1932,9 @@ require __DIR__ . '/templates/header.php';
                     </form>
                 </div>
                 <p class="text-muted small mb-1">Ou escolha um avatar pronto:</p>
-                <div class="galeria-avatares">
+                <div class="galeria-avatares mb-3">
                     <?php for ($i = 1; $i <= QUANTIDADE_AVATARES_PREDEFINIDOS; $i++): ?>
-                        <form method="post" class="d-inline">
+                        <form method="post" class="d-inline form-avatar-master">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="escolher_avatar_predefinido_master">
                             <input type="hidden" name="aba_retorno" value="visao-geral">
@@ -1923,6 +1945,30 @@ require __DIR__ . '/templates/header.php';
                         </form>
                     <?php endfor; ?>
                 </div>
+                <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="atualizar_contato">
+                    <input type="hidden" name="aba_retorno" value="visao-geral">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Contato - nome</label>
+                            <input type="text" name="contato_nome" class="form-control" value="<?= e($cliente['contato_nome']) ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Contato - e-mail</label>
+                            <input type="email" name="contato_email" class="form-control" value="<?= e($cliente['contato_email']) ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Contato - telefone</label>
+                            <input type="text" name="contato_telefone" class="form-control input-telefone" value="<?= e(formatar_telefone($cliente['contato_telefone'])) ?>" placeholder="(00) 00000-0000">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">CPF ou RG do contato *</label>
+                            <input type="text" name="contato_documento" class="form-control" required value="<?= e($cliente['contato_documento']) ?>" placeholder="Só números (RG pode terminar em X)">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-dark mt-3">Salvar dados do contato</button>
+                </form>
             </div>
         </div>
 
@@ -4151,6 +4197,43 @@ document.addEventListener('DOMContentLoaded', function () {
                 })
                 .finally(function () {
                     escondercarregando();
+                });
+        });
+    });
+
+    // Avatar do contato (foto enviada OU avatar pronto) -- também via AJAX,
+    // mesmo motivo do "pesquisar_perfil_empresa" acima: cada avatar pronto é
+    // um <form> próprio que ANTES recarregava a página inteira ao clicar, o
+    // que apagava qualquer campo já digitado (e ainda não salvo) em QUALQUER
+    // outro formulário da aba -- bug real reportado pelo Kleber ("preenchi
+    // os dados do contato, fui trocar a foto, ela recarregou e apagou tudo").
+    document.querySelectorAll('.form-avatar-master').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            var dados = new FormData(form);
+            dados.set('ajax', '1');
+            var botao = form.querySelector('button[type="submit"]');
+            var textoBotaoOriginal = botao ? botao.innerHTML : '';
+            if (botao) botao.disabled = true;
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (resp) { return resp.json(); })
+                .then(function (json) {
+                    if (json.sucesso && json.avatar_html) {
+                        var alvo = document.getElementById('avatarContatoMaster');
+                        if (alvo) alvo.innerHTML = json.avatar_html;
+                        form.reset();
+                    } else {
+                        alert(json.mensagem || 'Não foi possível atualizar o avatar.');
+                    }
+                })
+                .catch(function (erro) {
+                    alert('Falha de conexão ao atualizar o avatar: ' + String(erro));
+                })
+                .finally(function () {
+                    if (botao) { botao.disabled = false; botao.innerHTML = textoBotaoOriginal; }
                 });
         });
     });
