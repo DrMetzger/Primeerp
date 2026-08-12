@@ -188,9 +188,42 @@ class WhatsAppApi
 
         if ($resposta === false || $codigoHttp >= 300) {
             error_log('WhatsApp: falha na chamada à Graph API (' . $url . '): HTTP ' . $codigoHttp . ' ' . $erroCurl . ' -- ' . $resposta);
+            // 401/403 é quase sempre token expirado/inválido -- diferente de
+            // outros erros (número invalido, etc.), esse tipo derruba TODO
+            // envio de WhatsApp de uma vez só, e antes ficava só no error_log
+            // (ninguém via até um cliente reclamar que só chegou aviso por
+            // e-mail). Manda um alerta pra equipe por e-mail (que continua
+            // funcionando, é outro sistema) pra pegar rápido da próxima vez.
+            if ($codigoHttp === 401 || $codigoHttp === 403) {
+                self::alertarFalhaAutenticacao('HTTP ' . $codigoHttp . ' -- ' . $resposta);
+            }
             return null;
         }
 
         return json_decode($resposta, true);
+    }
+
+    private static function alertarFalhaAutenticacao(string $detalheErro): void
+    {
+        // No máximo 1 e-mail de alerta por hora enquanto o problema
+        // persistir -- numa hora de pico de chamados, cada mensagem que
+        // falhasse geraria um e-mail novo (viraria spam rápido).
+        $arquivoMarca = sys_get_temp_dir() . '/adminprime_whatsapp_alerta_token.marker';
+        if (is_file($arquivoMarca) && (time() - filemtime($arquivoMarca)) < 3600) {
+            return;
+        }
+        @touch($arquivoMarca);
+
+        if (!defined('NOTIFICACAO_EMAILS_EQUIPE')) {
+            return;
+        }
+
+        $corpo = '<p>A API do WhatsApp está rejeitando as mensagens (HTTP 401/403 -- token de acesso da Meta provavelmente expirado ou inválido).</p>'
+            . '<p>Avisos de chamado/treinamento estão saindo só por e-mail até isso ser corrigido -- gere um token novo (de preferência permanente, via System User) na Meta Business Manager e atualize ADMINPRIME_WHATSAPP_ACCESS_TOKEN.</p>'
+            . '<p>Detalhe técnico: ' . e($detalheErro) . '</p>';
+
+        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+            Mailer::enviar($emailEquipe, '⚠️ WhatsApp da Prime parou de enviar mensagens', $corpo);
+        }
     }
 }

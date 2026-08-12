@@ -21,10 +21,18 @@ Options -Indexes
 # roda PHP via LiteSpeed/lsphp, que lê .user.ini -- não mod_php) só pra
 # garantir que pelo menos um dos dois mecanismos funcione, sem quebrar o site
 # se o outro não for suportado (por isso o <IfModule>, que vira um no-op).
+# max_execution_time/max_input_time NÃO ficam em 300s -- o processamento de
+# upload em si (mover o arquivo + gravar o backup no banco) é rápido mesmo
+# pra 500MB (testado localmente), então não precisa de tanto tempo. Deixar
+# alto demais só faz qualquer coisa LENTA/travada em QUALQUER outra parte do
+# site (ex.: SMTP demorando pra responder) ficar pendurada até esse limite em
+# vez de falhar rápido -- e a Hostinger corta a conexão no nível do
+# nginx/proxy antes disso de qualquer jeito (504 Gateway Time-out, bem mais
+# feio pro cliente ver do que um erro normal da aplicação).
 <IfModule mod_php.c>
     php_value upload_max_filesize 500M
     php_value post_max_size 520M
     php_value memory_limit 1024M
-    php_value max_execution_time 300
-    php_value max_input_time 300
+    php_value max_execution_time 45
+    php_value max_input_time 90
 </IfModule>
