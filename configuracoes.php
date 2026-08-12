@@ -26,6 +26,8 @@ $camposConfiguracao = [
     'smtp_pass' => defined('SMTP_PASS') ? SMTP_PASS : '',
     'smtp_nome_remetente' => 'Prime Hub',
     'notificacao_emails_equipe' => defined('NOTIFICACAO_EMAILS_EQUIPE') ? implode("\n", NOTIFICACAO_EMAILS_EQUIPE) : '',
+    'gemini_api_key' => defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '',
+    'gemini_api_key_busca' => defined('GEMINI_API_KEY_BUSCA') ? GEMINI_API_KEY_BUSCA : '',
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -134,6 +136,31 @@ require __DIR__ . '/templates/header.php';
                     <label class="form-label">E-mails da equipe que recebem aviso de todo chamado/treinamento novo</label>
                     <textarea name="notificacao_emails_equipe" class="form-control" rows="3" placeholder="um e-mail por linha"><?= e($valores['notificacao_emails_equipe']) ?></textarea>
                     <div class="form-text">Um e-mail por linha (ou separados por vírgula).</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card card-stat mb-3">
+        <div class="card-body">
+            <strong class="d-block mb-1"><i class="bi bi-stars"></i> IA Gemini (Google)</strong>
+            <p class="text-muted small">Duas chaves de propósito -- não é redundância, é isolamento de custo. Enquanto a chave de análise não estiver preenchida, os botões de sugestão de IA ficam desabilitados (sem quebrar a tela).</p>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Chave de análise (chamados/KPIs/implantação)</label>
+                    <div class="campo-senha">
+                        <input type="password" name="gemini_api_key" class="form-control" value="<?= e($valores['gemini_api_key']) ?>" autocomplete="off">
+                        <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar chave"><i class="bi bi-eye"></i></button>
+                    </div>
+                    <div class="form-text">Analisa só dados JÁ CADASTRADOS no sistema, nunca busca na internet -- fica sempre dentro do plano gratuito do Google AI Studio.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Chave de busca (perfil público da empresa)</label>
+                    <div class="campo-senha">
+                        <input type="password" name="gemini_api_key_busca" class="form-control" value="<?= e($valores['gemini_api_key_busca']) ?>" autocomplete="off">
+                        <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar chave"><i class="bi bi-eye"></i></button>
+                    </div>
+                    <div class="form-text"><strong>Precisa ser de um projeto Google Cloud SEPARADO da chave de análise</strong>, com faturamento ativado -- ativar a ferramenta de busca do Google remove o plano gratuito do projeto INTEIRO. Se for a mesma chave/projeto da análise, a análise interna que hoje é de graça passa a ser cobrada também.</div>
                 </div>
             </div>
         </div>

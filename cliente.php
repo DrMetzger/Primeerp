@@ -1827,7 +1827,7 @@ require __DIR__ . '/templates/header.php';
                 </div>
                 <p class="text-muted small">A IA pesquisa no Google pelo nome (e CNPJ, se preenchido) da empresa e resume ramo de atividade, porte, situação cadastral e cidade/UF -- é informação pública, não substitui o que o próprio cliente informou no cadastro. Usa uma chave/projeto separado da análise interna de chamados/KPIs, de propósito (essa busca depende de faturamento ativado no Google Cloud; a análise interna continua sempre gratuita).</p>
                 <?php if (!AiSugestoes::configuradaBusca()): ?>
-                    <p class="text-muted small">Busca por IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto novo, com faturamento ativado no Google Cloud pra liberar a ferramenta de busca.</p>
+                    <p class="text-muted small">Busca por IA ainda não configurada -- preencha a chave em Configurações &gt; IA Gemini (Google) (precisa de uma chave/projeto novo, com faturamento ativado no Google Cloud pra liberar a ferramenta de busca).</p>
                 <?php endif; ?>
                 <div class="resultado-perfil-empresa" id="resultadoPerfilEmpresa">
                     <?php if ($cliente['perfil_ia']): ?>
@@ -2227,7 +2227,7 @@ require __DIR__ . '/templates/header.php';
             <div class="card-body">
                 <p class="text-muted small">
                     <i class="bi bi-info-circle"></i> A IA usa os setores, a quantidade de usuários, as etapas e o CONTEÚDO dos anexos dessa implantação pra gerar cada sugestão. O texto gerado é editável -- ajuste como quiser antes de exportar em PDF.
-                    <?php if (!AiSugestoes::configurada()): ?><span class="d-block mt-1">IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY).</span><?php endif; ?>
+                    <?php if (!AiSugestoes::configurada()): ?><span class="d-block mt-1">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span><?php endif; ?>
                 </p>
                 <?php foreach ([
                     'treinamento' => ['📋', 'Roteiro de treinamento'],
@@ -2960,7 +2960,7 @@ require __DIR__ . '/templates/header.php';
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                             <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> Gerar sugestões com IA</button>
                             <?php if (!AiSugestoes::configurada()): ?>
-                                <span class="text-muted small ms-2">IA ainda não configurada (ADMINPRIME_GEMINI_API_KEY).</span>
+                                <span class="text-muted small ms-2">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span>
                             <?php endif; ?>
                         </form>
                         <div class="resultado-sugestao-ia" id="resultadoSugestaoIa<?= $idSetorAtual ?>">

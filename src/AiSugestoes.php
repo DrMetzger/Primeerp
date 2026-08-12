@@ -69,14 +69,30 @@ class AiSugestoes
     // subiram, em vez de estourar o tempo de execução do PHP.
     private const TEMPO_MAX_UPLOADS_SEGUNDOS = 60;
 
+    /**
+     * As duas chaves preferem o valor salvo pela tela configuracoes.php
+     * (tabela `configuracoes`) e só caem pra constante de config/config.php
+     * se nada tiver sido salvo ainda pela tela -- mesmo esquema do
+     * WhatsAppApi/Mailer.
+     */
+    private static function chaveAnalise(): string
+    {
+        return Configuracoes::get(Database::connection(), 'gemini_api_key', defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '') ?? '';
+    }
+
+    private static function chaveBusca(): string
+    {
+        return Configuracoes::get(Database::connection(), 'gemini_api_key_busca', defined('GEMINI_API_KEY_BUSCA') ? GEMINI_API_KEY_BUSCA : '') ?? '';
+    }
+
     public static function configurada(): bool
     {
-        return defined('GEMINI_API_KEY') && GEMINI_API_KEY !== '';
+        return self::chaveAnalise() !== '';
     }
 
     public static function configuradaBusca(): bool
     {
-        return defined('GEMINI_API_KEY_BUSCA') && GEMINI_API_KEY_BUSCA !== '';
+        return self::chaveBusca() !== '';
     }
 
     /**
@@ -102,7 +118,7 @@ class AiSugestoes
      */
     public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = []): array
     {
-        $chave ??= defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '';
+        $chave ??= self::chaveAnalise();
         if ($chave === '') {
             return ['ok' => false, 'texto' => null, 'erro' => 'Chave do Gemini não configurada.', 'arquivos_com_falha' => []];
         }
@@ -340,7 +356,7 @@ class AiSugestoes
     public static function pesquisarPerfilEmpresa(string $nomeEmpresa, ?string $cnpj): array
     {
         if (!self::configuradaBusca()) {
-            return ['ok' => false, 'texto' => null, 'erro' => 'Busca por IA não configurada (ADMINPRIME_GEMINI_API_KEY_BUSCA) -- precisa de uma chave/projeto separado com faturamento ativado pra liberar a ferramenta de busca do Google.'];
+            return ['ok' => false, 'texto' => null, 'erro' => 'Busca por IA não configurada -- preencha a chave em Configurações > IA Gemini (Google) (precisa de uma chave/projeto separado com faturamento ativado pra liberar a ferramenta de busca do Google).'];
         }
 
         $prompt = 'Pesquise informações públicas sobre a empresa brasileira "' . $nomeEmpresa . '"'
@@ -348,6 +364,6 @@ class AiSugestoes
             . '. Responda em português, em tópicos curtos: ramo de atividade, porte, situação cadastral (ativa/inapta/baixada), cidade/UF da sede, e ano de fundação se encontrar. '
             . 'Se não achar informação confiável, diga isso claramente em vez de inventar.';
 
-        return self::gerar($prompt, [['google_search' => (object) []]], GEMINI_API_KEY_BUSCA);
+        return self::gerar($prompt, [['google_search' => (object) []]], self::chaveBusca());
     }
 }
