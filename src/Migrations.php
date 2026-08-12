@@ -843,6 +843,21 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         self::migrarSetorUnicoParaMuitosParaMuitos($pdo);
+
+        // Configurações editáveis pela tela configuracoes.php (WhatsApp/
+        // e-mail) -- chave/valor simples porque são poucos campos e cada um
+        // é independente (não precisa de colunas tipadas). Valor NULL/vazio
+        // = "sem override", quem lê cai pro padrão de config/config.php (ver
+        // Configuracoes::get()). Pedido do Kleber pra não precisar mais
+        // pedir pra eu trocar token/telefone/SMTP direto no código.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS configuracoes (
+                chave VARCHAR(100) NOT NULL PRIMARY KEY,
+                valor TEXT NULL,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                atualizado_por INT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     /**

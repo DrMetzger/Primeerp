@@ -13,9 +13,30 @@ class WhatsAppApi
 {
     private const VERSAO_API = 'v21.0';
 
+    /**
+     * Token/phone_number_id/app_secret preferem o valor salvo pela tela
+     * configuracoes.php (tabela `configuracoes`) -- só cai pra constante de
+     * config/config.php se nada tiver sido salvo ainda pela tela. Isso é o
+     * que permite trocar o token sem precisar tocar em código/fazer deploy.
+     */
+    private static function token(): string
+    {
+        return Configuracoes::get(Database::connection(), 'whatsapp_access_token', defined('WHATSAPP_ACCESS_TOKEN') ? WHATSAPP_ACCESS_TOKEN : '') ?? '';
+    }
+
+    private static function phoneNumberId(): string
+    {
+        return Configuracoes::get(Database::connection(), 'whatsapp_phone_number_id', defined('WHATSAPP_PHONE_NUMBER_ID') ? WHATSAPP_PHONE_NUMBER_ID : '') ?? '';
+    }
+
+    private static function appSecret(): string
+    {
+        return Configuracoes::get(Database::connection(), 'whatsapp_app_secret', defined('WHATSAPP_APP_SECRET') ? WHATSAPP_APP_SECRET : '') ?? '';
+    }
+
     public static function configurada(): bool
     {
-        return defined('WHATSAPP_ACCESS_TOKEN') && WHATSAPP_ACCESS_TOKEN !== '' && WHATSAPP_PHONE_NUMBER_ID !== '';
+        return self::token() !== '' && self::phoneNumberId() !== '';
     }
 
     public static function enviarTexto(string $telefoneDestino, string $texto): bool
@@ -25,7 +46,7 @@ class WhatsAppApi
             return false;
         }
 
-        return self::chamarGraphApi(WHATSAPP_PHONE_NUMBER_ID . '/messages', [
+        return self::chamarGraphApi(self::phoneNumberId() . '/messages', [
             'messaging_product' => 'whatsapp',
             'to' => $telefoneDestino,
             'type' => 'text',
@@ -48,7 +69,7 @@ class WhatsAppApi
             return false;
         }
 
-        return self::chamarGraphApi(WHATSAPP_PHONE_NUMBER_ID . '/messages', [
+        return self::chamarGraphApi(self::phoneNumberId() . '/messages', [
             'messaging_product' => 'whatsapp',
             'to' => $telefoneDestino,
             'type' => 'interactive',
@@ -78,7 +99,7 @@ class WhatsAppApi
             return false;
         }
 
-        return self::chamarGraphApi(WHATSAPP_PHONE_NUMBER_ID . '/messages', [
+        return self::chamarGraphApi(self::phoneNumberId() . '/messages', [
             'messaging_product' => 'whatsapp',
             'to' => $telefoneDestino,
             'type' => 'interactive',
@@ -119,7 +140,7 @@ class WhatsAppApi
         $ch = curl_init($info['url']);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . WHATSAPP_ACCESS_TOKEN],
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . self::token()],
             CURLOPT_TIMEOUT => 20,
         ]);
         $bytes = curl_exec($ch);
@@ -146,14 +167,15 @@ class WhatsAppApi
      */
     public static function assinaturaValida(string $corpoBruto, ?string $assinaturaRecebida): bool
     {
-        if (!defined('WHATSAPP_APP_SECRET') || WHATSAPP_APP_SECRET === '') {
+        $appSecret = self::appSecret();
+        if ($appSecret === '') {
             return true;
         }
         if (!$assinaturaRecebida) {
             return false;
         }
 
-        $esperada = 'sha256=' . hash_hmac('sha256', $corpoBruto, WHATSAPP_APP_SECRET);
+        $esperada = 'sha256=' . hash_hmac('sha256', $corpoBruto, $appSecret);
         return hash_equals($esperada, $assinaturaRecebida);
     }
 
@@ -170,7 +192,7 @@ class WhatsAppApi
         $opcoes = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . WHATSAPP_ACCESS_TOKEN,
+                'Authorization: Bearer ' . self::token(),
                 'Content-Type: application/json',
             ],
             CURLOPT_TIMEOUT => 15,
@@ -214,15 +236,11 @@ class WhatsAppApi
         }
         @touch($arquivoMarca);
 
-        if (!defined('NOTIFICACAO_EMAILS_EQUIPE')) {
-            return;
-        }
-
         $corpo = '<p>A API do WhatsApp está rejeitando as mensagens (HTTP 401/403 -- token de acesso da Meta provavelmente expirado ou inválido).</p>'
-            . '<p>Avisos de chamado/treinamento estão saindo só por e-mail até isso ser corrigido -- gere um token novo (de preferência permanente, via System User) na Meta Business Manager e atualize ADMINPRIME_WHATSAPP_ACCESS_TOKEN.</p>'
+            . '<p>Avisos de chamado/treinamento estão saindo só por e-mail até isso ser corrigido -- gere um token novo (de preferência permanente, via System User) na Meta Business Manager e atualize em Configurações &gt; WhatsApp.</p>'
             . '<p>Detalhe técnico: ' . e($detalheErro) . '</p>';
 
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (Notificacoes::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, '⚠️ WhatsApp da Prime parou de enviar mensagens', $corpo);
         }
     }
