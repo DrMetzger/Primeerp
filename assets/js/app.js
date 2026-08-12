@@ -493,6 +493,7 @@
         overlay.classList.add('show');
 
         var dados = new FormData(form);
+        var tituloOverlay = overlay.querySelector('.overlay-upload-progresso-titulo');
         var xhr = new XMLHttpRequest();
         xhr.open((form.getAttribute('method') || 'POST').toUpperCase(), form.getAttribute('action') || window.location.href);
         xhr.upload.addEventListener('progress', function (ev) {
@@ -502,14 +503,34 @@
             barra.textContent = pct + '%';
             detalhe.textContent = formatarTamanhoArquivo(ev.loaded) + ' de ' + formatarTamanhoArquivo(ev.total);
         });
+        // O arquivo já terminou de subir, mas o servidor ainda está
+        // processando (salvando no banco, mandando e-mail/WhatsApp etc.) --
+        // sem isso a barra ficava travada em "100%" por vários segundos sem
+        // nenhum aviso, parecendo que travou de verdade.
+        xhr.upload.addEventListener('load', function () {
+            if (tituloOverlay) tituloOverlay.textContent = 'Registrando...';
+            detalhe.textContent = '';
+        });
         xhr.addEventListener('load', function () {
-            // Deixa a barra em 100% visível por um instante antes de trocar
-            // de página -- senão o salto de "90%" pra tela nova parece que
-            // travou nos últimos por cento (upload termina antes do server
-            // processar/responder).
-            barra.style.width = '100%';
-            barra.textContent = '100%';
-            window.location.href = xhr.responseURL || window.location.href;
+            // Volta pra MESMA aba/página de onde o formulário foi enviado --
+            // xhr.responseURL nunca inclui o #fragmento do Location (fragmento
+            // é só client-side, o navegador não manda pro servidor e a Graph
+            // API/redirect não devolve ele em lugar nenhum que o XHR exponha),
+            // então sem isso qualquer formulário com anexo mandava a pessoa
+            // pra aba errada mesmo o backend redirecionando certo -- bug real
+            // reportado pelo Kleber (respondia um chamado com anexo e caía na
+            // Visão Geral em vez de continuar em Chamados). Reconstrói o
+            // fragmento a partir do MESMO campo aba_retorno que o backend usa
+            // pra montar o Location, ou mantém o hash que já estava na tela
+            // se o formulário não tiver esse campo.
+            var abaRetorno = dados.get('aba_retorno');
+            var urlFinal = (xhr.responseURL || window.location.href).split('#')[0];
+            if (abaRetorno) {
+                urlFinal += '#' + abaRetorno;
+            } else if (window.location.hash) {
+                urlFinal += window.location.hash;
+            }
+            window.location.href = urlFinal;
         });
         xhr.addEventListener('error', function () {
             overlay.classList.remove('show');
