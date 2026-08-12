@@ -26,7 +26,7 @@ class Notificacoes
             <p><a href=\"$link\">Ver no Prime Hub</a></p>
         ";
 
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (self::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, "Novo chamado: {$chamado['titulo']} ({$cliente['nome']})", $corpo);
         }
 
@@ -103,7 +103,7 @@ class Notificacoes
         ";
 
         $assunto = ($ehReuniao ? 'Nova reunião' : 'Novo treinamento') . ": {$treinamento['titulo']} ({$nomeCliente})";
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (self::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, $assunto, $corpo);
         }
 
@@ -138,7 +138,7 @@ class Notificacoes
         ";
 
         $assunto = '⏰ Em 5 min: ' . ($ehReuniao ? 'reunião' : 'treinamento') . " {$treinamento['titulo']} ({$nomeCliente})";
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (self::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, $assunto, $corpo);
         }
 
@@ -207,7 +207,7 @@ class Notificacoes
             <p><a href=\"$link\">Ver no Prime Hub</a></p>
         ";
 
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (self::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, "Novo chamado (formulário público): {$chamado['titulo']}", $corpo);
         }
 
@@ -269,7 +269,7 @@ class Notificacoes
             <p><a href=\"$link\">Ver no Prime Hub</a></p>
         ";
 
-        foreach (NOTIFICACAO_EMAILS_EQUIPE as $emailEquipe) {
+        foreach (self::destinatariosEquipe() as $emailEquipe) {
             Mailer::enviar($emailEquipe, "Nova mensagem (WhatsApp) no chamado #{$chamado['id']}: {$chamado['titulo']}", $corpo);
         }
 
@@ -372,13 +372,28 @@ class Notificacoes
      */
     public static function whatsapp(?string $telefone, string $mensagem): void
     {
-        $destino = $telefone ?: (defined('WHATSAPP_NOTIFICAR_TELEFONE') ? WHATSAPP_NOTIFICAR_TELEFONE : '');
+        $padrao = defined('WHATSAPP_NOTIFICAR_TELEFONE') ? WHATSAPP_NOTIFICAR_TELEFONE : '';
+        $destino = $telefone ?: (Configuracoes::get(Database::connection(), 'whatsapp_notificar_telefone', $padrao) ?? '');
         if (!$destino) {
             error_log('WhatsApp (sem número de destino configurado): ' . $mensagem);
             return;
         }
 
         WhatsAppApi::enviarTexto($destino, $mensagem);
+    }
+
+    /**
+     * E-mails da equipe interna que recebem aviso de todo chamado/
+     * treinamento novo -- prefere a lista salva pela tela configuracoes.php
+     * (uma por linha), cai pra NOTIFICACAO_EMAILS_EQUIPE (config.php) se
+     * nada tiver sido salvo ainda.
+     */
+    public static function destinatariosEquipe(): array
+    {
+        $padrao = defined('NOTIFICACAO_EMAILS_EQUIPE') ? implode("\n", NOTIFICACAO_EMAILS_EQUIPE) : '';
+        $lista = Configuracoes::get(Database::connection(), 'notificacao_emails_equipe', $padrao) ?? '';
+
+        return array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', $lista))));
     }
 
     private static function baseUrlAbsoluta(): string

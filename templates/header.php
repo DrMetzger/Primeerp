@@ -36,6 +36,9 @@ use AdminPrime\Auth;
         <li class="nav-item"><a class="nav-link" href="<?= url('usuarios.php') ?>"><i class="bi bi-person-gear"></i> Usuários</a></li>
         <?php endif; ?>
       </ul>
+      <?php if (Auth::isAdmin()): ?>
+      <a href="<?= url('configuracoes.php') ?>" class="btn btn-outline-light btn-sm me-3" title="Configurações"><i class="bi bi-gear"></i></a>
+      <?php endif; ?>
       <a href="<?= url('perfil.php') ?>" class="navbar-text text-light me-3 d-flex align-items-center gap-2">
         <?= avatar_html(Auth::userName(), Auth::userFoto(), 'equipe') ?> <?= e(Auth::userName()) ?>
       </a>
