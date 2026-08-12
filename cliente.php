@@ -1918,6 +1918,74 @@ require __DIR__ . '/templates/header.php';
 
         <div class="card card-stat mt-3">
             <div class="card-body">
+                <strong class="d-block mb-3">Contratos</strong>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Contrato social da empresa</label>
+                        <?php if ($contratoSocial): ?>
+                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoSocial['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoSocial['arquivo_nome_original']) ?></a></p>
+                        <?php else: ?>
+                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
+                        <?php endif; ?>
+                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_documento">
+                            <input type="hidden" name="aba_retorno" value="visao-geral">
+                            <input type="hidden" name="titulo" value="Contrato Social">
+                            <input type="hidden" name="categoria" value="Contrato Social">
+                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoSocial ? 'Trocar' : 'Enviar' ?></button>
+                        </form>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Contrato de prestação de serviços (PrimeERP)</label>
+                        <?php if ($contratoPrestacaoServicos): ?>
+                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoPrestacaoServicos['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoPrestacaoServicos['arquivo_nome_original']) ?></a></p>
+                        <?php else: ?>
+                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
+                        <?php endif; ?>
+                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_documento">
+                            <input type="hidden" name="aba_retorno" value="visao-geral">
+                            <input type="hidden" name="titulo" value="Contrato de Prestação de Serviços">
+                            <input type="hidden" name="categoria" value="Contrato de Prestação de Serviços">
+                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
+                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoPrestacaoServicos ? 'Trocar' : 'Enviar' ?></button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
+                <strong class="d-block mb-3"><i class="bi bi-file-earmark"></i> Outros documentos gerais</strong>
+                <p class="text-muted small">Documentos que não são de um setor específico (para documento de setor, ver a aba Setores).</p>
+                <?php if ($documentosGerais): ?>
+                    <ul class="list-unstyled mb-3">
+                        <?php foreach ($documentosGerais as $doc): ?>
+                            <li class="d-flex align-items-center gap-2 mb-1">
+                                <a href="<?= url('download.php?id=' . $doc['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($doc['titulo']) ?></a>
+                                <span class="text-muted small"><?= $doc['categoria'] ? e($doc['categoria']) . ' · ' : '' ?><?= formatar_data($doc['criado_em']) ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="upload_documento">
+                    <input type="hidden" name="aba_retorno" value="visao-geral">
+                    <div class="col-md-3"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (opcional)"></div>
+                    <div class="col-md-3"><input type="text" name="categoria" class="form-control form-control-sm" placeholder="Categoria (opcional)"></div>
+                    <div class="col-md-4"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
+                    <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card card-stat mt-3">
+            <div class="card-body">
                 <strong class="d-block mb-3">Dados do contato</strong>
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <div id="avatarContatoMaster">
@@ -2005,74 +2073,6 @@ require __DIR__ . '/templates/header.php';
                     </form>
                     <?php endif; ?>
                 </div>
-            </div>
-        </div>
-
-        <div class="card card-stat mt-3">
-            <div class="card-body">
-                <strong class="d-block mb-3">Contratos</strong>
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Contrato social da empresa</label>
-                        <?php if ($contratoSocial): ?>
-                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoSocial['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoSocial['arquivo_nome_original']) ?></a></p>
-                        <?php else: ?>
-                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
-                        <?php endif; ?>
-                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="upload_documento">
-                            <input type="hidden" name="aba_retorno" value="visao-geral">
-                            <input type="hidden" name="titulo" value="Contrato Social">
-                            <input type="hidden" name="categoria" value="Contrato Social">
-                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
-                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoSocial ? 'Trocar' : 'Enviar' ?></button>
-                        </form>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Contrato de prestação de serviços (PrimeERP)</label>
-                        <?php if ($contratoPrestacaoServicos): ?>
-                            <p class="mb-2"><a href="<?= url('download.php?id=' . $contratoPrestacaoServicos['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($contratoPrestacaoServicos['arquivo_nome_original']) ?></a></p>
-                        <?php else: ?>
-                            <p class="text-muted small mb-2">Nenhum arquivo enviado ainda.</p>
-                        <?php endif; ?>
-                        <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="upload_documento">
-                            <input type="hidden" name="aba_retorno" value="visao-geral">
-                            <input type="hidden" name="titulo" value="Contrato de Prestação de Serviços">
-                            <input type="hidden" name="categoria" value="Contrato de Prestação de Serviços">
-                            <input type="file" name="arquivo" class="form-control form-control-sm" required>
-                            <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-upload"></i> <?= $contratoPrestacaoServicos ? 'Trocar' : 'Enviar' ?></button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="card card-stat mt-3">
-            <div class="card-body">
-                <strong class="d-block mb-3"><i class="bi bi-file-earmark"></i> Outros documentos gerais</strong>
-                <p class="text-muted small">Documentos que não são de um setor específico (para documento de setor, ver a aba Setores).</p>
-                <?php if ($documentosGerais): ?>
-                    <ul class="list-unstyled mb-3">
-                        <?php foreach ($documentosGerais as $doc): ?>
-                            <li class="d-flex align-items-center gap-2 mb-1">
-                                <a href="<?= url('download.php?id=' . $doc['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> <?= e($doc['titulo']) ?></a>
-                                <span class="text-muted small"><?= $doc['categoria'] ? e($doc['categoria']) . ' · ' : '' ?><?= formatar_data($doc['criado_em']) ?></span>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                <?php endif; ?>
-                <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="acao" value="upload_documento">
-                    <input type="hidden" name="aba_retorno" value="visao-geral">
-                    <div class="col-md-3"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (opcional)"></div>
-                    <div class="col-md-3"><input type="text" name="categoria" class="form-control form-control-sm" placeholder="Categoria (opcional)"></div>
-                    <div class="col-md-4"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
-                    <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
-                </form>
             </div>
         </div>
 
