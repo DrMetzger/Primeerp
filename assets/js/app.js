@@ -290,6 +290,17 @@
         var maxArquivos = parseInt(widget.getAttribute('data-max-arquivos'), 10) || 5;
         var maxTamanho = parseInt(widget.getAttribute('data-max-tamanho-bytes'), 10) || (500 * 1024 * 1024);
 
+        // Dica de arrastar-e-soltar injetada aqui (em vez de em cada
+        // template) pra não precisar repetir/manter em sincronia em todo
+        // lugar que usa esse widget (resposta de chamado, abrir chamado etc.).
+        var controles = widget.querySelector('.anexos-stager-controles');
+        if (controles && !controles.querySelector('.anexos-stager-dica')) {
+            var dica = document.createElement('span');
+            dica.className = 'anexos-stager-dica text-muted small';
+            dica.textContent = 'ou arraste o arquivo aqui';
+            controles.appendChild(dica);
+        }
+
         var arquivosNaLista = [];
         var pendentes = [];
 
@@ -428,6 +439,42 @@
                 });
 
                 tentarAdicionar(imagens);
+            });
+
+            // Arrastar e soltar arquivo(s) direto na área do chamado --
+            // pedido do Kleber, mesmo espírito de colar print (Ctrl+V):
+            // menos passos que abrir o seletor de arquivo. Ouve no FORM
+            // inteiro (não só no widget pequeno de anexo), pra soltar em
+            // qualquer lugar da área da resposta/chamado já funcionar, sem
+            // precisar acertar o alvo pequeno do "Escolher anexos".
+            var contadorArrastar = 0;
+            formDoWidget.addEventListener('dragenter', function (e) {
+                e.preventDefault();
+                contadorArrastar++;
+                formDoWidget.classList.add('anexos-arrastando');
+            });
+            formDoWidget.addEventListener('dragover', function (e) {
+                // Sem isso o navegador tenta ABRIR o arquivo numa aba nova
+                // em vez de disparar o evento "drop".
+                e.preventDefault();
+            });
+            formDoWidget.addEventListener('dragleave', function (e) {
+                e.preventDefault();
+                contadorArrastar = Math.max(0, contadorArrastar - 1);
+                // dragenter/dragleave disparam pra cada elemento filho que o
+                // mouse passa por cima -- só tira o destaque quando realmente
+                // saiu da área toda (contador voltou a zero), senão a borda
+                // fica "piscando" ao arrastar por cima de um texto/botão
+                // dentro do form.
+                if (contadorArrastar === 0) formDoWidget.classList.remove('anexos-arrastando');
+            });
+            formDoWidget.addEventListener('drop', function (e) {
+                e.preventDefault();
+                contadorArrastar = 0;
+                formDoWidget.classList.remove('anexos-arrastando');
+
+                var arquivos = Array.from((e.dataTransfer || {}).files || []);
+                if (arquivos.length) tentarAdicionar(arquivos);
             });
         }
     }
