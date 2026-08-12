@@ -1117,6 +1117,13 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 }
 .anexos-stager-item-remover:hover { color: var(--ph-danger); }
 
+/* Arrastar e soltar arquivo em qualquer lugar do form (não só no widget
+   pequeno) -- ver listener de "dragenter"/"drop" no form em
+   inicializarAnexoStager() (app.js). Destaca a área toda com uma borda
+   tracejada, e o widget de anexo em si fica mais evidente ainda. */
+form.anexos-arrastando { outline: 2px dashed var(--ph-primary); outline-offset: 4px; border-radius: var(--ph-radius-sm); }
+form.anexos-arrastando .anexos-stager { background-color: var(--ph-primary-light); border-radius: var(--ph-radius-sm); }
+
 /* Resumo com todos os anexos do chamado, no topo (fora de qualquer bolha de
    chat -- fundo neutro claro, então o link não pode herdar a cor branca
    usada dentro da bolha escura da equipe). */
