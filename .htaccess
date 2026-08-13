@@ -14,25 +14,32 @@ RedirectMatch 404 /\.git
 Options -Indexes
 
 # Limites de upload de arquivo -- sem isso o PRÓPRIO PHP corta o arquivo
-# bem antes de chegar nas validações de UPLOADS_MAX_SIZE/ANEXO_CHAMADO_MAX_SIZE
-# de config/config.php (500MB), com um erro genérico feio pro cliente ver.
-# post_max_size fica acima de upload_max_filesize (o POST inteiro inclui o
-# arquivo + os outros campos do formulário). Duplicado em .user.ini (Hostinger
-# roda PHP via LiteSpeed/lsphp, que lê .user.ini -- não mod_php) só pra
-# garantir que pelo menos um dos dois mecanismos funcione, sem quebrar o site
-# se o outro não for suportado (por isso o <IfModule>, que vira um no-op).
-# max_execution_time/max_input_time NÃO ficam em 300s -- o processamento de
-# upload em si (mover o arquivo + gravar o backup no banco) é rápido mesmo
-# pra 500MB (testado localmente), então não precisa de tanto tempo. Deixar
-# alto demais só faz qualquer coisa LENTA/travada em QUALQUER outra parte do
-# site (ex.: SMTP demorando pra responder) ficar pendurada até esse limite em
-# vez de falhar rápido -- e a Hostinger corta a conexão no nível do
-# nginx/proxy antes disso de qualquer jeito (504 Gateway Time-out, bem mais
-# feio pro cliente ver do que um erro normal da aplicação).
+# bem antes de chegar nas validações de UPLOADS_MAX_SIZE/ANEXO_CHAMADO_MAX_SIZE/
+# VIDEO_AULA_MAX_SIZE de config/config.php, com um erro genérico feio pro
+# cliente ver. post_max_size fica acima de upload_max_filesize (o POST
+# inteiro inclui o arquivo + os outros campos do formulário). Duplicado em
+# .user.ini (Hostinger roda PHP via LiteSpeed/lsphp, que lê .user.ini --
+# não mod_php) só pra garantir que pelo menos um dos dois mecanismos
+# funcione, sem quebrar o site se o outro não for suportado (por isso o
+# <IfModule>, que vira um no-op).
+# upload_max_filesize/post_max_size sobem pra 5GB por causa das vídeo aulas
+# (pedido do Kleber -- 500MB não dava pra vídeo de treinamento gravado).
+# max_input_time (tempo pra RECEBER o upload, diferente de max_execution_time
+# que só conta depois que o PHP começa a rodar) sobe bem mais (1h) só por
+# causa disso -- um vídeo de vários GB pode demorar bastante pra subir numa
+# internet mais lenta, e sem isso o PHP cortava o envio no meio. Vídeo aula
+# NÃO faz backup no banco (ver salvar_documento_upload($comBackupBanco)),
+# então o PROCESSAMENTO em si continua rápido -- max_execution_time continua
+# baixo (45s) de propósito: deixar alto demais só faz qualquer coisa LENTA/
+# travada em QUALQUER outra parte do site (ex.: SMTP demorando pra
+# responder) ficar pendurada até esse limite em vez de falhar rápido -- e a
+# Hostinger corta a conexão no nível do nginx/proxy antes disso de qualquer
+# jeito (504 Gateway Time-out, bem mais feio pro cliente ver do que um erro
+# normal da aplicação).
 <IfModule mod_php.c>
-    php_value upload_max_filesize 500M
-    php_value post_max_size 520M
+    php_value upload_max_filesize 5120M
+    php_value post_max_size 5200M
     php_value memory_limit 1024M
     php_value max_execution_time 45
-    php_value max_input_time 90
+    php_value max_input_time 3600
 </IfModule>

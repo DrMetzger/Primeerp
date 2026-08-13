@@ -1703,20 +1703,38 @@ a.card-cliente, a.card-cliente:hover {
 /* ------------------------------------------------------ Cards de vídeo aula
    Aba "Vídeo aulas" por setor (cliente.php) e grade do portal do cliente --
    pedido explícito do Kleber pra ficar "bem legal e atrativo" pros clientes,
-   não só uma lista/tabela seca como Documentos. */
+   não só uma lista/tabela seca como Documentos. Miniatura é o próprio
+   <video preload="metadata"> (o navegador mostra o primeiro quadro como
+   imagem estática sem precisar gerar um thumbnail no servidor -- Hostinger
+   shared hosting não tem ffmpeg disponível). */
 .video-aula-card { overflow: hidden; transition: transform .15s ease, box-shadow .15s ease; }
 .video-aula-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15, 23, 42, .12); }
 .video-aula-thumb {
-    height: 140px;
+    position: relative;
+    height: 160px;
+    background: linear-gradient(135deg, #1e293b, #334155);
+    cursor: pointer;
+    overflow: hidden;
+}
+.video-aula-thumb video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+.video-aula-play-overlay {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #1e293b, #334155);
     color: #fff;
-    font-size: 2.75rem;
-    cursor: pointer;
+    font-size: 3rem;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+    background: rgba(15, 23, 42, .15);
+    transition: background .15s ease, transform .15s ease;
 }
-.video-aula-thumb:hover { color: var(--ph-primary, #6366f1); }
+.video-aula-thumb:hover .video-aula-play-overlay { background: rgba(15, 23, 42, .35); transform: scale(1.08); }
 
 /* ------------------------------------------- Overlay de progresso de upload
    Mostrado enquanto um arquivo está subindo (barra com % de verdade, não só

@@ -182,14 +182,26 @@ define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,
 // Vídeo aulas por setor (cliente.php e portal do cliente) -- Kleber sobe uma
 // gravação em MP4 pra cada rotina/processo do setor; reaproveita a mesma
 // tabela "documentos" (categoria 'Vídeo aula', mesmo padrão já usado por
-// "Proposta de desenvolvimento" em salvar_documento_upload()), com o mesmo
-// limite de UPLOADS_MAX_SIZE (500MB) e restrito a MP4 (pedido explícito do
-// Kleber) -- é o formato mais compatível pra reproduzir direto no
-// navegador (tag <video>) sem precisar converter.
+// "Proposta de desenvolvimento" em salvar_documento_upload()), restrito a
+// MP4 (pedido explícito do Kleber) -- é o formato mais compatível pra
+// reproduzir direto no navegador (tag <video>) sem precisar converter.
 define('VIDEO_AULA_TIPOS_PERMITIDOS', [
     'video/mp4' => 'mp4',
 ]);
 define('VIDEO_AULA_ACCEPT_HTML', '.mp4');
+// Vídeo aula NÃO usa o limite de 500MB de UPLOADS_MAX_SIZE (documento
+// comum) -- vídeo de treinamento gravado costuma passar bem disso. "Sem
+// limite" de verdade não existe (o PHP sempre precisa de um número), então
+// isso aqui é um teto bem alto (5GB) só pra nunca ser o motivo de travar um
+// envio -- na prática, quem primeiro vai limitar um arquivo gigante é o
+// próprio tempo de upload da internet do cliente, não esse número. Por
+// arquivo desse tamanho, NÃO faz backup dos bytes no banco (ver
+// salvar_documento_upload(), parâmetro $comBackupBanco) -- ler um vídeo de
+// vários GB inteiro pra memória pra gravar como BLOB estouraria o
+// memory_limit do PHP. Ou seja: vídeo aula fica só em disco, sem a rede de
+// segurança contra o deploy do Hostinger apagar uploads/ -- se isso um dia
+// incomodar, a solução é um storage externo (S3 etc.), não esse backup.
+define('VIDEO_AULA_MAX_SIZE', 5 * 1024 * 1024 * 1024);
 
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro

@@ -775,15 +775,25 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
  * $arquivo é o item de $_FILES (ex.: $_FILES['arquivo']). Retorna o id do
  * documento criado, ou null se o upload falhar (erro fica em $erro, por
  * referência, pra quem chamou decidir a mensagem de flash).
+ *
+ * $tamanhoMaximo permite um limite diferente de UPLOADS_MAX_SIZE pra quem
+ * chamar (ex.: vídeo aula, que pode ser bem maior que documento comum) --
+ * null usa o padrão. $comBackupBanco desliga o backup do arquivo no banco
+ * (ver comentário abaixo): pra arquivo MUITO grande (vídeo de vários GB),
+ * ler o arquivo inteiro pra memória com file_get_contents() pode estourar o
+ * memory_limit e derrubar a requisição de um jeito NÃO recuperável (erro de
+ * memória não é um Throwable pego pelo catch abaixo) -- melhor nem tentar.
  */
-function salvar_documento_upload(\PDO &$pdo, int $clienteId, ?int $setorId, string $titulo, ?string $descricao, ?string $categoria, array $arquivo, ?int $criadoPor, ?string &$erro = null): ?int
+function salvar_documento_upload(\PDO &$pdo, int $clienteId, ?int $setorId, string $titulo, ?string $descricao, ?string $categoria, array $arquivo, ?int $criadoPor, ?string &$erro = null, ?int $tamanhoMaximo = null, bool $comBackupBanco = true): ?int
 {
+    $tamanhoMaximo ??= UPLOADS_MAX_SIZE;
+
     if ($arquivo['error'] !== UPLOAD_ERR_OK) {
         $erro = 'Falha no upload do arquivo.';
         return null;
     }
-    if ($arquivo['size'] > UPLOADS_MAX_SIZE) {
-        $erro = 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).';
+    if ($arquivo['size'] > $tamanhoMaximo) {
+        $erro = 'Arquivo maior que o limite permitido (' . (int) ($tamanhoMaximo / 1024 / 1024) . 'MB).';
         return null;
     }
 
@@ -798,6 +808,23 @@ function salvar_documento_upload(\PDO &$pdo, int $clienteId, ?int $setorId, stri
     if (!move_uploaded_file($arquivo['tmp_name'], $destino)) {
         $erro = 'Não foi possível salvar o arquivo no servidor.';
         return null;
+    }
+
+    if (!$comBackupBanco) {
+        $stmt = $pdo->prepare('INSERT INTO documentos (cliente_id, setor_id, titulo, descricao, categoria, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([
+            $clienteId,
+            $setorId,
+            $titulo ?: $arquivo['name'],
+            $descricao,
+            $categoria,
+            $arquivo['name'],
+            'clientes/' . $clienteId . '/' . $nomeArmazenado,
+            $arquivo['size'],
+            $criadoPor,
+        ]);
+
+        return (int) $pdo->lastInsertId();
     }
 
     // Backup dos bytes no banco -- ver Migrations::restaurarArquivoSeNecessario().

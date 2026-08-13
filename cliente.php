@@ -352,7 +352,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'Vídeo aula',
                 $_FILES['arquivo'],
                 Auth::userId(),
-                $erroUploadVideo
+                $erroUploadVideo,
+                VIDEO_AULA_MAX_SIZE,
+                false
             );
             flash_set($idVideoNovo ? 'sucesso' : 'erro', $idVideoNovo ? 'Vídeo aula cadastrada.' : $erroUploadVideo);
         }
@@ -3041,25 +3043,33 @@ require __DIR__ . '/templates/header.php';
                                 <input type="hidden" name="aba_retorno" value="setores">
                                 <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                                 <div class="col-md-5"><label class="form-label small mb-1">Nome da rotina</label><input type="text" name="nome_rotina" class="form-control form-control-sm" placeholder="Ex.: Como lançar uma Ordem de Produção" required></div>
-                                <div class="col-md-5"><label class="form-label small mb-1">Arquivo MP4 (até 500MB)</label><input type="file" name="arquivo" class="form-control form-control-sm" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required></div>
+                                <div class="col-md-5"><label class="form-label small mb-1">Arquivo MP4</label><input type="file" name="arquivo" class="form-control form-control-sm" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required>
+                                    <span class="text-muted small">Sem limite de tamanho -- vídeo grande só demora mais pra subir.</span>
+                                </div>
                                 <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
                             </form>
                         </div>
 
                         <?php if ($videoAulasSetor): ?>
-                        <div class="row g-3">
+                        <div class="mb-3">
+                            <input type="text" class="form-control form-control-sm filtro-video-aula" data-alvo="videoAulaGrid<?= $idSetorAtual ?>" placeholder="🔎 Filtrar por nome da rotina...">
+                        </div>
+                        <div class="row g-3" id="videoAulaGrid<?= $idSetorAtual ?>">
                             <?php foreach ($videoAulasSetor as $v): ?>
-                            <div class="col-md-4">
+                            <div class="col-md-4" data-nome-filtro="<?= e(mb_strtolower($v['titulo'], 'UTF-8')) ?>">
                                 <div class="card card-stat video-aula-card h-100">
-                                    <div class="video-aula-thumb" role="button" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>">
-                                        <i class="bi bi-play-circle-fill"></i>
+                                    <div class="card-body pb-1">
+                                        <div class="fw-semibold"><?= e($v['titulo']) ?></div>
                                     </div>
-                                    <div class="card-body">
-                                        <div class="fw-semibold mb-1"><?= e($v['titulo']) ?></div>
+                                    <div class="video-aula-thumb" role="button" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>">
+                                        <video preload="metadata" muted playsinline src="<?= url('video_aula.php?id=' . $v['id']) ?>"></video>
+                                        <div class="video-aula-play-overlay"><i class="bi bi-play-circle-fill"></i></div>
+                                    </div>
+                                    <div class="card-body pt-2">
                                         <p class="text-muted small mb-2"><?= round($v['arquivo_tamanho'] / 1024 / 1024, 1) ?> MB &middot; <?= formatar_data($v['criado_em']) ?><br><?= e($v['criado_por_nome'] ?: '-') ?></p>
                                         <div class="d-flex gap-2">
                                             <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
-                                            <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                                            <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> Baixar</a>
                                             <form method="post" class="ms-auto" onsubmit="return confirm('Excluir a vídeo aula &quot;<?= e($v['titulo']) ?>&quot;?');">
                                                 <?= csrf_field() ?>
                                                 <input type="hidden" name="acao" value="excluir_video_aula">
@@ -3772,6 +3782,19 @@ document.addEventListener('DOMContentLoaded', function () {
             playerVideoAula.load();
         });
     }
+
+    // Filtro por nome da rotina na grade de vídeo aulas -- cada setor tem a
+    // própria grade/campo (podem acumular muita vídeo aula com o tempo).
+    document.querySelectorAll('.filtro-video-aula').forEach(function (campo) {
+        var grade = document.getElementById(campo.dataset.alvo);
+        if (!grade) return;
+        campo.addEventListener('input', function () {
+            var termo = campo.value.trim().toLowerCase();
+            grade.querySelectorAll('[data-nome-filtro]').forEach(function (card) {
+                card.style.display = card.dataset.nomeFiltro.indexOf(termo) === -1 ? 'none' : '';
+            });
+        });
+    });
 
     var hash = window.location.hash || '#visao-geral';
     var tabLink = document.querySelector('.nav-tabs a[href="' + hash + '"]');
