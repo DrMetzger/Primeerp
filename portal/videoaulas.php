@@ -66,30 +66,39 @@ require __DIR__ . '/../templates/portal_header.php';
             <p class="text-muted mt-3 mb-0">Nenhuma vídeo aula disponível ainda.</p>
         </div>
     </div>
+<?php else: ?>
+    <input type="text" class="form-control filtro-video-aula mb-3" data-alvo="videoAulaGridPortal" placeholder="🔎 Filtrar por nome da rotina...">
 <?php endif; ?>
 
+<div id="videoAulaGridPortal">
 <?php foreach ($videoAulasPorSetorNomePortal as $nomeSetorVideoAula => $videosDoSetor): ?>
-    <h6 class="text-muted text-uppercase small fw-bold mt-4 mb-2"><?= e($nomeSetorVideoAula) ?></h6>
-    <div class="row g-3 mb-3">
-        <?php foreach ($videosDoSetor as $v): ?>
-        <div class="col-md-4 col-sm-6">
-            <div class="card card-stat video-aula-card h-100">
-                <div class="video-aula-thumb" role="button" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAulaPortal" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>">
-                    <i class="bi bi-play-circle-fill"></i>
-                </div>
-                <div class="card-body">
-                    <div class="fw-semibold mb-1"><?= e($v['titulo']) ?></div>
-                    <p class="text-muted small mb-2"><?= round($v['arquivo_tamanho'] / 1024 / 1024, 1) ?> MB &middot; <?= formatar_data($v['criado_em']) ?></p>
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAulaPortal" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
-                        <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> Baixar</a>
+    <div class="video-aula-grupo">
+        <h6 class="text-muted text-uppercase small fw-bold mt-4 mb-2"><?= e($nomeSetorVideoAula) ?></h6>
+        <div class="row g-3 mb-3">
+            <?php foreach ($videosDoSetor as $v): ?>
+            <div class="col-md-4 col-sm-6" data-nome-filtro="<?= e(mb_strtolower($v['titulo'], 'UTF-8')) ?>">
+                <div class="card card-stat video-aula-card h-100">
+                    <div class="card-body pb-1">
+                        <div class="fw-semibold"><?= e($v['titulo']) ?></div>
+                    </div>
+                    <div class="video-aula-thumb" role="button" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAulaPortal" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>">
+                        <video preload="metadata" muted playsinline src="<?= url('video_aula.php?id=' . $v['id']) ?>"></video>
+                        <div class="video-aula-play-overlay"><i class="bi bi-play-circle-fill"></i></div>
+                    </div>
+                    <div class="card-body pt-2">
+                        <p class="text-muted small mb-2"><?= round($v['arquivo_tamanho'] / 1024 / 1024, 1) ?> MB &middot; <?= formatar_data($v['criado_em']) ?></p>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAulaPortal" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
+                            <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> Baixar</a>
+                        </div>
                     </div>
                 </div>
             </div>
+            <?php endforeach; ?>
         </div>
-        <?php endforeach; ?>
     </div>
 <?php endforeach; ?>
+</div>
 
 <div class="modal fade" id="modalAssistirVideoAulaPortal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -119,6 +128,26 @@ document.addEventListener('DOMContentLoaded', function () {
         playerVideoAulaPortal.pause();
         playerVideoAulaPortal.removeAttribute('src');
         playerVideoAulaPortal.load();
+    });
+
+    // Filtro por nome da rotina -- também esconde o título do setor
+    // (video-aula-grupo) se TODAS as vídeo aulas dele ficarem escondidas.
+    document.querySelectorAll('.filtro-video-aula').forEach(function (campo) {
+        var grade = document.getElementById(campo.dataset.alvo);
+        if (!grade) return;
+        campo.addEventListener('input', function () {
+            var termo = campo.value.trim().toLowerCase();
+            grade.querySelectorAll('.video-aula-grupo').forEach(function (grupo) {
+                var cards = grupo.querySelectorAll('[data-nome-filtro]');
+                var algumVisivel = false;
+                cards.forEach(function (card) {
+                    var visivel = card.dataset.nomeFiltro.indexOf(termo) !== -1;
+                    card.style.display = visivel ? '' : 'none';
+                    if (visivel) algumVisivel = true;
+                });
+                grupo.style.display = algumVisivel ? '' : 'none';
+            });
+        });
     });
 });
 </script>
