@@ -555,11 +555,22 @@ class WhatsAppBot
         $conversa = self::obterOuCriarConversa($pdo, $conversa['telefone'], $conversa['nome_perfil']);
         $qtdAnexos = (int) $pdo->query('SELECT COUNT(*) FROM whatsapp_midias_temp WHERE conversa_id = ' . (int) $conversa['id'])->fetchColumn();
 
+        // Preview curto da descrição -- mensagem interativa (botão) tem
+        // limite de 1024 caracteres na Cloud API da Meta (ver
+        // WhatsAppApi::limitarCorpoInterativo(), que também protege isso
+        // como rede de segurança); reproduzir uma descrição bem longa
+        // (cliente colando um texto de especificação técnica, por exemplo)
+        // aqui inteira já quase estourava esse limite sozinha. A descrição
+        // COMPLETA continua indo pro chamado -- isso aqui é só o resumo.
+        $descricaoPreview = mb_strlen($conversa['descricao']) > 300
+            ? mb_substr($conversa['descricao'], 0, 300) . '(...)'
+            : $conversa['descricao'];
+
         $resumo = "🔎 Confere se está tudo certo:\n\n"
             . "📝 *Título:* {$conversa['titulo']}\n"
             . "🏷️ *Categoria:* {$conversa['categoria']}\n"
             . '📶 *Prioridade:* ' . self::PRIORIDADES[$conversa['prioridade']] . "\n"
-            . "📄 *Descrição:* {$conversa['descricao']}\n"
+            . "📄 *Descrição:* {$descricaoPreview}\n"
             . ($qtdAnexos > 0 ? "📎 *Anexos:* $qtdAnexos arquivo(s)\n" : '')
             . "\nPosso abrir o chamado?";
         WhatsAppApi::enviarBotoes($conversa['telefone'], $resumo, [

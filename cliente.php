@@ -211,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmtNomeSetor->execute([$setorIdTreinamentoNovo, $clienteId]);
             $nomeSetorTreinamentoNovo = $stmtNomeSetor->fetchColumn() ?: null;
         }
-        Notificacoes::novoTreinamento($pdo, [
+        notificar_depois(fn () => Notificacoes::novoTreinamento($pdo, [
             'id' => $treinamentoIdNovo,
             'cliente_id' => $clienteId,
             'titulo' => $tituloTreinamentoNovo,
@@ -219,7 +219,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'data_inicio' => $_POST['data_inicio'] ?: null,
             'hora_inicio' => $_POST['hora_inicio'] ?: null,
             'link_reuniao' => trim($_POST['link_reuniao'] ?? '') ?: null,
-        ], $cliente['nome'], $nomeSetorTreinamentoNovo);
+        ], $cliente['nome'], $nomeSetorTreinamentoNovo));
 
         $rotulosTipoTreinamento = ['treinamento' => 'Treinamento', 'reuniao' => 'Reunião', 'conversa' => 'Conversa', 'auxilio' => 'Auxílio'];
         flash_set('sucesso', $rotulosTipoTreinamento[$tipoTreinamentoNovo] . ' registrado(a).');
@@ -326,6 +326,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare('DELETE FROM propostas_desenvolvimento WHERE id=? AND cliente_id=?')
             ->execute([(int) $_POST['proposta_id'], $clienteId]);
         flash_set('sucesso', 'Proposta removida.');
+    }
+
+    // --- Vídeo aulas por setor (portal do cliente assiste/baixa) ---------
+    // Reaproveita a tabela "documentos" (categoria 'Vídeo aula'), mesma
+    // ideia de Proposta de desenvolvimento -- sem tabela nova, ganha de
+    // graça o backup/restauração de arquivo que documento já tem.
+
+    if ($acao === 'upload_video_aula' && isset($_FILES['arquivo'])) {
+        $nomeRotinaVideo = trim($_POST['nome_rotina'] ?? '');
+        $setorIdVideo = (int) ($_POST['setor_id'] ?? 0);
+
+        if ($nomeRotinaVideo === '') {
+            flash_set('erro', 'Informe o nome da rotina da vídeo aula.');
+        } elseif ($_FILES['arquivo']['error'] === UPLOAD_ERR_OK && !isset(VIDEO_AULA_TIPOS_PERMITIDOS[mime_content_type($_FILES['arquivo']['tmp_name'])])) {
+            flash_set('erro', 'Envie um arquivo de vídeo no formato MP4.');
+        } else {
+            $erroUploadVideo = null;
+            $idVideoNovo = salvar_documento_upload(
+                $pdo,
+                $clienteId,
+                $setorIdVideo ?: null,
+                $nomeRotinaVideo,
+                null,
+                'Vídeo aula',
+                $_FILES['arquivo'],
+                Auth::userId(),
+                $erroUploadVideo
+            );
+            flash_set($idVideoNovo ? 'sucesso' : 'erro', $idVideoNovo ? 'Vídeo aula cadastrada.' : $erroUploadVideo);
+        }
+    }
+
+    if ($acao === 'excluir_video_aula') {
+        $stmtVideoExcluir = $pdo->prepare("SELECT arquivo_caminho FROM documentos WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'");
+        $stmtVideoExcluir->execute([(int) $_POST['documento_id'], $clienteId]);
+        $caminhoVideoExcluir = $stmtVideoExcluir->fetchColumn();
+
+        $pdo->prepare("DELETE FROM documentos WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'")
+            ->execute([(int) $_POST['documento_id'], $clienteId]);
+
+        if ($caminhoVideoExcluir) {
+            @unlink(UPLOADS_DIR . '/' . $caminhoVideoExcluir);
+        }
+        flash_set('sucesso', 'Vídeo aula removida.');
     }
 
     // --- Sugestões de melhoria por setor, geradas com IA -----------------
@@ -804,7 +848,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $token = bin2hex(random_bytes(32));
             $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
                 ->execute([$clienteId, $token]);
-            Notificacoes::conviteAcessoPortal($cliente, $token);
+            notificar_depois(fn () => Notificacoes::conviteAcessoPortal($cliente, $token));
             flash_set('sucesso', 'Convite enviado para ' . $cliente['contato_email'] . '.');
         }
     }
@@ -821,7 +865,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $token = bin2hex(random_bytes(32));
             $pdo->prepare('INSERT INTO cliente_senha_tokens (cliente_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
                 ->execute([$clienteId, $token]);
-            Notificacoes::conviteAcessoPortal($cliente, $token);
+            notificar_depois(fn () => Notificacoes::conviteAcessoPortal($cliente, $token));
             flash_set('sucesso', 'Senha resetada e novo link enviado para ' . $cliente['contato_email'] . '.');
         }
     }
@@ -1142,7 +1186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $token = bin2hex(random_bytes(32));
             $pdo->prepare('INSERT INTO setor_senha_tokens (setor_responsavel_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
                 ->execute([$responsavelId, $token]);
-            Notificacoes::conviteAcessoSetor($responsavel, $responsavel['setor_nome'], $token);
+            notificar_depois(fn () => Notificacoes::conviteAcessoSetor($responsavel, $responsavel['setor_nome'], $token));
             flash_set('sucesso', 'Convite enviado para ' . $responsavel['email'] . '.');
         }
     }
@@ -1163,7 +1207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $token = bin2hex(random_bytes(32));
             $pdo->prepare('INSERT INTO setor_senha_tokens (setor_responsavel_id, token, expira_em) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))')
                 ->execute([$responsavelId, $token]);
-            Notificacoes::conviteAcessoSetor($responsavel, $responsavel['setor_nome'], $token);
+            notificar_depois(fn () => Notificacoes::conviteAcessoSetor($responsavel, $responsavel['setor_nome'], $token));
             flash_set('sucesso', 'Senha resetada e novo link enviado para ' . $responsavel['email'] . '.');
         }
     }
@@ -1248,9 +1292,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // foi encerrado agora mesmo -- não faz sentido perguntar
             // "quer encerrar?" de algo que já está encerrado.
             $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
-            Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta);
+            notificar_depois(fn () => Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta));
             if ($pessoaChamado['telefone'] && $statusAposResposta !== 'fechado') {
-                WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']);
+                notificar_depois(fn () => WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoaChamado['telefone']));
             }
         }
 
@@ -1298,7 +1342,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtNovoResp->execute([$novoResponsavelId]);
                 $novoResponsavel = $stmtNovoResp->fetch();
                 if ($novoResponsavel) {
-                    Notificacoes::chamadoAtribuido(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo'], 'cliente_id' => $clienteId], $novoResponsavel);
+                    notificar_depois(fn () => Notificacoes::chamadoAtribuido(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo'], 'cliente_id' => $clienteId], $novoResponsavel));
                 }
             }
 
@@ -1349,14 +1393,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // responsáveis desse setor, não só um (pode ter vários).
                 if ($novoSetorId !== (int) $chamadoAlvo['setor_id']) {
                     foreach ($membrosSetorAlvo as $membro) {
-                        Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $membro, $setorAlvo['nome']);
+                        notificar_depois(fn () => Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']], $membro, $setorAlvo['nome']));
                     }
                     if ($masterNesseSetor) {
-                        Notificacoes::chamadoAtribuidoSetor(
+                        notificar_depois(fn () => Notificacoes::chamadoAtribuidoSetor(
                             ['id' => $chamadoId, 'titulo' => $chamadoAlvo['titulo']],
                             ['nome' => $cliente['contato_nome'] ?: $cliente['nome'], 'email' => $cliente['contato_email'], 'telefone' => $cliente['contato_telefone']],
                             $setorAlvo['nome']
-                        );
+                        ));
                     }
                 }
 
@@ -1366,6 +1410,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
+    finalizar_resposta_e_notificar();
     exit;
 }
 
@@ -1543,11 +1588,14 @@ $documentos = $pdo->prepare('SELECT d.*, u.nome AS criado_por_nome FROM document
 $documentos->execute([$clienteId]);
 $documentos = $documentos->fetchAll();
 $documentosPorSetorId = [];
+$videoAulasPorSetorId = [];
 $documentosGerais = [];
 $contratoSocial = null;
 $contratoPrestacaoServicos = null;
 foreach ($documentos as $doc) {
-    if ($doc['setor_id']) {
+    if ($doc['setor_id'] && $doc['categoria'] === 'Vídeo aula') {
+        $videoAulasPorSetorId[$doc['setor_id']][] = $doc;
+    } elseif ($doc['setor_id']) {
         $documentosPorSetorId[$doc['setor_id']][] = $doc;
     } elseif ($doc['categoria'] === 'Contrato Social') {
         $contratoSocial ??= $doc; // primeiro = mais recente (ORDER BY criado_em DESC)
@@ -2626,6 +2674,7 @@ require __DIR__ . '/templates/header.php';
             $membrosReais = array_filter($responsaveisPorSetorId[$idSetorAtual] ?? [], fn ($m) => empty($m['eh_master']));
             $treinamentosSetor = $treinamentosPorSetorId[$idSetorAtual] ?? [];
             $documentosSetor = $documentosPorSetorId[$idSetorAtual] ?? [];
+            $videoAulasSetor = $videoAulasPorSetorId[$idSetorAtual] ?? [];
             $propostasSetor = $propostasPorSetorId[$idSetorAtual] ?? [];
             $kpisSetor = $kpisPorSetorId[$idSetorAtual] ?? [];
             $sugestaoIaSetor = $ultimaSugestaoIaPorSetorId[$idSetorAtual] ?? null;
@@ -2648,6 +2697,7 @@ require __DIR__ . '/templates/header.php';
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorPropostas<?= $idSetorAtual ?>"><i class="bi bi-lightbulb"></i> Propostas <span class="badge bg-secondary"><?= count($propostasSetor) ?></span></a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorMetricas<?= $idSetorAtual ?>"><i class="bi bi-graph-up"></i> Métricas <span class="badge bg-secondary"><?= count($kpisSetor) ?></span></a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorIa<?= $idSetorAtual ?>"><i class="bi bi-stars"></i> IA</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorVideoAulas<?= $idSetorAtual ?>"><i class="bi bi-play-circle"></i> Vídeo aulas <span class="badge bg-secondary"><?= count($videoAulasSetor) ?></span></a></li>
                 </ul>
                 <div class="tab-content pt-3">
 
@@ -2975,6 +3025,57 @@ require __DIR__ . '/templates/header.php';
                             <p class="text-muted text-center py-3">Nenhuma sugestão gerada ainda pra esse setor.</p>
                         <?php endif; ?>
                         </div>
+                    </div>
+
+                    <!-- Vídeo aulas -->
+                    <div class="tab-pane" id="setorVideoAulas<?= $idSetorAtual ?>">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <p class="text-muted small mb-0"><i class="bi bi-info-circle"></i> Grave e suba aqui as vídeo aulas desse setor -- o cliente assiste e baixa direto no portal.</p>
+                            <button type="button" class="btn btn-sm btn-dark" data-bs-toggle="collapse" data-bs-target="#formNovaVideoAula<?= $idSetorAtual ?>"><i class="bi bi-plus-lg"></i> Cadastrar nova</button>
+                        </div>
+
+                        <div class="collapse mb-3" id="formNovaVideoAula<?= $idSetorAtual ?>">
+                            <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end card card-stat p-3">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="upload_video_aula">
+                                <input type="hidden" name="aba_retorno" value="setores">
+                                <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                                <div class="col-md-5"><label class="form-label small mb-1">Nome da rotina</label><input type="text" name="nome_rotina" class="form-control form-control-sm" placeholder="Ex.: Como lançar uma Ordem de Produção" required></div>
+                                <div class="col-md-5"><label class="form-label small mb-1">Arquivo MP4 (até 500MB)</label><input type="file" name="arquivo" class="form-control form-control-sm" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required></div>
+                                <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                            </form>
+                        </div>
+
+                        <?php if ($videoAulasSetor): ?>
+                        <div class="row g-3">
+                            <?php foreach ($videoAulasSetor as $v): ?>
+                            <div class="col-md-4">
+                                <div class="card card-stat video-aula-card h-100">
+                                    <div class="video-aula-thumb" role="button" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>">
+                                        <i class="bi bi-play-circle-fill"></i>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="fw-semibold mb-1"><?= e($v['titulo']) ?></div>
+                                        <p class="text-muted small mb-2"><?= round($v['arquivo_tamanho'] / 1024 / 1024, 1) ?> MB &middot; <?= formatar_data($v['criado_em']) ?><br><?= e($v['criado_por_nome'] ?: '-') ?></p>
+                                        <div class="d-flex gap-2">
+                                            <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
+                                            <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                                            <form method="post" class="ms-auto" onsubmit="return confirm('Excluir a vídeo aula &quot;<?= e($v['titulo']) ?>&quot;?');">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="acao" value="excluir_video_aula">
+                                                <input type="hidden" name="aba_retorno" value="setores">
+                                                <input type="hidden" name="documento_id" value="<?= $v['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhuma vídeo aula cadastrada ainda pra esse setor.</p>
+                        <?php endif; ?>
                     </div>
 
                 </div>
@@ -3618,6 +3719,23 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
+<!-- Player de vídeo aula -- UM modal só, compartilhado por todas as vídeo
+     aulas de todos os setores (o <video> troca de src via JS ao abrir, ver
+     script mais abaixo), em vez de um modal por vídeo cadastrado. -->
+<div class="modal fade" id="modalAssistirVideoAula" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content bg-dark">
+      <div class="modal-header border-0">
+        <h5 class="modal-title text-white" id="tituloVideoAssistir"></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-0">
+        <video id="videoAssistirPlayer" controls style="width:100%; max-height:70vh; border-radius:8px;"></video>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="<?= asset_url('assets/js/calendario_visual.js') ?>"></script>
 <script>
 // Ativa a aba certa com base no hash da URL (ex: #chamados) ou abre "Visão geral" por padrão.
@@ -3632,6 +3750,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 botaoEnviar.disabled = true;
                 botaoEnviar.textContent = 'Enviando...';
             }
+        });
+    }
+
+    // Player de vídeo aula -- só troca o src do <video> ao abrir o modal
+    // (não carrega nada até o usuário clicar em "Assistir") e limpa/pausa ao
+    // fechar, senão o navegador continuaria baixando/tocando em segundo
+    // plano mesmo com o modal escondido.
+    var modalVideoAula = document.getElementById('modalAssistirVideoAula');
+    if (modalVideoAula) {
+        var playerVideoAula = document.getElementById('videoAssistirPlayer');
+        modalVideoAula.addEventListener('show.bs.modal', function (ev) {
+            var gatilho = ev.relatedTarget;
+            if (!gatilho) return;
+            document.getElementById('tituloVideoAssistir').textContent = gatilho.dataset.videoNome || '';
+            playerVideoAula.src = '<?= url('video_aula.php') ?>?id=' + encodeURIComponent(gatilho.dataset.videoId);
+        });
+        modalVideoAula.addEventListener('hidden.bs.modal', function () {
+            playerVideoAula.pause();
+            playerVideoAula.removeAttribute('src');
+            playerVideoAula.load();
         });
     }
 

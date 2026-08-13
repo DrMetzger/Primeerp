@@ -15,6 +15,51 @@ function url(string $path = ''): string
 }
 
 /**
+ * Fila de notificações (e-mail/WhatsApp) pra rodar DEPOIS que a resposta já
+ * foi mandada pro navegador -- ver finalizar_resposta_e_notificar(). Cada
+ * chamada de API externa (Graph API do WhatsApp, SMTP) já tem timeout curto
+ * (12-20s) pra não travar pra sempre, mas SOMAR várias seguidas (responder
+ * chamado pode disparar e-mail + WhatsApp pro cliente + WhatsApp do bot de
+ * pós-resposta, por exemplo) passava do max_execution_time em rede lenta --
+ * a requisição morria sem NENHUMA resposta pro navegador (nem erro, nem
+ * sucesso), travando a barra de progresso em "Registrando..." pra sempre.
+ * Bug real reportado pelo Kleber. Enfileirar em vez de chamar direto resolve
+ * isso: o redirect sai pro navegador na hora, essas chamadas continuam
+ * rodando em segundo plano no mesmo processo PHP.
+ */
+$GLOBALS['__fila_notificacoes'] = [];
+
+function notificar_depois(callable $callback): void
+{
+    $GLOBALS['__fila_notificacoes'][] = $callback;
+}
+
+/**
+ * Fecha a resposta HTTP pro navegador AGORA (chamar depois de já ter
+ * mandado o header('Location: ...') do redirect de POST) e só então executa
+ * a fila de notificações registrada via notificar_depois() -- ver o
+ * comentário lá acima. Sem fastcgi_finish_request() disponível (hosts sem
+ * PHP-FPM/LiteSpeed), cai pro comportamento antigo: executa a fila antes de
+ * fechar a conexão mesmo (mais lento, mas não trava: só demora).
+ */
+function finalizar_resposta_e_notificar(): void
+{
+    if (function_exists('fastcgi_finish_request')) {
+        session_write_close();
+        fastcgi_finish_request();
+    }
+
+    foreach ($GLOBALS['__fila_notificacoes'] as $callback) {
+        try {
+            $callback();
+        } catch (\Throwable $e) {
+            error_log('Falha ao executar notificação em segundo plano: ' . $e->getMessage());
+        }
+    }
+    $GLOBALS['__fila_notificacoes'] = [];
+}
+
+/**
  * Política de senha forte, exigida da EQUIPE interna (usuarios) -- pedido
  * do Kleber depois do Petronilho esquecer a senha repetidas vezes com uma
  * senha fraca fácil de esquecer. NÃO se aplica à senha do cliente no portal
