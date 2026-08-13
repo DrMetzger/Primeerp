@@ -32,6 +32,18 @@ class WhatsAppBot
     // várias vezes seguidas dentro da mesma janela fora do expediente.
     private const HORAS_ENTRE_AVISOS_HORARIO = 3;
 
+    // Conversa "esquecida" (a pessoa começou a abrir um chamado -- às vezes
+    // já tinha digitado até o título -- e nunca respondeu de novo, nem
+    // cancelou) fica pra sempre com etapa/título/categoria/setor da
+    // tentativa antiga, já que nada aqui apaga a conversa sozinho enquanto
+    // ela não chega no fim (chamado criado) ou é cancelada. Bug real: dias
+    // depois, a mesma pessoa manda mensagem de novo pra um assunto TOTALMENTE
+    // diferente, e esses campos antigos "vazam" pro chamado novo (setor
+    // errado, ou até o título de outro chamado). Passado esse tempo sem
+    // nenhuma resposta, trata a conversa como abandonada e começa do zero,
+    // igual se a pessoa nunca tivesse mandado nada antes.
+    private const HORAS_ABANDONO_CONVERSA = 3;
+
     public static function processarTexto(PDO $pdo, string $telefone, string $nomePerfil, string $texto): void
     {
         $texto = trim($texto);
@@ -160,7 +172,21 @@ class WhatsAppBot
      */
     private static function avancarAposIdentificar(PDO $pdo, array $conversa, int $clienteId, string $nomeCliente, ?string $nomePessoa, ?int $setorResponsavelId, ?int $setorId, ?string $nomeSetor): void
     {
-        $dados = ['cliente_id' => $clienteId, 'setor_responsavel_id' => $setorResponsavelId, 'nome_pessoa' => $nomePessoa];
+        // Limpa título/categoria/prioridade/descrição aqui, no ÚNICO ponto de
+        // entrada depois de identificar quem é -- ver HORAS_ABANDONO_CONVERSA:
+        // sem isso, se essa MESMA linha de conversa sobreviver de uma
+        // tentativa anterior (dentro da janela de abandono), esses campos de
+        // um assunto ANTIGO ficam largados até alguém preencher de novo, e
+        // podem "vazar" pro chamado novo se a pessoa pular alguma etapa.
+        $dados = [
+            'cliente_id' => $clienteId,
+            'setor_responsavel_id' => $setorResponsavelId,
+            'nome_pessoa' => $nomePessoa,
+            'titulo' => null,
+            'categoria' => null,
+            'prioridade' => null,
+            'descricao' => null,
+        ];
         $saudacao = $nomePessoa ? ('Oi, ' . self::primeiroNome($nomePessoa) . '! 👋 ') : '👋 ';
 
         $chamadosAbertos = self::chamadosAbertosParaIdentidade($pdo, $clienteId, $setorResponsavelId);
@@ -387,6 +413,18 @@ class WhatsAppBot
         WhatsAppApi::enviarBotoes($conversa['telefone'], '🤔 Não entendi. Toca numa das opções:', self::BOTOES_ACAO_POS_RESPOSTA);
     }
 
+    /**
+     * Título/categoria/prioridade/descrição de qualquer assunto anterior
+     * (o que ela tinha respondido antes de pedir pra ver os chamados
+     * abertos, ou de uma tentativa anterior) -- mesclar isso em toda vez que
+     * um NOVO assunto começa de verdade evita esses campos "vazarem" pro
+     * chamado novo (ver HORAS_ABANDONO_CONVERSA e avancarAposIdentificar()).
+     */
+    private static function camposNovoAssunto(array $extra): array
+    {
+        return $extra + ['titulo' => null, 'categoria' => null, 'prioridade' => null, 'descricao' => null];
+    }
+
     /** Retoma o fluxo normal de abertura de chamado, sem repetir "encontrei seu cadastro" (já dito antes). */
     private static function iniciarNovoAssunto(PDO $pdo, array $conversa): void
     {
@@ -398,13 +436,13 @@ class WhatsAppBot
             // na conversa (sem precisar perguntar de novo). Com mais de um,
             // pergunta de novo (pode ser um assunto de outro setor dela).
             if (count(setores_do_responsavel($pdo, $setorResponsavelId)) <= 1) {
-                self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
+                self::atualizarConversa($pdo, $conversa['id'], self::camposNovoAssunto(['etapa' => 'titulo', 'chamado_continuar_id' => null]));
                 WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
                 return;
             }
 
             $setoresPessoa = self::setoresParaEscolha($pdo, $clienteId, $setorResponsavelId);
-            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]);
+            self::atualizarConversa($pdo, $conversa['id'], self::camposNovoAssunto(['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]));
             $linhas = [];
             foreach (array_values($setoresPessoa) as $i => $s) {
                 $linhas[] = ['id' => (string) ($i + 1), 'titulo' => $s['nome']];
@@ -415,7 +453,7 @@ class WhatsAppBot
 
         $setoresDisponiveis = self::setoresDisponiveis($pdo, $clienteId);
         if ($setoresDisponiveis) {
-            self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]);
+            self::atualizarConversa($pdo, $conversa['id'], self::camposNovoAssunto(['etapa' => 'escolher_setor', 'chamado_continuar_id' => null]));
             $linhas = [];
             foreach (array_values($setoresDisponiveis) as $i => $s) {
                 $linhas[] = ['id' => (string) ($i + 1), 'titulo' => $s['nome']];
@@ -424,7 +462,7 @@ class WhatsAppBot
             return;
         }
 
-        self::atualizarConversa($pdo, $conversa['id'], ['etapa' => 'titulo', 'chamado_continuar_id' => null]);
+        self::atualizarConversa($pdo, $conversa['id'], self::camposNovoAssunto(['etapa' => 'titulo', 'chamado_continuar_id' => null]));
         WhatsAppApi::enviarTexto($conversa['telefone'], '📝 Beleza, novo assunto. Resuma em poucas palavras o que está acontecendo (isso vai virar o título do chamado):');
     }
 
@@ -743,13 +781,34 @@ class WhatsAppBot
 
     private static function obterOuCriarConversa(PDO $pdo, string $telefone, string $nomePerfil): array
     {
-        $stmt = $pdo->prepare('SELECT * FROM whatsapp_conversas WHERE telefone = ?');
-        $stmt->execute([$telefone]);
+        // "abandonada" comparado inteiro dentro do MySQL (atualizado_em contra
+        // NOW() do PRÓPRIO servidor) -- de propósito, pra não depender do
+        // fuso horário do PHP bater com o do servidor de banco. Comparar
+        // strtotime($atualizado_em) (interpretado no fuso do PHP) contra
+        // time() (Unix, sem fuso) dá resultado errado sempre que os dois
+        // servidores não estiverem no mesmo fuso -- bug real encontrado
+        // testando: MySQL local em "SYSTEM" (UTC) e PHP em America/Sao_Paulo,
+        // uma diferença de 3h que fazia uma conversa de 4h atrás parecer ter
+        // só 1h, nunca expirando.
+        $stmt = $pdo->prepare('SELECT *, (atualizado_em < NOW() - INTERVAL ? HOUR) AS abandonada FROM whatsapp_conversas WHERE telefone = ?');
+        $stmt->execute([self::HORAS_ABANDONO_CONVERSA, $telefone]);
         $conversa = $stmt->fetch();
 
+        // Ver HORAS_ABANDONO_CONVERSA -- sem isso, título/categoria/setor de
+        // uma tentativa de dias/semanas atrás que nunca terminou (chamado
+        // criado ou cancelado) fica pra sempre na linha e pode "vazar" pra
+        // um assunto novo completamente diferente.
+        if ($conversa && (bool) $conversa['abandonada']) {
+            self::excluirConversa($pdo, $conversa['id']);
+            $conversa = null;
+        }
+
         if ($conversa) {
+            unset($conversa['abandonada']);
             return $conversa;
         }
+
+        $stmt = $pdo->prepare('SELECT * FROM whatsapp_conversas WHERE telefone = ?');
 
         $pdo->prepare('INSERT INTO whatsapp_conversas (telefone, nome_perfil) VALUES (?, ?)')->execute([$telefone, $nomePerfil]);
         $stmt->execute([$telefone]);
