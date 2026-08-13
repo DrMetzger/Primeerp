@@ -29,6 +29,7 @@ use AdminPrime\ClienteAuth;
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/chamados.php') ?>"><i class="bi bi-headset"></i> Meus Chamados</a></li>
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/calendario.php') ?>"><i class="bi bi-calendar-event"></i> Calendário</a></li>
+        <li class="nav-item"><a class="nav-link" href="<?= url('portal/videoaulas.php') ?>"><i class="bi bi-play-circle"></i> Vídeo aulas</a></li>
         <?php if (ClienteAuth::podeGerenciarEquipe()): ?>
         <li class="nav-item"><a class="nav-link" href="<?= url('portal/equipe.php') ?>"><i class="bi bi-diagram-3"></i> Setores e Usuários</a></li>
         <?php endif; ?>

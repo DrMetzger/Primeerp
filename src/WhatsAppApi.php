@@ -75,7 +75,7 @@ class WhatsAppApi
             'type' => 'interactive',
             'interactive' => [
                 'type' => 'button',
-                'body' => ['text' => $corpo],
+                'body' => ['text' => self::limitarCorpoInterativo($corpo)],
                 'action' => [
                     'buttons' => array_map(fn ($b) => [
                         'type' => 'reply',
@@ -105,7 +105,7 @@ class WhatsAppApi
             'type' => 'interactive',
             'interactive' => [
                 'type' => 'list',
-                'body' => ['text' => $corpo],
+                'body' => ['text' => self::limitarCorpoInterativo($corpo)],
                 'action' => [
                     'button' => mb_substr($tituloBotao, 0, 20),
                     'sections' => [[
@@ -177,6 +177,24 @@ class WhatsAppApi
 
         $esperada = 'sha256=' . hash_hmac('sha256', $corpoBruto, $appSecret);
         return hash_equals($esperada, $assinaturaRecebida);
+    }
+
+    /**
+     * O corpo de mensagem INTERATIVA (botões/lista) tem limite de 1024
+     * caracteres na Cloud API da Meta -- passar disso faz a Graph API
+     * rejeitar a chamada (HTTP 400) e a mensagem NUNCA chega no cliente,
+     * sem nenhum aviso visível pra ele (nem erro, nem nada -- só "para de
+     * responder"). Bug real: cliente colava uma descrição de chamado bem
+     * longa (ex.: um texto de especificação técnica) e, ao tocar em "Sem
+     * anexo", o resumo de confirmação (que reproduz a descrição inteira)
+     * passava do limite -- a Graph API recusava silenciosamente e o
+     * cliente ficava sem conseguir prosseguir nem abrir outro chamado.
+     * Corta com reticências em vez de deixar a Graph API rejeitar (mensagem
+     * de texto normal, sem botão, não tem esse limite -- só as interativas).
+     */
+    private static function limitarCorpoInterativo(string $corpo): string
+    {
+        return mb_strlen($corpo) > 1024 ? mb_substr($corpo, 0, 1021) . '...' : $corpo;
     }
 
     /**

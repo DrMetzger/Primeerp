@@ -179,6 +179,18 @@ define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
 // de ANEXO_CHAMADO_TIPOS_PERMITIDOS acima, no servidor.
 define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.prw,.rtf,.zip,.rar,.7z');
 
+// Vídeo aulas por setor (cliente.php e portal do cliente) -- Kleber sobe uma
+// gravação em MP4 pra cada rotina/processo do setor; reaproveita a mesma
+// tabela "documentos" (categoria 'Vídeo aula', mesmo padrão já usado por
+// "Proposta de desenvolvimento" em salvar_documento_upload()), com o mesmo
+// limite de UPLOADS_MAX_SIZE (500MB) e restrito a MP4 (pedido explícito do
+// Kleber) -- é o formato mais compatível pra reproduzir direto no
+// navegador (tag <video>) sem precisar converter.
+define('VIDEO_AULA_TIPOS_PERMITIDOS', [
+    'video/mp4' => 'mp4',
+]);
+define('VIDEO_AULA_ACCEPT_HTML', '.mp4');
+
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
 // futuro módulo financeiro (contratos/faturas/CNAB), que ainda está em

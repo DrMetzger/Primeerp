@@ -82,14 +82,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
 
             if ($novoSetorId !== $setorAntigoId) {
                 foreach ($membrosAlvoPortal as $membro) {
-                    Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $membro, $setorAlvoPortal['nome']);
+                    notificar_depois(fn () => Notificacoes::chamadoAtribuidoSetor(['id' => $chamadoId, 'titulo' => $chamado['titulo']], $membro, $setorAlvoPortal['nome']));
                 }
                 if ($masterNesseSetorPortal) {
-                    Notificacoes::chamadoAtribuidoSetor(
+                    notificar_depois(fn () => Notificacoes::chamadoAtribuidoSetor(
                         ['id' => $chamadoId, 'titulo' => $chamado['titulo']],
                         ['nome' => $nomeMasterCliente, 'email' => $clienteInfo['contato_email'], 'telefone' => $clienteInfo['contato_telefone']],
                         $setorAlvoPortal['nome']
-                    );
+                    ));
                 }
             }
 
@@ -98,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'atribui
     }
 
     header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));
+    finalizar_resposta_e_notificar();
     exit;
 }
 

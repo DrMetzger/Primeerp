@@ -1700,6 +1700,24 @@ a.card-cliente, a.card-cliente:hover {
 }
 .progress-bar.bg-success { background-color: var(--ph-success); }
 
+/* ------------------------------------------------------ Cards de vídeo aula
+   Aba "Vídeo aulas" por setor (cliente.php) e grade do portal do cliente --
+   pedido explícito do Kleber pra ficar "bem legal e atrativo" pros clientes,
+   não só uma lista/tabela seca como Documentos. */
+.video-aula-card { overflow: hidden; transition: transform .15s ease, box-shadow .15s ease; }
+.video-aula-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15, 23, 42, .12); }
+.video-aula-thumb {
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1e293b, #334155);
+    color: #fff;
+    font-size: 2.75rem;
+    cursor: pointer;
+}
+.video-aula-thumb:hover { color: var(--ph-primary, #6366f1); }
+
 /* ------------------------------------------- Overlay de progresso de upload
    Mostrado enquanto um arquivo está subindo (barra com % de verdade, não só
    um spinner) -- pedido do Kleber depois de levantar o limite de anexo pra
