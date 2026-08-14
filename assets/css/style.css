@@ -907,6 +907,17 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
 
 .chamado-card:hover { box-shadow: var(--ph-elev-2); }
 
+/* Piscada rápida no card pra onde a tela rolou de volta sozinha depois de
+   uma ação (responder/encerrar/trocar setor) -- confirma visualmente que é
+   ESSE o chamado, não só a posição de scroll (ver scroll_para em cliente.php). */
+.chamado-card.chamado-destacado {
+    animation: chamado-destacado-flash 2s ease-out;
+}
+@keyframes chamado-destacado-flash {
+    0%, 15% { box-shadow: 0 0 0 3px var(--ph-primary, #4f46e5), var(--ph-elev-2); }
+    100% { box-shadow: var(--ph-elev-1); }
+}
+
 .badge-rotulo {
     font-size: .64rem;
     text-transform: uppercase;
