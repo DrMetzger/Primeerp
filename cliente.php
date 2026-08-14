@@ -1411,7 +1411,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: ' . url('cliente.php?id=' . $clienteId . '#' . ($_POST['aba_retorno'] ?? 'visao-geral')));
+    // Volta rolado até o MESMO card de onde a ação partiu (ex.: responder um
+    // chamado específico numa lista com 20+ chamados) -- sem isso a página
+    // sempre recarregava no topo da aba, obrigando rolar tudo de novo pra
+    // continuar a conversa. $_POST['scroll_para'] é o id="..." do elemento
+    // (ver forms dos chamados) -- validado aqui (só letras/números/hífen)
+    // porque vai direto pra URL do redirect. Query string SEMPRE antes do
+    // #fragmento (senão vira parte do hash e o JS não acha via
+    // URLSearchParams(location.search)).
+    $urlRetorno = 'cliente.php?id=' . $clienteId;
+    $scrollPara = $_POST['scroll_para'] ?? '';
+    if ($scrollPara !== '' && preg_match('/^[a-zA-Z0-9-]+$/', $scrollPara)) {
+        $urlRetorno .= '&scroll_para=' . urlencode($scrollPara);
+    }
+    $urlRetorno .= '#' . ($_POST['aba_retorno'] ?? 'visao-geral');
+    header('Location: ' . url($urlRetorno));
     finalizar_resposta_e_notificar();
     exit;
 }
@@ -2444,7 +2458,7 @@ require __DIR__ . '/templates/header.php';
 
         <div id="listaChamados">
         <?php foreach ($chamados as $c): ?>
-        <div class="card chamado-card mb-3" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>">
+        <div class="card chamado-card mb-3" id="chamado-<?= (int) $c['id'] ?>" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                     <div>
@@ -2457,6 +2471,7 @@ require __DIR__ . '/templates/header.php';
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="acao" value="atribuir_setor_chamado">
                                     <input type="hidden" name="aba_retorno" value="chamados">
+                                    <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
                                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                                     <select name="setor_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o setor avisa o responsável dele por e-mail -- setor sem responsável cadastrado fica bloqueado aqui">
                                         <option value="" <?= !$c['setor_id'] ? 'selected' : '' ?>>Sem setor</option>
@@ -2478,6 +2493,7 @@ require __DIR__ . '/templates/header.php';
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="acao" value="atribuir_responsavel_chamado">
                                     <input type="hidden" name="aba_retorno" value="chamados">
+                                    <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
                                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                                     <select name="responsavel_id" class="form-select form-select-sm select-responsavel-chamado" onchange="this.form.submit()" title="Trocar o responsável avisa a pessoa por e-mail">
                                         <option value="">Sem responsável</option>
@@ -2498,6 +2514,7 @@ require __DIR__ . '/templates/header.php';
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="<?= $c['status'] === 'fechado' ? 'reabrir_chamado' : 'fechar_chamado' ?>">
                             <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
                             <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                             <?php if ($c['status'] === 'fechado'): ?>
                                 <button type="submit" class="btn btn-reabrir"><i class="bi bi-arrow-counterclockwise"></i> Reabrir</button>
@@ -2537,6 +2554,7 @@ require __DIR__ . '/templates/header.php';
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="responder_chamado">
                     <input type="hidden" name="aba_retorno" value="chamados">
+                    <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
                     <div class="d-flex flex-wrap align-items-center gap-3 mb-2 resposta-opcoes-envio">
@@ -3855,6 +3873,36 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
     }
+
+    // Volta pro MESMO chamado de onde a ação partiu (responder, encerrar,
+    // trocar setor/responsável) em vez de sempre abrir a aba Chamados lá do
+    // topo -- pedido do Kleber: com 15-20 chamados abertos, ter que rolar
+    // tudo de novo depois de cada resposta era inaceitável. Ver
+    // scroll_para em cada form de chamado + o redirect no topo do arquivo.
+    (function () {
+        var parametros = new URLSearchParams(window.location.search);
+        var scrollPara = parametros.get('scroll_para');
+        if (!scrollPara) return;
+
+        parametros.delete('scroll_para');
+        var novaQuery = parametros.toString();
+        history.replaceState(null, '', window.location.pathname + (novaQuery ? '?' + novaQuery : '') + window.location.hash);
+
+        var alvo = document.getElementById(scrollPara);
+        if (!alvo) return;
+
+        // A resposta pode ter tirado o chamado do filtro "Pendentes"
+        // (padrão da tela) -- ex.: virou "Aguardando cliente" -- então
+        // força "Todos" antes de rolar, senão o card fica escondido.
+        var botaoTodos = document.querySelector('.filtro-todos');
+        if (botaoTodos) botaoTodos.click();
+
+        setTimeout(function () {
+            alvo.scrollIntoView({ block: 'center' });
+            alvo.classList.add('chamado-destacado');
+            setTimeout(function () { alvo.classList.remove('chamado-destacado'); }, 2000);
+        }, 50);
+    })();
 
     document.querySelectorAll('.card-setor').forEach(function (card) {
         card.addEventListener('click', function () {
