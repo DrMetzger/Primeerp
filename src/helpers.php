@@ -38,15 +38,41 @@ function notificar_depois(callable $callback): void
  * Fecha a resposta HTTP pro navegador AGORA (chamar depois de já ter
  * mandado o header('Location: ...') do redirect de POST) e só então executa
  * a fila de notificações registrada via notificar_depois() -- ver o
- * comentário lá acima. Sem fastcgi_finish_request() disponível (hosts sem
- * PHP-FPM/LiteSpeed), cai pro comportamento antigo: executa a fila antes de
- * fechar a conexão mesmo (mais lento, mas não trava: só demora).
+ * comentário lá acima.
+ *
+ * IMPORTANTE: a Hostinger roda PHP via LiteSpeed/lsphp (LSAPI), NÃO
+ * FastCGI/PHP-FPM -- fastcgi_finish_request() não existe (ou não faz nada
+ * de verdade) nesse SAPI. A função equivalente de verdade é
+ * litespeed_finish_request(). Primeira versão desse fix só checava
+ * fastcgi_finish_request() e por isso NÃO tinha efeito nenhum em produção
+ * (bug continuou acontecendo -- reportado pelo Kleber de novo). Checa as
+ * duas, na ordem certa pro SAPI de cada host, com um fallback manual
+ * (Content-Length + flush) pra qualquer outro SAPI sem nenhuma das duas.
  */
 function finalizar_resposta_e_notificar(): void
 {
-    if (function_exists('fastcgi_finish_request')) {
-        session_write_close();
+    session_write_close();
+
+    if (function_exists('litespeed_finish_request')) {
+        litespeed_finish_request();
+    } elseif (function_exists('fastcgi_finish_request')) {
         fastcgi_finish_request();
+    } else {
+        // Fallback genérico (mod_php, CLI server etc.) -- manda o
+        // Content-Length exato do que já foi gerado e fecha a conexão
+        // explicitamente, pro navegador saber que a resposta terminou
+        // mesmo sem uma função nativa de "termina agora, continua depois".
+        ignore_user_abort(true);
+        $conteudoAcumulado = '';
+        while (ob_get_level() > 0) {
+            $conteudoAcumulado .= ob_get_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Length: ' . strlen($conteudoAcumulado));
+            header('Connection: close');
+        }
+        echo $conteudoAcumulado;
+        flush();
     }
 
     foreach ($GLOBALS['__fila_notificacoes'] as $callback) {
