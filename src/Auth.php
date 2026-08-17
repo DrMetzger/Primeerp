@@ -103,6 +103,59 @@ class Auth
     }
 
     /**
+     * Acesso ao cofre de credenciais (aba "Acessos") e às Fontes ADVPL de
+     * cliente.php -- dado extremamente sensível (senha de servidor/RDP/
+     * AnyDesk/VPN, código-fonte proprietário do cliente). Restrito por
+     * padrão a admin/diretor (CEO de propósito NÃO entra aqui, mesmo tendo
+     * isAdmin()=true pro resto do sistema -- é um nível de sigilo à parte,
+     * liberar geral demais contraria o pedido explícito do Kleber). Um
+     * colaborador específico pode ganhar acesso especial via
+     * usuarios.acesso_dados_sensiveis (ver usuarios.php), pra quem realmente
+     * precisa sem promover o perfil dele. SEMPRE busca no banco (não
+     * cachear em sessão) -- uma liberação dada/revogada tem que valer na
+     * hora, mesmo pra quem já está com sessão aberta.
+     */
+    public static function podeAcessarDadosSensiveis(): bool
+    {
+        if (!self::check()) {
+            return false;
+        }
+        if (in_array($_SESSION['usuario_perfil'] ?? null, ['admin', 'diretor'], true)) {
+            return true;
+        }
+        $stmt = Database::connection()->prepare('SELECT acesso_dados_sensiveis FROM usuarios WHERE id = ?');
+        $stmt->execute([self::userId()]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    public static function requireAcessoDadosSensiveis(): void
+    {
+        self::requireLogin();
+        if (!self::podeAcessarDadosSensiveis()) {
+            http_response_code(403);
+            die('Acesso restrito -- essa área guarda dados sensíveis do cliente (credenciais, código-fonte).');
+        }
+    }
+
+    /**
+     * Registra toda vez que alguém autorizado revela uma senha ou baixa um
+     * arquivo do cofre de acessos/Fontes ADVPL -- boas práticas de mercado
+     * pra dado desse nível de sigilo (trilha de auditoria, mesmo que seja
+     * um acesso legítimo). Nunca bloqueia o acesso se o log falhar (só
+     * loga o erro) -- auditoria não pode ser motivo de travar quem já tem
+     * permissão de verdade.
+     */
+    public static function registrarAcessoSensivel(string $tipo, string $acao, int $referenciaId, ?int $clienteId = null): void
+    {
+        try {
+            Database::connection()->prepare('INSERT INTO acesso_dados_sensiveis_log (usuario_id, tipo, acao, referencia_id, cliente_id) VALUES (?, ?, ?, ?, ?)')
+                ->execute([self::userId(), $tipo, $acao, $referenciaId, $clienteId]);
+        } catch (\Throwable $e) {
+            error_log('Falha ao registrar log de acesso sensível: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Igual requireAdmin(), mas também aceita um token temporário válido
      * (?diag_token=...) gerado por um admin logado, para permitir leitura
      * por uma ferramenta externa sem sessão de navegador.

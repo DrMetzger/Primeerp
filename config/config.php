@@ -123,6 +123,17 @@ define('GEMINI_API_KEY_BUSCA', getenv('ADMINPRIME_GEMINI_API_KEY_BUSCA') ?: '');
 // só quando for via URL/wget.
 define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: ($isLocal ? 'teste-local' : '9333d390beced8c03a2a8668c38ee1f9d7333def0501d182'));
 
+// Chave de cifra do cofre de acessos (aba "Acessos" em cliente.php --
+// senha de servidor/RDP/AnyDesk/VPN) -- ver src/Crypto.php. AES-256-GCM,
+// chave de 32 bytes em base64. NUNCA reusar/trocar essa chave em produção
+// depois que já existir credencial cifrada com ela (perde a senha de
+// verdade pra sempre, decifrar exige a MESMA chave que cifrou). Local usa
+// uma chave fixa só pra desenvolvimento/teste, sem risco nenhum (não é
+// dado real).
+define('CREDENCIAIS_CIFRA_CHAVE', getenv('ADMINPRIME_CREDENCIAIS_CIFRA_CHAVE') ?: ($isLocal
+    ? 'dGVzdGUtbG9jYWwtc2VtLXJpc2NvLTMyLWJ5dGVzISE='
+    : 'VAAkLbbFOBQTIZIfFMVms14PIu1S2lhksFtXcqSRdDE='));
+
 // Diretório de uploads (relativo à raiz do projeto)
 define('UPLOADS_DIR', __DIR__ . '/../uploads');
 define('UPLOADS_MAX_SIZE', 500 * 1024 * 1024); // 500MB por arquivo (pedido do Kleber -- 15MB não dava pra nada)
