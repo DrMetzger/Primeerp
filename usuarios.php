@@ -112,6 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $telefone = apenas_digitos($_POST['telefone'] ?? '');
         $documento = normalizar_documento($_POST['documento'] ?? '');
         $perfil = array_key_exists($_POST['perfil'] ?? '', PERFIS_USUARIO) ? $_POST['perfil'] : 'colaborador';
+        $acessoDadosSensiveis = ($_POST['acesso_dados_sensiveis'] ?? '') === '1' ? 1 : 0;
 
         if ($nome === '' || $email === '') {
             flash_set('erro', 'Preencha nome e e-mail.');
@@ -121,8 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($existe->fetchColumn()) {
                 flash_set('erro', 'Já existe outro usuário com esse e-mail.');
             } else {
-                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, documento = ?, perfil = ? WHERE id = ?')
-                    ->execute([$nome, $email, $telefone, $documento, $perfil, $usuarioIdAlvo]);
+                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, documento = ?, perfil = ?, acesso_dados_sensiveis = ? WHERE id = ?')
+                    ->execute([$nome, $email, $telefone, $documento, $perfil, $acessoDadosSensiveis, $usuarioIdAlvo]);
                 flash_set('sucesso', 'Dados de "' . $nome . '" atualizados.');
             }
         }
@@ -403,6 +404,15 @@ require __DIR__ . '/templates/header.php';
                                 <?php endforeach; ?>
                             </select>
                         </div>
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="acesso_dados_sensiveis" id="editarAcessoDadosSensiveis" value="1">
+                                <label class="form-check-label" for="editarAcessoDadosSensiveis">
+                                    <i class="bi bi-shield-lock"></i> Acesso especial a dados sensíveis (Acessos/Fontes ADVPL dos clientes)
+                                </label>
+                                <p class="text-muted small mb-0">Admin/Diretor já têm esse acesso por padrão. Marque só pra um colaborador que realmente precisa ver credenciais e código-fonte de cliente -- dado extremamente sensível.</p>
+                            </div>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar dados</button>
                 </form>
@@ -476,6 +486,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarTelefone').value = dados.telefone ? PrimeUI.formatarTelefone(dados.telefone) : '';
         document.getElementById('editarDocumento').value = dados.documento || '';
         document.getElementById('editarPerfil').value = dados.perfil;
+        document.getElementById('editarAcessoDadosSensiveis').checked = !!parseInt(dados.acesso_dados_sensiveis, 10);
         document.querySelectorAll('.avatar-usuario-id-campo').forEach(function (campo) { campo.value = dados.id; });
 
         // Senha

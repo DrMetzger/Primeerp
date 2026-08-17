@@ -858,6 +858,107 @@ class Migrations
                 atualizado_por INT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Permissão especial (além de admin/diretor, que já têm por padrão --
+        // ver Auth::podeAcessarDadosSensiveis()) pra um colaborador específico
+        // enxergar a aba "Acessos" (credenciais/VPN) e "Fontes ADVPL" de um
+        // cliente -- dado extremamente sensível (senha de servidor, RDP,
+        // AnyDesk, código-fonte proprietário do cliente), pedido do Kleber
+        // pra ficar restrito por padrão e só liberado caso a caso.
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS acesso_dados_sensiveis TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Acesso especial a Acessos/Fontes ADVPL, além do que admin/diretor já têm'");
+
+        // --- Cofre de acessos do cliente (aba "Acessos") -----------------
+        // Nível CLIENTE (não por setor) -- servidor/RDP/AnyDesk/VPN costuma
+        // ser da empresa toda, não de um setor específico. A senha NUNCA
+        // fica em texto puro no banco: senha_cifrada guarda o resultado de
+        // Crypto::cifrar() (AES-256-GCM, chave só no config.php do servidor,
+        // nunca versionada) -- é decifrada só na hora de mostrar pra quem
+        // tem permissão (ver ver_credencial.php), nunca embutida direto no
+        // HTML da página.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_credenciais (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                tipo ENUM('servidor','rdp','anydesk','vpn','outro') NOT NULL DEFAULT 'outro',
+                titulo VARCHAR(200) NOT NULL,
+                host VARCHAR(150) NULL,
+                porta VARCHAR(10) NULL,
+                usuario VARCHAR(150) NULL,
+                senha_cifrada TEXT NULL,
+                observacoes TEXT NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT fk_cliente_credenciais_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_cliente_credenciais_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Repositório de arquivo de VPN (ex.: .ovpn) pra baixar/repassar --
+        // deliberadamente uma tabela PRÓPRIA, não reaproveita "documentos":
+        // documentos é acessível por QUALQUER um da equipe (ver
+        // download.php), e aqui precisa da MESMA trava restrita da aba
+        // Acessos (ver download_vpn.php). Arquivo de VPN é sempre pequeno,
+        // então o backup dos bytes no banco (mesma ideia de documentos.dados)
+        // não tem o risco de memória que vídeo aula tem.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_vpn_arquivos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                titulo VARCHAR(200) NOT NULL,
+                arquivo_nome_original VARCHAR(255) NOT NULL,
+                arquivo_caminho VARCHAR(255) NOT NULL,
+                arquivo_tamanho INT NOT NULL DEFAULT 0,
+                dados LONGBLOB NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_vpn_arquivos_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_vpn_arquivos_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // --- Fontes ADVPL por setor (sub-aba "Fontes ADVPL") -------------
+        // Código-fonte proprietário do cliente -- mesmo nível de sigilo do
+        // cofre de acessos acima, mesma trava de permissão. "ponto_entrada"
+        // é o nome da função/rotina customizada (ex.: U_MEUFONTE01) que o
+        // Protheus chama pra entrar nesse fonte -- útil na hora de reaplicar
+        // o customizado depois de uma atualização do Protheus.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS setor_fontes_advpl (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setor_id INT NOT NULL,
+                titulo VARCHAR(200) NOT NULL,
+                ponto_entrada VARCHAR(150) NULL COMMENT 'Nome da função/ponto de entrada customizado, ex.: U_MEUFONTE01',
+                descricao TEXT NULL,
+                arquivo_nome_original VARCHAR(255) NOT NULL,
+                arquivo_caminho VARCHAR(255) NOT NULL,
+                arquivo_tamanho INT NOT NULL DEFAULT 0,
+                dados LONGBLOB NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_fontes_advpl_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE CASCADE,
+                CONSTRAINT fk_fontes_advpl_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Auditoria de acesso a dado sensível (boas práticas de mercado pra
+        // cofre de credencial/código-fonte proprietário) -- registra TODA
+        // vez que alguém revela uma senha ou baixa um arquivo de VPN/fonte
+        // ADVPL, mesmo sendo alguém autorizado. Sem FK pra usuario "NOT
+        // NULL" de propósito (usuario_id fica NULL se a conta for excluída
+        // depois, mas o registro de QUE aconteve um acesso continua valendo).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS acesso_dados_sensiveis_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id INT NULL,
+                tipo VARCHAR(30) NOT NULL COMMENT 'credencial, vpn_arquivo ou fonte_advpl',
+                acao VARCHAR(30) NOT NULL COMMENT 'visualizar_senha, baixar_arquivo etc.',
+                referencia_id INT NOT NULL,
+                cliente_id INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_log_sensivel_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     /**

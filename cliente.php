@@ -4,6 +4,7 @@ require_once __DIR__ . '/bootstrap.php';
 
 use AdminPrime\AiSugestoes;
 use AdminPrime\Auth;
+use AdminPrime\Crypto;
 use AdminPrime\Database;
 use AdminPrime\Notificacoes;
 use AdminPrime\PdfExport;
@@ -372,6 +373,200 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             @unlink(UPLOADS_DIR . '/' . $caminhoVideoExcluir);
         }
         flash_set('sucesso', 'Vídeo aula removida.');
+    }
+
+    // --- Acessos (cofre de credenciais/VPN) e Fontes ADVPL ----------------
+    // Dado extremamente sensível -- checa a permissão especial de novo
+    // AQUI (server-side), não só escondendo a aba na tela: alguém sem
+    // permissão não pode criar/editar/excluir isso nem mandando o POST
+    // direto, mesmo sem ver o botão.
+    $acoesDadosSensiveis = [
+        'criar_credencial', 'atualizar_credencial', 'excluir_credencial',
+        'upload_vpn_arquivo', 'excluir_vpn_arquivo',
+        'upload_fonte_advpl', 'excluir_fonte_advpl',
+    ];
+    if (in_array($acao, $acoesDadosSensiveis, true) && !Auth::podeAcessarDadosSensiveis()) {
+        http_response_code(403);
+        die('Acesso restrito -- essa área guarda dados sensíveis do cliente (credenciais, código-fonte).');
+    }
+
+    if ($acao === 'criar_credencial') {
+        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', ['servidor' => 1, 'rdp' => 1, 'anydesk' => 1, 'vpn' => 1, 'outro' => 1]) ? $_POST['tipo'] : 'outro';
+        $tituloCredencial = trim($_POST['titulo'] ?? '');
+        if ($tituloCredencial === '') {
+            flash_set('erro', 'Informe um título/nome pra essa credencial.');
+        } else {
+            $pdo->prepare('INSERT INTO cliente_credenciais (cliente_id, tipo, titulo, host, porta, usuario, senha_cifrada, observacoes, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([
+                    $clienteId,
+                    $tipoCredencial,
+                    $tituloCredencial,
+                    trim($_POST['host'] ?? '') ?: null,
+                    trim($_POST['porta'] ?? '') ?: null,
+                    trim($_POST['usuario'] ?? '') ?: null,
+                    Crypto::cifrar($_POST['senha'] ?? null),
+                    trim($_POST['observacoes'] ?? '') ?: null,
+                    Auth::userId(),
+                ]);
+            flash_set('sucesso', 'Credencial cadastrada.');
+        }
+    }
+
+    if ($acao === 'atualizar_credencial') {
+        $credencialIdAlvo = (int) $_POST['credencial_id'];
+        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', ['servidor' => 1, 'rdp' => 1, 'anydesk' => 1, 'vpn' => 1, 'outro' => 1]) ? $_POST['tipo'] : 'outro';
+        $tituloCredencial = trim($_POST['titulo'] ?? '');
+        if ($tituloCredencial === '') {
+            flash_set('erro', 'Informe um título/nome pra essa credencial.');
+        } else {
+            // Senha só é trocada se o campo vier preenchido -- em branco
+            // mantém a senha atual (evita ter que redigitar só pra
+            // corrigir o título/host de uma credencial já cadastrada).
+            $novaSenha = trim($_POST['senha'] ?? '');
+            if ($novaSenha !== '') {
+                $pdo->prepare('UPDATE cliente_credenciais SET tipo=?, titulo=?, host=?, porta=?, usuario=?, senha_cifrada=?, observacoes=? WHERE id=? AND cliente_id=?')
+                    ->execute([
+                        $tipoCredencial, $tituloCredencial,
+                        trim($_POST['host'] ?? '') ?: null, trim($_POST['porta'] ?? '') ?: null, trim($_POST['usuario'] ?? '') ?: null,
+                        Crypto::cifrar($novaSenha), trim($_POST['observacoes'] ?? '') ?: null,
+                        $credencialIdAlvo, $clienteId,
+                    ]);
+            } else {
+                $pdo->prepare('UPDATE cliente_credenciais SET tipo=?, titulo=?, host=?, porta=?, usuario=?, observacoes=? WHERE id=? AND cliente_id=?')
+                    ->execute([
+                        $tipoCredencial, $tituloCredencial,
+                        trim($_POST['host'] ?? '') ?: null, trim($_POST['porta'] ?? '') ?: null, trim($_POST['usuario'] ?? '') ?: null,
+                        trim($_POST['observacoes'] ?? '') ?: null,
+                        $credencialIdAlvo, $clienteId,
+                    ]);
+            }
+            flash_set('sucesso', 'Credencial atualizada.');
+        }
+    }
+
+    if ($acao === 'excluir_credencial') {
+        $pdo->prepare('DELETE FROM cliente_credenciais WHERE id = ? AND cliente_id = ?')
+            ->execute([(int) $_POST['credencial_id'], $clienteId]);
+        flash_set('sucesso', 'Credencial removida.');
+    }
+
+    if ($acao === 'upload_vpn_arquivo' && isset($_FILES['arquivo'])) {
+        $tituloVpn = trim($_POST['titulo'] ?? '');
+        if ($tituloVpn === '') {
+            flash_set('erro', 'Informe um título pra esse arquivo de VPN.');
+        } elseif ($_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
+            flash_set('erro', 'Falha no upload do arquivo.');
+        } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
+            flash_set('erro', 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).');
+        } else {
+            $dirClienteVpn = UPLOADS_DIR . '/clientes/' . $clienteId;
+            if (!is_dir($dirClienteVpn)) {
+                mkdir($dirClienteVpn, 0755, true);
+            }
+            $extensaoVpn = strtolower(pathinfo($_FILES['arquivo']['name'], PATHINFO_EXTENSION));
+            $nomeArmazenadoVpn = bin2hex(random_bytes(16)) . ($extensaoVpn ? '.' . $extensaoVpn : '');
+            $destinoVpn = $dirClienteVpn . '/' . $nomeArmazenadoVpn;
+
+            if (!move_uploaded_file($_FILES['arquivo']['tmp_name'], $destinoVpn)) {
+                flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
+            } else {
+                $pdo->prepare('INSERT INTO cliente_vpn_arquivos (cliente_id, titulo, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([
+                        $clienteId,
+                        $tituloVpn,
+                        $_FILES['arquivo']['name'],
+                        'clientes/' . $clienteId . '/' . $nomeArmazenadoVpn,
+                        $_FILES['arquivo']['size'],
+                        file_get_contents($destinoVpn),
+                        Auth::userId(),
+                    ]);
+                flash_set('sucesso', 'Arquivo de VPN cadastrado.');
+            }
+        }
+    }
+
+    if ($acao === 'excluir_vpn_arquivo') {
+        $stmtVpnExcluir = $pdo->prepare('SELECT arquivo_caminho FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?');
+        $stmtVpnExcluir->execute([(int) $_POST['arquivo_id'], $clienteId]);
+        $caminhoVpnExcluir = $stmtVpnExcluir->fetchColumn();
+
+        $pdo->prepare('DELETE FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?')
+            ->execute([(int) $_POST['arquivo_id'], $clienteId]);
+
+        if ($caminhoVpnExcluir) {
+            @unlink(UPLOADS_DIR . '/' . $caminhoVpnExcluir);
+        }
+        flash_set('sucesso', 'Arquivo de VPN removido.');
+    }
+
+    if ($acao === 'upload_fonte_advpl' && isset($_FILES['arquivo'])) {
+        $tituloFonte = trim($_POST['titulo'] ?? '');
+        $setorIdFonte = (int) ($_POST['setor_id'] ?? 0);
+        // Confirma que esse setor é mesmo desse cliente -- sem isso,
+        // alguém poderia mandar o id de um setor de OUTRO cliente e a
+        // fonte iria parar lá, fora do lugar (e visível pra quem não devia).
+        $stmtSetorFonte = $pdo->prepare('SELECT 1 FROM setores WHERE id = ? AND cliente_id = ?');
+        $stmtSetorFonte->execute([$setorIdFonte, $clienteId]);
+        $setorPertenceAoCliente = (bool) $stmtSetorFonte->fetchColumn();
+        if ($tituloFonte === '' || !$setorIdFonte) {
+            flash_set('erro', 'Informe o nome da rotina e o setor.');
+        } elseif (!$setorPertenceAoCliente) {
+            flash_set('erro', 'Setor inválido.');
+        } elseif ($_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
+            flash_set('erro', 'Falha no upload do arquivo.');
+        } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
+            flash_set('erro', 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).');
+        } else {
+            $dirClienteFonte = UPLOADS_DIR . '/clientes/' . $clienteId;
+            if (!is_dir($dirClienteFonte)) {
+                mkdir($dirClienteFonte, 0755, true);
+            }
+            $extensaoFonte = strtolower(pathinfo($_FILES['arquivo']['name'], PATHINFO_EXTENSION));
+            $nomeArmazenadoFonte = bin2hex(random_bytes(16)) . ($extensaoFonte ? '.' . $extensaoFonte : '');
+            $destinoFonte = $dirClienteFonte . '/' . $nomeArmazenadoFonte;
+
+            if (!move_uploaded_file($_FILES['arquivo']['tmp_name'], $destinoFonte)) {
+                flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
+            } else {
+                $pdo->prepare('INSERT INTO setor_fontes_advpl (setor_id, titulo, ponto_entrada, descricao, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([
+                        $setorIdFonte,
+                        $tituloFonte,
+                        trim($_POST['ponto_entrada'] ?? '') ?: null,
+                        trim($_POST['descricao'] ?? '') ?: null,
+                        $_FILES['arquivo']['name'],
+                        'clientes/' . $clienteId . '/' . $nomeArmazenadoFonte,
+                        $_FILES['arquivo']['size'],
+                        file_get_contents($destinoFonte),
+                        Auth::userId(),
+                    ]);
+                flash_set('sucesso', 'Fonte ADVPL cadastrada.');
+            }
+        }
+    }
+
+    if ($acao === 'excluir_fonte_advpl') {
+        // setor_fontes_advpl não tem cliente_id direto (só setor_id) -- o
+        // JOIN com setores confirma que essa fonte é mesmo desse cliente
+        // antes de excluir, senão alguém com a permissão especial num
+        // cliente conseguiria apagar fonte de OUTRO cliente só sabendo o id.
+        $stmtFonteExcluir = $pdo->prepare('
+            SELECT f.arquivo_caminho FROM setor_fontes_advpl f
+            INNER JOIN setores s ON s.id = f.setor_id
+            WHERE f.id = ? AND s.cliente_id = ?
+        ');
+        $stmtFonteExcluir->execute([(int) $_POST['fonte_id'], $clienteId]);
+        $fonteEncontrada = $stmtFonteExcluir->fetch();
+
+        if ($fonteEncontrada) {
+            $pdo->prepare('DELETE FROM setor_fontes_advpl WHERE id = ?')->execute([(int) $_POST['fonte_id']]);
+            if ($fonteEncontrada['arquivo_caminho']) {
+                @unlink(UPLOADS_DIR . '/' . $fonteEncontrada['arquivo_caminho']);
+            }
+            flash_set('sucesso', 'Fonte ADVPL removida.');
+        } else {
+            flash_set('erro', 'Fonte não encontrada.');
+        }
     }
 
     // --- Sugestões de melhoria por setor, geradas com IA -----------------
@@ -1679,6 +1874,48 @@ foreach ($propostas as $p) {
     }
 }
 
+// --- Acessos (cofre de credenciais/VPN) e Fontes ADVPL ------------------
+// Dado extremamente sensível (senha de servidor/RDP/AnyDesk/VPN, código-
+// fonte proprietário do cliente) -- só carrega essas listas se a pessoa
+// logada realmente tiver a permissão especial (ver Auth::
+// podeAcessarDadosSensiveis()), pra nem essas linhas existirem em memória
+// numa requisição de quem não pode ver. A SENHA em si nunca é decifrada
+// aqui -- só o resto dos dados da credencial (título, host, usuário); a
+// senha só é decifrada sob demanda via ver_credencial.php, quando a pessoa
+// clica em "Mostrar".
+$podeAcessarDadosSensiveis = Auth::podeAcessarDadosSensiveis();
+$credenciaisCliente = [];
+$vpnArquivosCliente = [];
+$fontesAdvplPorSetorId = [];
+if ($podeAcessarDadosSensiveis) {
+    $stmtCredenciais = $pdo->prepare('SELECT * FROM cliente_credenciais WHERE cliente_id = ? ORDER BY tipo ASC, titulo ASC');
+    $stmtCredenciais->execute([$clienteId]);
+    $credenciaisCliente = $stmtCredenciais->fetchAll();
+
+    $stmtVpnArquivos = $pdo->prepare('
+        SELECT v.*, u.nome AS criado_por_nome
+        FROM cliente_vpn_arquivos v
+        LEFT JOIN usuarios u ON u.id = v.criado_por
+        WHERE v.cliente_id = ?
+        ORDER BY v.criado_em DESC
+    ');
+    $stmtVpnArquivos->execute([$clienteId]);
+    $vpnArquivosCliente = $stmtVpnArquivos->fetchAll();
+
+    $stmtFontesAdvpl = $pdo->prepare('
+        SELECT f.*, u.nome AS criado_por_nome
+        FROM setor_fontes_advpl f
+        INNER JOIN setores s ON s.id = f.setor_id
+        LEFT JOIN usuarios u ON u.id = f.criado_por
+        WHERE s.cliente_id = ?
+        ORDER BY f.criado_em DESC
+    ');
+    $stmtFontesAdvpl->execute([$clienteId]);
+    foreach ($stmtFontesAdvpl->fetchAll() as $fonte) {
+        $fontesAdvplPorSetorId[$fonte['setor_id']][] = $fonte;
+    }
+}
+
 $treinamentos = $pdo->prepare('
     SELECT t.*, u.nome AS responsavel_nome, s.nome AS setor_nome
     FROM treinamentos t
@@ -1872,6 +2109,9 @@ require __DIR__ . '/templates/header.php';
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis"><i class="bi bi-graph-up"></i> KPIs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores"><i class="bi bi-diagram-3"></i> Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios"><i class="bi bi-people"></i> Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
+    <?php if ($podeAcessarDadosSensiveis): ?>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#acessos"><i class="bi bi-shield-lock"></i> Acessos</a></li>
+    <?php endif; ?>
 </ul>
 
 <div class="tab-content">
@@ -2695,6 +2935,7 @@ require __DIR__ . '/templates/header.php';
             $treinamentosSetor = $treinamentosPorSetorId[$idSetorAtual] ?? [];
             $documentosSetor = $documentosPorSetorId[$idSetorAtual] ?? [];
             $videoAulasSetor = $videoAulasPorSetorId[$idSetorAtual] ?? [];
+            $fontesAdvplSetor = $fontesAdvplPorSetorId[$idSetorAtual] ?? [];
             $propostasSetor = $propostasPorSetorId[$idSetorAtual] ?? [];
             $kpisSetor = $kpisPorSetorId[$idSetorAtual] ?? [];
             $sugestaoIaSetor = $ultimaSugestaoIaPorSetorId[$idSetorAtual] ?? null;
@@ -2718,6 +2959,9 @@ require __DIR__ . '/templates/header.php';
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorMetricas<?= $idSetorAtual ?>"><i class="bi bi-graph-up"></i> Métricas <span class="badge bg-secondary"><?= count($kpisSetor) ?></span></a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorIa<?= $idSetorAtual ?>"><i class="bi bi-stars"></i> IA</a></li>
                     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorVideoAulas<?= $idSetorAtual ?>"><i class="bi bi-play-circle"></i> Vídeo aulas <span class="badge bg-secondary"><?= count($videoAulasSetor) ?></span></a></li>
+                    <?php if ($podeAcessarDadosSensiveis): ?>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setorFontesAdvpl<?= $idSetorAtual ?>"><i class="bi bi-file-earmark-code"></i> Fontes ADVPL <span class="badge bg-secondary"><?= count($fontesAdvplSetor) ?></span></a></li>
+                    <?php endif; ?>
                 </ul>
                 <div class="tab-content pt-3">
 
@@ -3106,6 +3350,56 @@ require __DIR__ . '/templates/header.php';
                         <?php endif; ?>
                     </div>
 
+                    <?php if ($podeAcessarDadosSensiveis): ?>
+                    <!-- Fontes ADVPL -->
+                    <div class="tab-pane" id="setorFontesAdvpl<?= $idSetorAtual ?>">
+                        <div class="alert alert-warning small py-2 mb-3"><i class="bi bi-exclamation-triangle-fill"></i> Código-fonte proprietário do cliente -- área restrita, todo download fica registrado.</div>
+
+                        <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end card card-stat p-3 mb-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="upload_fonte_advpl">
+                            <input type="hidden" name="aba_retorno" value="setores">
+                            <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
+                            <div class="col-md-4"><label class="form-label small mb-1">Nome da rotina</label><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Ex.: Bloqueio de faturamento" required></div>
+                            <div class="col-md-3"><label class="form-label small mb-1">Ponto de entrada</label><input type="text" name="ponto_entrada" class="form-control form-control-sm" placeholder="Ex.: U_MEUFONTE01"></div>
+                            <div class="col-md-3"><label class="form-label small mb-1">Arquivo fonte</label><input type="file" name="arquivo" class="form-control form-control-sm" accept=".prw,.ptm,.tlpp,.ch,.zip" required></div>
+                            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                            <div class="col-12"><label class="form-label small mb-1">Descrição</label><textarea name="descricao" class="form-control form-control-sm" rows="1" placeholder="O que esse fonte faz, opcional"></textarea></div>
+                        </form>
+
+                        <?php if ($fontesAdvplSetor): ?>
+                        <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead><tr><th>Rotina</th><th>Ponto de entrada</th><th>Arquivo</th><th>Enviado por</th><th>Data</th><th></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($fontesAdvplSetor as $f): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= e($f['titulo']) ?><?= $f['descricao'] ? '<div class="text-muted small">' . e($f['descricao']) . '</div>' : '' ?></td>
+                                    <td><?= $f['ponto_entrada'] ? '<code>' . e($f['ponto_entrada']) . '</code>' : '-' ?></td>
+                                    <td><?= e($f['arquivo_nome_original']) ?> <small class="text-muted">(<?= round($f['arquivo_tamanho'] / 1024) ?> KB)</small></td>
+                                    <td><?= e($f['criado_por_nome'] ?: '-') ?></td>
+                                    <td><?= formatar_data($f['criado_em']) ?></td>
+                                    <td class="text-end text-nowrap">
+                                        <a href="<?= url('download_fonte_advpl.php?id=' . $f['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir a fonte &quot;<?= e($f['titulo']) ?>&quot;?');">
+                                            <?= csrf_field() ?>
+                                            <input type="hidden" name="acao" value="excluir_fonte_advpl">
+                                            <input type="hidden" name="aba_retorno" value="setores">
+                                            <input type="hidden" name="fonte_id" value="<?= $f['id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <?php else: ?>
+                            <p class="text-muted text-center py-3">Nenhuma fonte ADVPL cadastrada ainda pra esse setor.</p>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+
                 </div>
             </div>
         </details>
@@ -3231,6 +3525,109 @@ require __DIR__ . '/templates/header.php';
             </div>
         </div>
     </div>
+
+    <?php if ($podeAcessarDadosSensiveis): ?>
+    <!-- ACESSOS (cofre de credenciais + VPN) -->
+    <div class="tab-pane" id="acessos">
+        <div class="alert alert-warning d-flex align-items-start gap-2">
+            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+            <div>
+                <strong>Área restrita.</strong> Credenciais e arquivos aqui são extremamente sensíveis (senha de servidor, acesso remoto, VPN) -- só admin/diretor e usuários com liberação especial enxergam essa aba. Todo acesso (ver senha, baixar arquivo) fica registrado.
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="mb-0"><i class="bi bi-key"></i> Credenciais</h6>
+            <button type="button" class="btn btn-sm btn-dark" id="botaoNovaCredencial"><i class="bi bi-plus-lg"></i> Nova credencial</button>
+        </div>
+
+        <?php if ($credenciaisCliente): ?>
+        <div class="table-responsive mb-4">
+        <table class="table table-hover align-middle mb-0" id="tabelaCredenciais" data-csrf-ver-senha="<?= e(csrf_token()) ?>">
+            <thead><tr><th>Tipo</th><th>Título</th><th>Host</th><th>Porta</th><th>Usuário</th><th>Senha</th><th>Observações</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($credenciaisCliente as $cr): ?>
+                <tr>
+                    <td><span class="badge bg-secondary"><?= e(ucfirst($cr['tipo'])) ?></span></td>
+                    <td class="fw-semibold"><?= e($cr['titulo']) ?></td>
+                    <td><?= e($cr['host'] ?: '-') ?></td>
+                    <td><?= e($cr['porta'] ?: '-') ?></td>
+                    <td><?= e($cr['usuario'] ?: '-') ?></td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2 credencial-senha-linha" data-credencial-id="<?= $cr['id'] ?>">
+                            <span class="credencial-senha-valor font-monospace">••••••••</span>
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-mostrar-senha" title="Mostrar senha"><i class="bi bi-eye"></i></button>
+                        </div>
+                    </td>
+                    <td class="text-muted small"><?= e($cr['observacoes'] ?: '-') ?></td>
+                    <td class="text-end text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-credencial"
+                            data-id="<?= $cr['id'] ?>" data-tipo="<?= e($cr['tipo']) ?>" data-titulo="<?= e($cr['titulo']) ?>"
+                            data-host="<?= e($cr['host']) ?>" data-porta="<?= e($cr['porta']) ?>" data-usuario="<?= e($cr['usuario']) ?>"
+                            data-observacoes="<?= e($cr['observacoes']) ?>"
+                        ><i class="bi bi-pencil"></i></button>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir a credencial &quot;<?= e($cr['titulo']) ?>&quot;?');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="excluir_credencial">
+                            <input type="hidden" name="aba_retorno" value="acessos">
+                            <input type="hidden" name="credencial_id" value="<?= $cr['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <?php else: ?>
+            <p class="text-muted text-center py-3">Nenhuma credencial cadastrada ainda.</p>
+        <?php endif; ?>
+
+        <hr class="my-4">
+
+        <div class="mb-3">
+            <h6 class="mb-0"><i class="bi bi-hdd-network"></i> Arquivos de VPN</h6>
+            <p class="text-muted small mb-0">Repositório pra guardar e baixar arquivo de configuração de VPN (.ovpn etc.) desse cliente.</p>
+        </div>
+        <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="upload_vpn_arquivo">
+            <input type="hidden" name="aba_retorno" value="acessos">
+            <div class="col-md-4"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (ex.: VPN Matriz)" required></div>
+            <div class="col-md-6"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
+            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+        </form>
+        <?php if ($vpnArquivosCliente): ?>
+        <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Título</th><th>Arquivo</th><th>Enviado por</th><th>Data</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($vpnArquivosCliente as $v): ?>
+                <tr>
+                    <td class="fw-semibold"><?= e($v['titulo']) ?></td>
+                    <td><?= e($v['arquivo_nome_original']) ?> <small class="text-muted">(<?= round($v['arquivo_tamanho'] / 1024) ?> KB)</small></td>
+                    <td><?= e($v['criado_por_nome'] ?: '-') ?></td>
+                    <td><?= formatar_data($v['criado_em']) ?></td>
+                    <td class="text-end text-nowrap">
+                        <a href="<?= url('download_vpn.php?id=' . $v['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir o arquivo &quot;<?= e($v['titulo']) ?>&quot;?');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="excluir_vpn_arquivo">
+                            <input type="hidden" name="aba_retorno" value="acessos">
+                            <input type="hidden" name="arquivo_id" value="<?= $v['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <?php else: ?>
+            <p class="text-muted text-center py-3">Nenhum arquivo de VPN cadastrado ainda.</p>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
 
 </div>
 
@@ -3747,6 +4144,74 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
+<?php if ($podeAcessarDadosSensiveis): ?>
+<!-- Nova/editar credencial (aba Acessos) -- UM modal só, reaproveitado pros
+     dois casos (o botão "Nova credencial" reseta os campos antes de abrir,
+     "editar" preenche a partir dos data-* do botão da linha). -->
+<div class="modal fade" id="modalCredencial" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" id="credencialAcao" value="criar_credencial">
+        <input type="hidden" name="aba_retorno" value="acessos">
+        <input type="hidden" name="credencial_id" id="credencialId" value="">
+        <div class="modal-header">
+          <h5 class="modal-title" id="credencialModalTitulo">Nova credencial</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Tipo</label>
+              <select name="tipo" id="credencialTipo" class="form-select">
+                <option value="servidor">Servidor</option>
+                <option value="rdp">RDP</option>
+                <option value="anydesk">AnyDesk</option>
+                <option value="vpn">VPN</option>
+                <option value="outro">Outro</option>
+              </select>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Título *</label>
+              <input type="text" name="titulo" id="credencialTitulo" class="form-control" placeholder="Ex.: Servidor Protheus - Produção" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Host/IP</label>
+              <input type="text" name="host" id="credencialHost" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Porta</label>
+              <input type="text" name="porta" id="credencialPorta" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Usuário</label>
+              <input type="text" name="usuario" id="credencialUsuario" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Senha</label>
+              <div class="campo-senha">
+                <input type="password" name="senha" id="credencialSenha" class="form-control" autocomplete="new-password">
+                <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar senha"><i class="bi bi-eye"></i></button>
+              </div>
+              <p class="text-muted small mb-0" id="credencialSenhaDica" style="display:none;">Deixe em branco pra manter a senha atual.</p>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Observações</label>
+              <textarea name="observacoes" id="credencialObservacoes" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-dark"><i class="bi bi-check2"></i> Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <!-- Player de vídeo aula -- UM modal só, compartilhado por todas as vídeo
      aulas de todos os setores (o <video> troca de src via JS ao abrir, ver
      script mais abaixo), em vez de um modal por vídeo cadastrado. -->
@@ -3813,6 +4278,93 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
     });
+
+    // --- Aba Acessos (cofre de credenciais) -----------------------------
+    var modalCredencial = document.getElementById('modalCredencial');
+    if (modalCredencial) {
+        modalCredencial.querySelectorAll('.toggle-senha').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                var campo = botao.previousElementSibling;
+                var mostrando = campo.type === 'text';
+                campo.type = mostrando ? 'password' : 'text';
+                botao.querySelector('i').className = mostrando ? 'bi bi-eye' : 'bi bi-eye-slash';
+            });
+        });
+
+        var botaoNovaCredencial = document.getElementById('botaoNovaCredencial');
+        if (botaoNovaCredencial) {
+            botaoNovaCredencial.addEventListener('click', function () {
+                document.getElementById('credencialModalTitulo').textContent = 'Nova credencial';
+                document.getElementById('credencialAcao').value = 'criar_credencial';
+                document.getElementById('credencialId').value = '';
+                document.getElementById('credencialTipo').value = 'servidor';
+                document.getElementById('credencialTitulo').value = '';
+                document.getElementById('credencialHost').value = '';
+                document.getElementById('credencialPorta').value = '';
+                document.getElementById('credencialUsuario').value = '';
+                document.getElementById('credencialSenha').value = '';
+                document.getElementById('credencialObservacoes').value = '';
+                document.getElementById('credencialSenhaDica').style.display = 'none';
+                PrimeUI.openModal(modalCredencial);
+            });
+        }
+
+        document.querySelectorAll('.botao-editar-credencial').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                document.getElementById('credencialModalTitulo').textContent = 'Editar credencial';
+                document.getElementById('credencialAcao').value = 'atualizar_credencial';
+                document.getElementById('credencialId').value = botao.dataset.id;
+                document.getElementById('credencialTipo').value = botao.dataset.tipo;
+                document.getElementById('credencialTitulo').value = botao.dataset.titulo;
+                document.getElementById('credencialHost').value = botao.dataset.host || '';
+                document.getElementById('credencialPorta').value = botao.dataset.porta || '';
+                document.getElementById('credencialUsuario').value = botao.dataset.usuario || '';
+                document.getElementById('credencialSenha').value = '';
+                document.getElementById('credencialObservacoes').value = botao.dataset.observacoes || '';
+                document.getElementById('credencialSenhaDica').style.display = '';
+                PrimeUI.openModal(modalCredencial);
+            });
+        });
+    }
+
+    // "Mostrar senha" na lista de credenciais -- busca a senha decifrada só
+    // na hora do clique (nunca fica em texto puro no HTML da página), e só
+    // busca uma vez (fica em cache no próprio botão pra alternar
+    // mostrar/ocultar sem bater no servidor de novo nem gerar log repetido).
+    var tabelaCredenciais = document.getElementById('tabelaCredenciais');
+    if (tabelaCredenciais) {
+        var csrfVerSenha = tabelaCredenciais.dataset.csrfVerSenha;
+        tabelaCredenciais.querySelectorAll('.botao-mostrar-senha').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                var linha = botao.closest('.credencial-senha-linha');
+                var valorSpan = linha.querySelector('.credencial-senha-valor');
+
+                if (valorSpan.dataset.senhaReal !== undefined) {
+                    var mostrando = valorSpan.textContent !== '••••••••';
+                    valorSpan.textContent = mostrando ? '••••••••' : valorSpan.dataset.senhaReal;
+                    botao.querySelector('i').className = mostrando ? 'bi bi-eye' : 'bi bi-eye-slash';
+                    return;
+                }
+
+                var dados = new URLSearchParams();
+                dados.set('csrf_token', csrfVerSenha);
+                dados.set('id', linha.dataset.credencialId);
+
+                fetch('<?= url('ver_credencial.php') ?>', { method: 'POST', body: dados })
+                    .then(function (r) { return r.json(); })
+                    .then(function (json) {
+                        if (!json.sucesso) {
+                            alert(json.mensagem || 'Não foi possível mostrar a senha.');
+                            return;
+                        }
+                        valorSpan.dataset.senhaReal = json.senha || '(sem senha cadastrada)';
+                        valorSpan.textContent = valorSpan.dataset.senhaReal;
+                        botao.querySelector('i').className = 'bi bi-eye-slash';
+                    })
+                    .catch(function () { alert('Falha ao buscar a senha. Tente de novo.'); });
+            });
+        });
+    }
 
     var hash = window.location.hash || '#visao-geral';
     var tabLink = document.querySelector('.nav-tabs a[href="' + hash + '"]');
