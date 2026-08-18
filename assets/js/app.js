@@ -563,6 +563,7 @@
 
         var dados = new FormData(form);
         var tituloOverlay = overlay.querySelector('.overlay-upload-progresso-titulo');
+        var tamanhoTotalUpload = 0;
         var xhr = new XMLHttpRequest();
         xhr.open((form.getAttribute('method') || 'POST').toUpperCase(), form.getAttribute('action') || window.location.href);
         // Rede de segurança contra qualquer travamento silencioso no
@@ -573,22 +574,29 @@
         xhr.timeout = 15 * 60 * 1000;
         xhr.upload.addEventListener('progress', function (ev) {
             if (!ev.lengthComputable) return;
+            tamanhoTotalUpload = ev.total;
             var pct = Math.round((ev.loaded / ev.total) * 100);
             barra.style.width = pct + '%';
             barra.textContent = pct + '%';
             detalhe.textContent = formatarTamanhoArquivo(ev.loaded) + ' de ' + formatarTamanhoArquivo(ev.total);
         });
         // O arquivo já terminou de subir, mas o servidor ainda está
-        // processando (salvando no banco, mandando e-mail/WhatsApp etc.) --
-        // sem isso a barra ficava travada em "100%" por vários segundos sem
-        // nenhum aviso, parecendo que travou de verdade. O listrado animado
-        // (ver .progress-bar-processando no style.css) deixa claro que ainda
-        // tem coisa rodando mesmo sem um % real pra mostrar -- não dá pra
-        // saber o progresso dessa parte (o navegador já mandou tudo).
+        // processando (salvando no banco, recarregando a página depois do
+        // redirect) -- sem isso a barra ficava travada em "100%" por vários
+        // segundos sem nenhum aviso, parecendo que travou de verdade. O
+        // listrado animado (ver .progress-bar-processando no style.css)
+        // deixa claro que ainda tem coisa rodando mesmo sem um % real pra
+        // mostrar -- não dá pra saber o progresso dessa parte (o navegador
+        // já mandou tudo). O aviso de "pode levar minutos" só aparece pra
+        // arquivo GRANDE de verdade (>15MB) -- pra um anexo pequeno (a
+        // maioria) esse aviso só assustava sem motivo, fazendo uma espera de
+        // 1-2s (recarregar a página depois) parecer um travamento sério.
         xhr.upload.addEventListener('load', function () {
             if (tituloOverlay) tituloOverlay.textContent = 'Registrando...';
             barra.classList.add('progress-bar-processando');
-            detalhe.textContent = 'Isso pode levar alguns minutos em arquivos grandes. Não saia nem atualize essa página.';
+            detalhe.textContent = tamanhoTotalUpload > 15 * 1024 * 1024
+                ? 'Isso pode levar alguns minutos em arquivos grandes. Não saia nem atualize essa página.'
+                : 'Só um instante...';
         });
         xhr.addEventListener('load', function () {
             pararDeAvisarAntesDeSair();

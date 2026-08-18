@@ -399,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acoesDadosSensiveis = [
         'criar_credencial', 'atualizar_credencial', 'excluir_credencial',
         'upload_vpn_arquivo', 'excluir_vpn_arquivo',
-        'upload_fonte_advpl', 'excluir_fonte_advpl',
+        'upload_fonte_advpl', 'atualizar_fonte_advpl', 'excluir_fonte_advpl',
         'salvar_tcloud_ambiente',
         'criar_tcloud_vscode', 'atualizar_tcloud_vscode', 'excluir_tcloud_vscode',
     ];
@@ -559,6 +559,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         Auth::userId(),
                     ]);
                 flash_set('sucesso', 'Fonte ADVPL cadastrada.');
+            }
+        }
+    }
+
+    if ($acao === 'atualizar_fonte_advpl') {
+        $fonteIdAlvo = (int) $_POST['fonte_id'];
+        $tituloFonte = trim($_POST['titulo'] ?? '');
+
+        // Mesmo cuidado do excluir_fonte_advpl: setor_fontes_advpl não tem
+        // cliente_id direto, então o JOIN com setores confirma que essa
+        // fonte é mesmo desse cliente antes de editar.
+        $stmtFonteEditar = $pdo->prepare('
+            SELECT f.arquivo_caminho FROM setor_fontes_advpl f
+            INNER JOIN setores s ON s.id = f.setor_id
+            WHERE f.id = ? AND s.cliente_id = ?
+        ');
+        $stmtFonteEditar->execute([$fonteIdAlvo, $clienteId]);
+        $fonteAtual = $stmtFonteEditar->fetch();
+
+        if (!$fonteAtual) {
+            flash_set('erro', 'Fonte não encontrada.');
+        } elseif ($tituloFonte === '') {
+            flash_set('erro', 'Informe o nome da rotina.');
+        } else {
+            $pontoEntradaFonte = trim($_POST['ponto_entrada'] ?? '') ?: null;
+            $descricaoFonte = trim($_POST['descricao'] ?? '') ?: null;
+
+            // Arquivo novo é OPCIONAL na edição -- em branco mantém o
+            // arquivo já cadastrado (mesma ideia da senha em branco no
+            // editar_credencial), pra poder corrigir só o nome/ponto de
+            // entrada sem precisar reenviar o fonte inteiro de novo.
+            $temArquivoNovo = isset($_FILES['arquivo']) && $_FILES['arquivo']['error'] === UPLOAD_ERR_OK && $_FILES['arquivo']['size'] > 0;
+
+            if (!$temArquivoNovo) {
+                $pdo->prepare('UPDATE setor_fontes_advpl SET titulo=?, ponto_entrada=?, descricao=? WHERE id=?')
+                    ->execute([$tituloFonte, $pontoEntradaFonte, $descricaoFonte, $fonteIdAlvo]);
+                flash_set('sucesso', 'Fonte ADVPL atualizada.');
+            } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
+                flash_set('erro', 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).');
+            } else {
+                $dirClienteFonte = UPLOADS_DIR . '/clientes/' . $clienteId;
+                if (!is_dir($dirClienteFonte)) {
+                    mkdir($dirClienteFonte, 0755, true);
+                }
+                $extensaoFonte = strtolower(pathinfo($_FILES['arquivo']['name'], PATHINFO_EXTENSION));
+                $nomeArmazenadoFonte = bin2hex(random_bytes(16)) . ($extensaoFonte ? '.' . $extensaoFonte : '');
+                $destinoFonte = $dirClienteFonte . '/' . $nomeArmazenadoFonte;
+
+                if (!move_uploaded_file($_FILES['arquivo']['tmp_name'], $destinoFonte)) {
+                    flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
+                } else {
+                    $pdo->prepare('UPDATE setor_fontes_advpl SET titulo=?, ponto_entrada=?, descricao=?, arquivo_nome_original=?, arquivo_caminho=?, arquivo_tamanho=?, dados=? WHERE id=?')
+                        ->execute([
+                            $tituloFonte,
+                            $pontoEntradaFonte,
+                            $descricaoFonte,
+                            $_FILES['arquivo']['name'],
+                            'clientes/' . $clienteId . '/' . $nomeArmazenadoFonte,
+                            $_FILES['arquivo']['size'],
+                            file_get_contents($destinoFonte),
+                            $fonteIdAlvo,
+                        ]);
+                    // Só apaga o arquivo antigo depois do UPDATE ter dado
+                    // certo -- senão, numa falha no meio do caminho, o
+                    // registro ficaria apontando pra um arquivo já apagado.
+                    if ($fonteAtual['arquivo_caminho']) {
+                        @unlink(UPLOADS_DIR . '/' . $fonteAtual['arquivo_caminho']);
+                    }
+                    flash_set('sucesso', 'Fonte ADVPL atualizada (arquivo substituído).');
+                }
             }
         }
     }
@@ -3481,12 +3551,15 @@ require __DIR__ . '/templates/header.php';
                         </form>
 
                         <?php if ($fontesAdvplSetor): ?>
+                        <div class="mb-3">
+                            <input type="text" class="form-control form-control-sm filtro-fonte-advpl" data-alvo="fontesAdvplTbody<?= $idSetorAtual ?>" placeholder="🔎 Filtrar por rotina, ponto de entrada ou arquivo...">
+                        </div>
                         <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead><tr><th>Rotina</th><th>Ponto de entrada</th><th>Arquivo</th><th>Enviado por</th><th>Data</th><th></th></tr></thead>
-                            <tbody>
+                            <tbody id="fontesAdvplTbody<?= $idSetorAtual ?>">
                             <?php foreach ($fontesAdvplSetor as $f): ?>
-                                <tr>
+                                <tr data-nome-filtro="<?= e(mb_strtolower($f['titulo'] . ' ' . $f['ponto_entrada'] . ' ' . $f['arquivo_nome_original'], 'UTF-8')) ?>">
                                     <td class="fw-semibold"><?= e($f['titulo']) ?><?= $f['descricao'] ? '<div class="text-muted small">' . e($f['descricao']) . '</div>' : '' ?></td>
                                     <td><?= $f['ponto_entrada'] ? '<code>' . e($f['ponto_entrada']) . '</code>' : '-' ?></td>
                                     <td><?= e($f['arquivo_nome_original']) ?> <small class="text-muted">(<?= round($f['arquivo_tamanho'] / 1024) ?> KB)</small></td>
@@ -3494,6 +3567,11 @@ require __DIR__ . '/templates/header.php';
                                     <td><?= formatar_data($f['criado_em']) ?></td>
                                     <td class="text-end text-nowrap">
                                         <a href="<?= url('download_fonte_advpl.php?id=' . $f['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-fonte-advpl"
+                                            data-id="<?= $f['id'] ?>" data-titulo="<?= e($f['titulo']) ?>"
+                                            data-ponto-entrada="<?= e($f['ponto_entrada']) ?>" data-descricao="<?= e($f['descricao']) ?>"
+                                            data-arquivo="<?= e($f['arquivo_nome_original']) ?>"
+                                        ><i class="bi bi-pencil"></i></button>
                                         <form method="post" class="d-inline" onsubmit="return confirm('Excluir a fonte &quot;<?= e($f['titulo']) ?>&quot;?');">
                                             <?= csrf_field() ?>
                                             <input type="hidden" name="acao" value="excluir_fonte_advpl">
@@ -4409,6 +4487,50 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
+<!-- Editar Fonte ADVPL (aba Setores > Fontes ADVPL) -- arquivo é opcional
+     aqui: em branco mantém o já cadastrado, preenchido substitui. -->
+<div class="modal fade" id="modalEditarFonteAdvpl" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" enctype="multipart/form-data">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="atualizar_fonte_advpl">
+        <input type="hidden" name="aba_retorno" value="setores">
+        <input type="hidden" name="fonte_id" id="editarFonteAdvplId" value="">
+        <div class="modal-header">
+          <h5 class="modal-title">Editar fonte ADVPL</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Nome da rotina *</label>
+              <input type="text" name="titulo" id="editarFonteAdvplTitulo" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Ponto de entrada</label>
+              <input type="text" name="ponto_entrada" id="editarFonteAdvplPontoEntrada" class="form-control">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Descrição</label>
+              <textarea name="descricao" id="editarFonteAdvplDescricao" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Arquivo fonte</label>
+              <input type="file" name="arquivo" class="form-control" accept=".prw,.ptm,.prx,.tlpp,.ch,.zip">
+              <p class="text-muted small mb-0">Deixe em branco pra manter o arquivo atual (<span id="editarFonteAdvplArquivoAtual"></span>).</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-dark"><i class="bi bi-check2"></i> Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Ambiente T-Cloud (Produção/Teste) -- UM modal só, aberto via
      data-bs-toggle direto no card (Bootstrap dispara show.bs.modal com
      event.relatedTarget = o card clicado, ver script mais abaixo), sem
@@ -4556,6 +4678,20 @@ document.addEventListener('DOMContentLoaded', function () {
             var termo = campo.value.trim().toLowerCase();
             grade.querySelectorAll('[data-nome-filtro]').forEach(function (card) {
                 card.style.display = card.dataset.nomeFiltro.indexOf(termo) === -1 ? 'none' : '';
+            });
+        });
+    });
+
+    // Mesma ideia do filtro de vídeo aula acima, só que pra tabela de
+    // Fontes ADVPL -- filtra por rotina, ponto de entrada OU nome do
+    // arquivo (tudo já concatenado em data-nome-filtro na linha).
+    document.querySelectorAll('.filtro-fonte-advpl').forEach(function (campo) {
+        var corpo = document.getElementById(campo.dataset.alvo);
+        if (!corpo) return;
+        campo.addEventListener('input', function () {
+            var termo = campo.value.trim().toLowerCase();
+            corpo.querySelectorAll('[data-nome-filtro]').forEach(function (linha) {
+                linha.style.display = linha.dataset.nomeFiltro.indexOf(termo) === -1 ? 'none' : '';
             });
         });
     });
@@ -4802,6 +4938,21 @@ document.addEventListener('DOMContentLoaded', function () {
                         botao.querySelector('i').className = 'bi bi-eye-slash';
                     })
                     .catch(function () { alert('Falha ao buscar a senha. Tente de novo.'); });
+            });
+        });
+    }
+
+    // --- Fontes ADVPL: editar (rotina/ponto de entrada/descrição/arquivo) --
+    var modalEditarFonteAdvpl = document.getElementById('modalEditarFonteAdvpl');
+    if (modalEditarFonteAdvpl) {
+        document.querySelectorAll('.botao-editar-fonte-advpl').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                document.getElementById('editarFonteAdvplId').value = botao.dataset.id;
+                document.getElementById('editarFonteAdvplTitulo').value = botao.dataset.titulo;
+                document.getElementById('editarFonteAdvplPontoEntrada').value = botao.dataset.pontoEntrada || '';
+                document.getElementById('editarFonteAdvplDescricao').value = botao.dataset.descricao || '';
+                document.getElementById('editarFonteAdvplArquivoAtual').textContent = botao.dataset.arquivo;
+                PrimeUI.openModal(modalEditarFonteAdvpl);
             });
         });
     }
