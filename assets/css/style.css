@@ -846,21 +846,6 @@ table.table-hover tbody tr:hover { background-color: var(--ph-primary-light); }
     box-shadow: var(--ph-elev-3);
 }
 
-/* Aviso de "fora do horário comercial" na tela de login do portal -- bem
-   grande e chamativo de propósito (pedido do Kleber): um cliente reportou
-   ter resetado a própria senha várias vezes achando que tinha errado ela,
-   quando na verdade o problema era só o horário. Um alert pequeno passava
-   despercebido; esse aqui ocupa a largura toda com borda grossa e ícone
-   grande, impossível de rolar por cima sem notar. */
-.alert-horario-grande {
-    background: #fff7ed;
-    border: 2px solid #f59e0b;
-    border-radius: 12px;
-    padding: 1.25rem 1rem;
-    color: #7c2d12;
-}
-.alert-horario-grande h5 { color: #9a3412; }
-
 .login-logo-wrap {
     background: linear-gradient(135deg, #1e1b4b, #4338ca);
     padding: 2rem 1rem;
