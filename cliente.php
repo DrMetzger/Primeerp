@@ -3412,7 +3412,7 @@ require __DIR__ . '/templates/header.php';
                         </div>
 
                         <div class="collapse mb-3" id="formNovaVideoAula<?= $idSetorAtual ?>">
-                            <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end card card-stat p-3">
+                            <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end card card-stat p-3 form-video-aula-chunk">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="acao" value="upload_video_aula">
                                 <input type="hidden" name="aba_retorno" value="setores">
@@ -4557,6 +4557,165 @@ document.addEventListener('DOMContentLoaded', function () {
             grade.querySelectorAll('[data-nome-filtro]').forEach(function (card) {
                 card.style.display = card.dataset.nomeFiltro.indexOf(termo) === -1 ? 'none' : '';
             });
+        });
+    });
+
+    // --- Vídeo aula: upload em PEDAÇOS ----------------------------------
+    // Manda o arquivo em pedaços de ~10MB, um por vez, em vez de uma única
+    // requisição gigante -- resolve de verdade o bug de "Registrando..."
+    // travado por dezenas de minutos (o arquivo inteiro numa requisição só
+    // dependia de camadas fora do nosso controle -- proxy da hospedagem,
+    // disco -- que podiam segurar isso por muito tempo sem responder nada).
+    // Cada pedaço é confirmado de verdade pelo servidor (ver
+    // upload_video_aula_chunk.php), então a barra reflete progresso real, e
+    // só mostra "salvo com sucesso" quando o ÚLTIMO pedaço realmente
+    // terminar de ser processado no servidor.
+    // 20MB por pedaço -- like qualquer outro upload desse site, depende do
+    // upload_max_filesize/post_max_size subidos pra 5GB no .htaccess (ver
+    // lá o comentário; mesmo override que já sustenta anexo de chamado e
+    // documento comum). Sem esse override (php.ini padrão, sem nenhuma
+    // config), o PHP teto é upload_max_filesize=2M -- rejeitaria QUALQUER
+    // upload desse site, não só esse, então não faz sentido este pedaço
+    // específico tentar ser mais conservador que o resto da aplicação.
+    var TAMANHO_PEDACO_VIDEO_AULA = 20 * 1024 * 1024;
+
+    function criarOverlayVideoAula() {
+        var el = document.createElement('div');
+        el.className = 'overlay-upload-progresso';
+        el.innerHTML = '<div class="overlay-upload-progresso-caixa">'
+            + '<div class="overlay-upload-progresso-titulo">Enviando vídeo aula...</div>'
+            + '<div class="progress"><div class="progress-bar" role="progressbar">0%</div></div>'
+            + '<div class="overlay-upload-progresso-detalhe"></div>'
+            + '</div>';
+        document.body.appendChild(el);
+        return el;
+    }
+
+    function gerarUploadIdVideoAula() {
+        var base = Date.now().toString(16) + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+        return (base + '00000000000000000000000000000000').slice(0, 32);
+    }
+
+    // Manda 1 pedaço, com até 3 tentativas (rede instável no meio de um
+    // upload longo -- de VÁRIOS pedaços -- não deveria jogar tudo fora,
+    // só aquele pedaço específico precisa repetir).
+    function enviarPedacoVideoAula(url, montarDados, tentativa) {
+        tentativa = tentativa || 1;
+        return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            xhr.timeout = 60000;
+            xhr.addEventListener('load', function () {
+                var json = null;
+                try { json = JSON.parse(xhr.responseText); } catch (e) { /* segue com json=null */ }
+                if (xhr.status >= 200 && xhr.status < 300 && json && json.sucesso) {
+                    resolve(json);
+                    return;
+                }
+                tentarDeNovoOuDesistir(json && json.mensagem ? json.mensagem : ('Falha no envio (HTTP ' + xhr.status + ').'));
+            });
+            xhr.addEventListener('error', function () { tentarDeNovoOuDesistir('Falha de rede.'); });
+            xhr.addEventListener('timeout', function () { tentarDeNovoOuDesistir('O pedaço demorou demais pra ser confirmado.'); });
+
+            function tentarDeNovoOuDesistir(mensagemErro) {
+                if (tentativa < 3) {
+                    setTimeout(function () {
+                        enviarPedacoVideoAula(url, montarDados, tentativa + 1).then(resolve, reject);
+                    }, 1000 * tentativa);
+                    return;
+                }
+                reject(new Error(mensagemErro));
+            }
+
+            xhr.send(montarDados());
+        });
+    }
+
+    document.querySelectorAll('.form-video-aula-chunk').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            var inputArquivo = form.querySelector('input[type="file"]');
+            var arquivo = inputArquivo.files[0];
+            if (!arquivo) return;
+
+            var campoNomeRotina = form.querySelector('input[name="nome_rotina"]');
+            var nomeRotina = campoNomeRotina.value.trim();
+            if (!nomeRotina) {
+                alert('Informe o nome da rotina da vídeo aula.');
+                return;
+            }
+
+            var campoSetorId = form.querySelector('input[name="setor_id"]');
+            var csrfToken = form.querySelector('input[name="csrf_token"]').value;
+            var campoAbaRetorno = form.querySelector('input[name="aba_retorno"]');
+            var botaoEnviar = form.querySelector('button[type="submit"]');
+
+            var overlay = criarOverlayVideoAula();
+            var titulo = overlay.querySelector('.overlay-upload-progresso-titulo');
+            var barra = overlay.querySelector('.progress-bar');
+            var detalhe = overlay.querySelector('.overlay-upload-progresso-detalhe');
+            overlay.classList.add('show');
+            botaoEnviar.disabled = true;
+
+            var avisarAntesDeSair = function (ev) { ev.preventDefault(); ev.returnValue = ''; };
+            window.addEventListener('beforeunload', avisarAntesDeSair);
+
+            var uploadId = gerarUploadIdVideoAula();
+            var totalPartes = Math.max(1, Math.ceil(arquivo.size / TAMANHO_PEDACO_VIDEO_AULA));
+            var indiceAtual = 0;
+
+            function enviarProximoPedaco() {
+                var inicio = indiceAtual * TAMANHO_PEDACO_VIDEO_AULA;
+                var fim = Math.min(inicio + TAMANHO_PEDACO_VIDEO_AULA, arquivo.size);
+                var pedaco = arquivo.slice(inicio, fim);
+
+                titulo.textContent = 'Enviando vídeo aula...';
+                detalhe.textContent = 'Pedaço ' + (indiceAtual + 1) + ' de ' + totalPartes;
+                var pctAntes = Math.round((indiceAtual / totalPartes) * 100);
+                barra.style.width = pctAntes + '%';
+                barra.textContent = pctAntes + '%';
+
+                enviarPedacoVideoAula('<?= url('upload_video_aula_chunk.php') ?>', function () {
+                    var dados = new FormData();
+                    dados.set('csrf_token', csrfToken);
+                    dados.set('cliente_id', '<?= (int) $clienteId ?>');
+                    if (campoSetorId) dados.set('setor_id', campoSetorId.value);
+                    dados.set('nome_rotina', nomeRotina);
+                    dados.set('nome_arquivo', arquivo.name);
+                    dados.set('upload_id', uploadId);
+                    dados.set('indice', String(indiceAtual));
+                    dados.set('total_partes', String(totalPartes));
+                    dados.set('pedaco', pedaco, 'pedaco.part');
+                    return dados;
+                }).then(function (json) {
+                    indiceAtual++;
+                    var pct = Math.round((indiceAtual / totalPartes) * 100);
+                    barra.style.width = pct + '%';
+                    barra.textContent = pct + '%';
+
+                    if (json.finalizado) {
+                        window.removeEventListener('beforeunload', avisarAntesDeSair);
+                        titulo.textContent = 'Vídeo aula salva com sucesso!';
+                        detalhe.textContent = '';
+                        setTimeout(function () {
+                            var abaRetorno = campoAbaRetorno ? campoAbaRetorno.value : '';
+                            var urlFinal = window.location.href.split('#')[0];
+                            window.location.href = abaRetorno ? (urlFinal + '#' + abaRetorno) : urlFinal;
+                        }, 1200);
+                        return;
+                    }
+                    enviarProximoPedaco();
+                }).catch(function (erro) {
+                    window.removeEventListener('beforeunload', avisarAntesDeSair);
+                    overlay.classList.remove('show');
+                    overlay.remove();
+                    botaoEnviar.disabled = false;
+                    alert('Falha ao enviar o vídeo (' + erro.message + '). Tente novamente.');
+                });
+            }
+
+            enviarProximoPedaco();
         });
     });
 

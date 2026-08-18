@@ -1021,6 +1021,30 @@ class Migrations
     }
 
     /**
+     * Apaga pedaço de upload de vídeo aula (ver upload_video_aula_chunk.php)
+     * abandonado -- alguém que fechou a aba ou perdeu a conexão no meio de
+     * um envio deixa pedaços parados em uploads/tmp_chunks/ pra sempre, já
+     * que só o ÚLTIMO pedaço aciona a limpeza dos anteriores. NÃO roda em
+     * Migrations::run() (isso executa em TODA requisição do site inteiro --
+     * varrer um diretório a cada request só por causa de uma feature bem
+     * específica seria desperdício); o próprio endpoint de upload chama
+     * isso só no PRIMEIRO pedaço de um novo envio, que já é bem mais raro.
+     */
+    public static function limparPedacosVideoAulaAbandonados(string $raizUploads): void
+    {
+        $dirTemp = rtrim($raizUploads, '/') . '/tmp_chunks';
+        if (!is_dir($dirTemp)) {
+            return;
+        }
+        $limiteAntigo = time() - 24 * 3600;
+        foreach (glob($dirTemp . '/*') ?: [] as $arquivo) {
+            if (is_file($arquivo) && filemtime($arquivo) < $limiteAntigo) {
+                @unlink($arquivo);
+            }
+        }
+    }
+
+    /**
      * Recria em disco (assets/avatars/) qualquer foto/logo enviado por
      * upload que tenha desaparecido -- ex.: depois de um deploy que recriou
      * a pasta do zero -- usando o backup dos bytes guardado no banco (ver
