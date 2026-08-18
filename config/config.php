@@ -229,6 +229,21 @@ define('CREDENCIAL_TIPOS', [
     'outro' => 'Outro',
 ]);
 
+// Aba "T-Cloud" (ver cliente_tcloud_ambientes) -- ambientes fixos (produção
+// e teste) do T-Cloud, cada um com o mesmo conjunto de 4 links. Chave é a
+// coluna da tabela, label é o rótulo do campo no modal.
+define('TCLOUD_AMBIENTES', [
+    'producao' => 'Ambiente de Produção',
+    'teste' => 'Ambiente de Teste',
+]);
+
+define('TCLOUD_LINKS', [
+    'link_protheus' => 'Link Protheus',
+    'link_rest' => 'Link REST',
+    'link_schedule' => 'Link Schedule',
+    'link_exclusivo' => 'Link Ambiente / Modo Exclusivo',
+]);
+
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
 // futuro módulo financeiro (contratos/faturas/CNAB), que ainda está em

@@ -967,6 +967,49 @@ class Migrations
                 CONSTRAINT fk_log_sensivel_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // --- Aba T-Cloud (aba nova, mesma trava de dados sensíveis) ------
+        // Links de ambiente (produção/teste) do T-Cloud -- 1 linha por
+        // ambiente por cliente (chave única cliente_id+tipo, upsert direto
+        // via ON DUPLICATE KEY UPDATE). São só URLs, não senha, mas ainda
+        // assim ficam atrás da mesma trava de Auth::podeAcessarDadosSensiveis()
+        // porque revelam a topologia dos servidores do cliente.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_tcloud_ambientes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                tipo ENUM('producao','teste') NOT NULL,
+                link_protheus VARCHAR(500) NULL,
+                link_rest VARCHAR(500) NULL,
+                link_schedule VARCHAR(500) NULL,
+                link_exclusivo VARCHAR(500) NULL,
+                atualizado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_tcloud_ambiente (cliente_id, tipo),
+                CONSTRAINT fk_tcloud_ambientes_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_tcloud_ambientes_usuario FOREIGN KEY (atualizado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Configurações de acesso via VSCode (link + porta + rótulo do
+        // ambiente) -- lista livre, pode ter mais de uma (ex.: uma pra cada
+        // servidor/ambiente que o dev conecta direto pelo VSCode).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_tcloud_vscode (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                titulo VARCHAR(150) NOT NULL,
+                link VARCHAR(500) NULL,
+                porta VARCHAR(10) NULL,
+                ambiente VARCHAR(100) NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT fk_tcloud_vscode_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_tcloud_vscode_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     /**

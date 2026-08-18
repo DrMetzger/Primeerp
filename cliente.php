@@ -384,6 +384,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'criar_credencial', 'atualizar_credencial', 'excluir_credencial',
         'upload_vpn_arquivo', 'excluir_vpn_arquivo',
         'upload_fonte_advpl', 'excluir_fonte_advpl',
+        'salvar_tcloud_ambiente',
+        'criar_tcloud_vscode', 'atualizar_tcloud_vscode', 'excluir_tcloud_vscode',
     ];
     if (in_array($acao, $acoesDadosSensiveis, true) && !Auth::podeAcessarDadosSensiveis()) {
         http_response_code(403);
@@ -567,6 +569,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             flash_set('erro', 'Fonte não encontrada.');
         }
+    }
+
+    // --- T-Cloud: links de ambiente (produção/teste) ---------------------
+    // Um upsert só (INSERT ... ON DUPLICATE KEY UPDATE) na chave única
+    // (cliente_id, tipo) -- o modal sempre manda os 4 links de uma vez
+    // (mesmo os que já estavam preenchidos), então não precisa de UPDATE
+    // parcial como a senha da credencial.
+    if ($acao === 'salvar_tcloud_ambiente') {
+        $tipoAmbienteTcloud = $_POST['tipo'] ?? '';
+        if (!array_key_exists($tipoAmbienteTcloud, TCLOUD_AMBIENTES)) {
+            flash_set('erro', 'Ambiente inválido.');
+        } else {
+            $pdo->prepare('
+                INSERT INTO cliente_tcloud_ambientes (cliente_id, tipo, link_protheus, link_rest, link_schedule, link_exclusivo, atualizado_por)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    link_protheus = VALUES(link_protheus), link_rest = VALUES(link_rest),
+                    link_schedule = VALUES(link_schedule), link_exclusivo = VALUES(link_exclusivo),
+                    atualizado_por = VALUES(atualizado_por)
+            ')->execute([
+                $clienteId,
+                $tipoAmbienteTcloud,
+                trim($_POST['link_protheus'] ?? '') ?: null,
+                trim($_POST['link_rest'] ?? '') ?: null,
+                trim($_POST['link_schedule'] ?? '') ?: null,
+                trim($_POST['link_exclusivo'] ?? '') ?: null,
+                Auth::userId(),
+            ]);
+            flash_set('sucesso', 'Links de ' . TCLOUD_AMBIENTES[$tipoAmbienteTcloud] . ' salvos.');
+        }
+    }
+
+    // --- T-Cloud: configurações de acesso via VSCode ----------------------
+    if ($acao === 'criar_tcloud_vscode') {
+        $tituloVscode = trim($_POST['titulo'] ?? '');
+        if ($tituloVscode === '') {
+            flash_set('erro', 'Informe um título pra essa configuração do VSCode.');
+        } else {
+            $pdo->prepare('INSERT INTO cliente_tcloud_vscode (cliente_id, titulo, link, porta, ambiente, criado_por) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([
+                    $clienteId,
+                    $tituloVscode,
+                    trim($_POST['link'] ?? '') ?: null,
+                    trim($_POST['porta'] ?? '') ?: null,
+                    trim($_POST['ambiente'] ?? '') ?: null,
+                    Auth::userId(),
+                ]);
+            flash_set('sucesso', 'Configuração do VSCode cadastrada.');
+        }
+    }
+
+    if ($acao === 'atualizar_tcloud_vscode') {
+        $vscodeIdAlvo = (int) $_POST['vscode_id'];
+        $tituloVscode = trim($_POST['titulo'] ?? '');
+        if ($tituloVscode === '') {
+            flash_set('erro', 'Informe um título pra essa configuração do VSCode.');
+        } else {
+            $pdo->prepare('UPDATE cliente_tcloud_vscode SET titulo=?, link=?, porta=?, ambiente=? WHERE id=? AND cliente_id=?')
+                ->execute([
+                    $tituloVscode,
+                    trim($_POST['link'] ?? '') ?: null,
+                    trim($_POST['porta'] ?? '') ?: null,
+                    trim($_POST['ambiente'] ?? '') ?: null,
+                    $vscodeIdAlvo,
+                    $clienteId,
+                ]);
+            flash_set('sucesso', 'Configuração do VSCode atualizada.');
+        }
+    }
+
+    if ($acao === 'excluir_tcloud_vscode') {
+        $pdo->prepare('DELETE FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?')
+            ->execute([(int) $_POST['vscode_id'], $clienteId]);
+        flash_set('sucesso', 'Configuração do VSCode removida.');
     }
 
     // --- Sugestões de melhoria por setor, geradas com IA -----------------
@@ -1887,6 +1963,14 @@ $podeAcessarDadosSensiveis = Auth::podeAcessarDadosSensiveis();
 $credenciaisCliente = [];
 $vpnArquivosCliente = [];
 $fontesAdvplPorSetorId = [];
+// Ambientes T-Cloud (produção/teste) desse cliente -- default com os 4
+// links vazios pra não precisar checar isset() no HTML do card/modal
+// quando o cliente ainda não tiver cadastrado nada.
+$tcloudAmbientesCliente = [];
+foreach (array_keys(TCLOUD_AMBIENTES) as $tipoAmbienteTcloud) {
+    $tcloudAmbientesCliente[$tipoAmbienteTcloud] = array_fill_keys(array_keys(TCLOUD_LINKS), null);
+}
+$tcloudVscodeCliente = [];
 if ($podeAcessarDadosSensiveis) {
     $stmtCredenciais = $pdo->prepare('SELECT * FROM cliente_credenciais WHERE cliente_id = ? ORDER BY tipo ASC, titulo ASC');
     $stmtCredenciais->execute([$clienteId]);
@@ -1914,6 +1998,18 @@ if ($podeAcessarDadosSensiveis) {
     foreach ($stmtFontesAdvpl->fetchAll() as $fonte) {
         $fontesAdvplPorSetorId[$fonte['setor_id']][] = $fonte;
     }
+
+    $stmtTcloudAmbientes = $pdo->prepare('SELECT * FROM cliente_tcloud_ambientes WHERE cliente_id = ?');
+    $stmtTcloudAmbientes->execute([$clienteId]);
+    foreach ($stmtTcloudAmbientes->fetchAll() as $ambienteTcloud) {
+        if (array_key_exists($ambienteTcloud['tipo'], $tcloudAmbientesCliente)) {
+            $tcloudAmbientesCliente[$ambienteTcloud['tipo']] = $ambienteTcloud;
+        }
+    }
+
+    $stmtTcloudVscode = $pdo->prepare('SELECT * FROM cliente_tcloud_vscode WHERE cliente_id = ? ORDER BY titulo ASC');
+    $stmtTcloudVscode->execute([$clienteId]);
+    $tcloudVscodeCliente = $stmtTcloudVscode->fetchAll();
 }
 
 $treinamentos = $pdo->prepare('
@@ -2111,6 +2207,7 @@ require __DIR__ . '/templates/header.php';
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios"><i class="bi bi-people"></i> Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
     <?php if ($podeAcessarDadosSensiveis): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#acessos"><i class="bi bi-shield-lock"></i> Acessos</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tcloud"><i class="bi bi-cloud"></i> T-Cloud</a></li>
     <?php endif; ?>
 </ul>
 
@@ -3627,6 +3724,93 @@ require __DIR__ . '/templates/header.php';
             <p class="text-muted text-center py-3">Nenhum arquivo de VPN cadastrado ainda.</p>
         <?php endif; ?>
     </div>
+
+    <!-- T-CLOUD (ambientes + configs VSCode) -->
+    <div class="tab-pane" id="tcloud">
+        <div class="alert alert-warning d-flex align-items-start gap-2">
+            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+            <div>
+                <strong>Área restrita.</strong> Links de ambiente e de acesso remoto do T-Cloud -- mesma trava da aba Acessos.
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <h6 class="mb-0"><i class="bi bi-cloud"></i> Ambientes</h6>
+            <p class="text-muted small mb-0">Clique num ambiente pra ver/editar os links (Protheus, REST, Schedule, modo exclusivo).</p>
+        </div>
+        <div class="grid-setores mb-4">
+            <?php foreach (TCLOUD_AMBIENTES as $tipoAmbienteTcloud => $labelAmbienteTcloud):
+                $dadosAmbienteTcloud = $tcloudAmbientesCliente[$tipoAmbienteTcloud];
+                $qtdLinksAmbienteTcloud = count(array_filter(array_intersect_key($dadosAmbienteTcloud, TCLOUD_LINKS)));
+            ?>
+            <div class="card-setor" role="button" tabindex="0" data-bs-toggle="modal" data-bs-target="#modalTcloudAmbiente"
+                data-tipo="<?= e($tipoAmbienteTcloud) ?>" data-titulo="<?= e($labelAmbienteTcloud) ?>"
+                <?php foreach (array_keys(TCLOUD_LINKS) as $campoLinkTcloud): ?>
+                data-<?= str_replace('_', '-', $campoLinkTcloud) ?>="<?= e($dadosAmbienteTcloud[$campoLinkTcloud] ?? '') ?>"
+                <?php endforeach; ?>
+            >
+                <div class="card-setor-topo">
+                    <span class="fw-semibold"><i class="bi <?= $tipoAmbienteTcloud === 'producao' ? 'bi-rocket-takeoff' : 'bi-flask' ?>"></i> <?= e($labelAmbienteTcloud) ?></span>
+                </div>
+                <div class="card-setor-insights">
+                    <span class="badge modulo-pill <?= $qtdLinksAmbienteTcloud > 0 ? 'modulo-ok' : 'modulo-neutro' ?>"><?= $qtdLinksAmbienteTcloud ?>/<?= count(TCLOUD_LINKS) ?> links configurados</span>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h6 class="mb-0"><i class="bi bi-code-slash"></i> Configurações do VSCode</h6>
+                <p class="text-muted small mb-0">Link, porta e ambiente pra conectar direto pelo VSCode.</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-dark" id="botaoNovoTcloudVscode"><i class="bi bi-plus-lg"></i> Nova configuração</button>
+        </div>
+
+        <?php if ($tcloudVscodeCliente): ?>
+        <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Título</th><th>Link</th><th>Porta</th><th>Ambiente</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($tcloudVscodeCliente as $vs): ?>
+                <tr>
+                    <td class="fw-semibold"><?= e($vs['titulo']) ?></td>
+                    <td>
+                        <?php if ($vs['link']): ?>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="text-truncate d-inline-block" style="max-width:220px;" title="<?= e($vs['link']) ?>"><?= e($vs['link']) ?></span>
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-copiar-link" data-valor="<?= e($vs['link']) ?>" title="Copiar link"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                        <?php else: ?>
+                            -
+                        <?php endif; ?>
+                    </td>
+                    <td><?= e($vs['porta'] ?: '-') ?></td>
+                    <td><?= e($vs['ambiente'] ?: '-') ?></td>
+                    <td class="text-end text-nowrap">
+                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-tcloud-vscode"
+                            data-id="<?= $vs['id'] ?>" data-titulo="<?= e($vs['titulo']) ?>" data-link="<?= e($vs['link']) ?>"
+                            data-porta="<?= e($vs['porta']) ?>" data-ambiente="<?= e($vs['ambiente']) ?>"
+                        ><i class="bi bi-pencil"></i></button>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Excluir a configuração &quot;<?= e($vs['titulo']) ?>&quot;?');">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="excluir_tcloud_vscode">
+                            <input type="hidden" name="aba_retorno" value="tcloud">
+                            <input type="hidden" name="vscode_id" value="<?= $vs['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <?php else: ?>
+            <p class="text-muted text-center py-3">Nenhuma configuração de VSCode cadastrada ainda.</p>
+        <?php endif; ?>
+    </div>
     <?php endif; ?>
 
 </div>
@@ -4208,6 +4392,89 @@ require __DIR__ . '/templates/header.php';
     </div>
   </div>
 </div>
+
+<!-- Ambiente T-Cloud (Produção/Teste) -- UM modal só, aberto via
+     data-bs-toggle direto no card (Bootstrap dispara show.bs.modal com
+     event.relatedTarget = o card clicado, ver script mais abaixo), sem
+     precisar de um botão "editar" separado -- o próprio card É o
+     gatilho de visualizar/editar. -->
+<div class="modal fade" id="modalTcloudAmbiente" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="salvar_tcloud_ambiente">
+        <input type="hidden" name="aba_retorno" value="tcloud">
+        <input type="hidden" name="tipo" id="tcloudAmbienteTipo" value="">
+        <div class="modal-header">
+          <h5 class="modal-title" id="tcloudAmbienteModalTitulo">Ambiente</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">Cole o link e use o botão pra copiar sem precisar selecionar o texto.</p>
+          <?php foreach (TCLOUD_LINKS as $campoLinkTcloud => $labelLinkTcloud): ?>
+          <div class="mb-3">
+            <label class="form-label"><?= e($labelLinkTcloud) ?></label>
+            <div class="input-group">
+              <input type="text" name="<?= e($campoLinkTcloud) ?>" id="tcloudAmbiente_<?= e($campoLinkTcloud) ?>" class="form-control" placeholder="https://...">
+              <button type="button" class="btn btn-outline-dark botao-copiar-link" data-alvo="tcloudAmbiente_<?= e($campoLinkTcloud) ?>" title="Copiar"><i class="bi bi-clipboard"></i></button>
+            </div>
+          </div>
+          <?php endforeach; ?>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-dark"><i class="bi bi-check2"></i> Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Nova/editar configuração VSCode (aba T-Cloud) -->
+<div class="modal fade" id="modalTcloudVscode" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" id="tcloudVscodeAcao" value="criar_tcloud_vscode">
+        <input type="hidden" name="aba_retorno" value="tcloud">
+        <input type="hidden" name="vscode_id" id="tcloudVscodeId" value="">
+        <div class="modal-header">
+          <h5 class="modal-title" id="tcloudVscodeModalTitulo">Nova configuração do VSCode</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label">Título *</label>
+              <input type="text" name="titulo" id="tcloudVscodeTitulo" class="form-control" placeholder="Ex.: Servidor de testes" required>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Link</label>
+              <div class="input-group">
+                <input type="text" name="link" id="tcloudVscodeLink" class="form-control" placeholder="ssh://... ou vscode-remote://...">
+                <button type="button" class="btn btn-outline-dark botao-copiar-link" data-alvo="tcloudVscodeLink" title="Copiar"><i class="bi bi-clipboard"></i></button>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Porta</label>
+              <input type="text" name="porta" id="tcloudVscodePorta" class="form-control">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Ambiente</label>
+              <input type="text" name="ambiente" id="tcloudVscodeAmbiente" class="form-control" placeholder="Ex.: Produção, Teste">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-dark"><i class="bi bi-check2"></i> Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 <?php endif; ?>
 
 <!-- Player de vídeo aula -- UM modal só, compartilhado por todas as vídeo
@@ -4360,6 +4627,91 @@ document.addEventListener('DOMContentLoaded', function () {
                         botao.querySelector('i').className = 'bi bi-eye-slash';
                     })
                     .catch(function () { alert('Falha ao buscar a senha. Tente de novo.'); });
+            });
+        });
+    }
+
+    // --- Aba T-Cloud (ambientes + configs VSCode) -------------------------
+    // Botão de copiar reaproveitado nos 2 modais dessa aba e na tabela de
+    // configs VSCode -- lê o valor do input indicado em data-alvo (modais)
+    // ou direto de data-valor (célula da tabela), sem precisar de um
+    // handler diferente pra cada lugar.
+    document.querySelectorAll('.botao-copiar-link').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            var valor = botao.dataset.valor;
+            if (valor === undefined) {
+                var campoAlvo = document.getElementById(botao.dataset.alvo);
+                valor = campoAlvo ? campoAlvo.value : '';
+            }
+            if (!valor) return;
+
+            var marcarCopiado = function () {
+                var iconeOriginal = botao.innerHTML;
+                botao.innerHTML = '<i class="bi bi-check2"></i>';
+                setTimeout(function () { botao.innerHTML = iconeOriginal; }, 1500);
+            };
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(valor).then(marcarCopiado).catch(function () { alert('Não foi possível copiar. Copie manualmente.'); });
+            } else {
+                var campoTemporario = document.createElement('textarea');
+                campoTemporario.value = valor;
+                campoTemporario.style.position = 'fixed';
+                campoTemporario.style.opacity = '0';
+                document.body.appendChild(campoTemporario);
+                campoTemporario.select();
+                try { document.execCommand('copy'); marcarCopiado(); } catch (e) { alert('Não foi possível copiar. Copie manualmente.'); }
+                document.body.removeChild(campoTemporario);
+            }
+        });
+    });
+
+    // Modal de ambiente (Produção/Teste) -- disparado pelo próprio card via
+    // data-bs-toggle/data-bs-target, sem JS de clique próprio; só escuta
+    // show.bs.modal pra preencher os campos a partir dos data-* do card
+    // clicado (event.relatedTarget), mesmo padrão do player de vídeo aula.
+    var modalTcloudAmbiente = document.getElementById('modalTcloudAmbiente');
+    if (modalTcloudAmbiente) {
+        modalTcloudAmbiente.addEventListener('show.bs.modal', function (ev) {
+            var card = ev.relatedTarget;
+            if (!card) return;
+            document.getElementById('tcloudAmbienteModalTitulo').textContent = card.dataset.titulo || 'Ambiente';
+            document.getElementById('tcloudAmbienteTipo').value = card.dataset.tipo || '';
+            <?php foreach (array_keys(TCLOUD_LINKS) as $campoLinkTcloudJs): ?>
+            document.getElementById('tcloudAmbiente_<?= e($campoLinkTcloudJs) ?>').value = card.dataset.<?= lcfirst(str_replace('_', '', ucwords($campoLinkTcloudJs, '_'))) ?> || '';
+            <?php endforeach; ?>
+        });
+    }
+
+    // Modal de configuração do VSCode -- mesmo padrão do modal de
+    // credencial (um botão "novo" que reseta, um botão de editar por linha
+    // que preenche a partir dos data-* daquela linha).
+    var modalTcloudVscode = document.getElementById('modalTcloudVscode');
+    if (modalTcloudVscode) {
+        var botaoNovoTcloudVscode = document.getElementById('botaoNovoTcloudVscode');
+        if (botaoNovoTcloudVscode) {
+            botaoNovoTcloudVscode.addEventListener('click', function () {
+                document.getElementById('tcloudVscodeModalTitulo').textContent = 'Nova configuração do VSCode';
+                document.getElementById('tcloudVscodeAcao').value = 'criar_tcloud_vscode';
+                document.getElementById('tcloudVscodeId').value = '';
+                document.getElementById('tcloudVscodeTitulo').value = '';
+                document.getElementById('tcloudVscodeLink').value = '';
+                document.getElementById('tcloudVscodePorta').value = '';
+                document.getElementById('tcloudVscodeAmbiente').value = '';
+                PrimeUI.openModal(modalTcloudVscode);
+            });
+        }
+
+        document.querySelectorAll('.botao-editar-tcloud-vscode').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                document.getElementById('tcloudVscodeModalTitulo').textContent = 'Editar configuração do VSCode';
+                document.getElementById('tcloudVscodeAcao').value = 'atualizar_tcloud_vscode';
+                document.getElementById('tcloudVscodeId').value = botao.dataset.id;
+                document.getElementById('tcloudVscodeTitulo').value = botao.dataset.titulo;
+                document.getElementById('tcloudVscodeLink').value = botao.dataset.link || '';
+                document.getElementById('tcloudVscodePorta').value = botao.dataset.porta || '';
+                document.getElementById('tcloudVscodeAmbiente').value = botao.dataset.ambiente || '';
+                PrimeUI.openModal(modalTcloudVscode);
             });
         });
     }
