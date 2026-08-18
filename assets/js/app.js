@@ -612,13 +612,29 @@
             // pra montar o Location, ou mantém o hash que já estava na tela
             // se o formulário não tiver esse campo.
             var abaRetorno = dados.get('aba_retorno');
-            var urlFinal = (xhr.responseURL || window.location.href).split('#')[0];
-            if (abaRetorno) {
-                urlFinal += '#' + abaRetorno;
-            } else if (window.location.hash) {
-                urlFinal += window.location.hash;
+            var baseFinal = (xhr.responseURL || window.location.href).split('#')[0];
+            var hashFinal = abaRetorno || window.location.hash.replace(/^#/, '');
+
+            // Quando a base (caminho+query) não muda -- ex.: envio feito de
+            // dentro da MESMA aba que ele volta pra depois (Fontes ADVPL,
+            // Documentos, etc. dentro da aba "setores") -- trocar só o
+            // #fragmento é navegação same-document pro navegador (não
+            // recarrega a página, só rola até o elemento). Resultado: o
+            // overlay "Registrando..." ficava preso na tela pra sempre
+            // porque a página nunca buscava os dados novos do servidor.
+            // Bug real reportado pelo Kleber (upload de fonte ADVPL
+            // registrava certinho no banco mas o modal nunca sumia).
+            // location.reload() força a busca de verdade; o #fragmento
+            // certo precisa já estar setado ANTES de recarregar, senão o
+            // reload volta pro fragmento antigo.
+            if (baseFinal === window.location.href.split('#')[0]) {
+                if (window.location.hash !== '#' + hashFinal) {
+                    window.location.hash = hashFinal;
+                }
+                window.location.reload();
+            } else {
+                window.location.href = baseFinal + (hashFinal ? '#' + hashFinal : '');
             }
-            window.location.href = urlFinal;
         });
         xhr.addEventListener('error', function () {
             pararDeAvisarAntesDeSair();
