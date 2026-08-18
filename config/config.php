@@ -214,6 +214,21 @@ define('VIDEO_AULA_ACCEPT_HTML', '.mp4');
 // incomodar, a solução é um storage externo (S3 etc.), não esse backup.
 define('VIDEO_AULA_MAX_SIZE', 5 * 1024 * 1024 * 1024);
 
+// Tipos de credencial do cofre de acessos (aba "Acessos", ver
+// cliente_credenciais) -- chave é o valor gravado no banco (enum), label é
+// o que aparece na tela. Label à parte da chave porque tem nome que
+// ucfirst() sozinho não capitaliza direito (SQL Server, T-Cloud).
+define('CREDENCIAL_TIPOS', [
+    'servidor' => 'Servidor',
+    'rdp' => 'RDP',
+    'anydesk' => 'AnyDesk',
+    'vpn' => 'VPN',
+    'protheus' => 'Protheus',
+    'sql_server' => 'SQL Server',
+    't_cloud' => 'T-Cloud',
+    'outro' => 'Outro',
+]);
+
 // Perfis de usuário da equipe. Diretor e CEO têm hoje o mesmo nível de
 // acesso que Administrador (ver Auth::isAdmin()) -- o CEO é pensado pro
 // futuro módulo financeiro (contratos/faturas/CNAB), que ainda está em

@@ -391,7 +391,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_credencial') {
-        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', ['servidor' => 1, 'rdp' => 1, 'anydesk' => 1, 'vpn' => 1, 'outro' => 1]) ? $_POST['tipo'] : 'outro';
+        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', CREDENCIAL_TIPOS) ? $_POST['tipo'] : 'outro';
         $tituloCredencial = trim($_POST['titulo'] ?? '');
         if ($tituloCredencial === '') {
             flash_set('erro', 'Informe um título/nome pra essa credencial.');
@@ -414,7 +414,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'atualizar_credencial') {
         $credencialIdAlvo = (int) $_POST['credencial_id'];
-        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', ['servidor' => 1, 'rdp' => 1, 'anydesk' => 1, 'vpn' => 1, 'outro' => 1]) ? $_POST['tipo'] : 'outro';
+        $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', CREDENCIAL_TIPOS) ? $_POST['tipo'] : 'outro';
         $tituloCredencial = trim($_POST['titulo'] ?? '');
         if ($tituloCredencial === '') {
             flash_set('erro', 'Informe um título/nome pra essa credencial.');
@@ -3548,7 +3548,7 @@ require __DIR__ . '/templates/header.php';
             <tbody>
             <?php foreach ($credenciaisCliente as $cr): ?>
                 <tr>
-                    <td><span class="badge bg-secondary"><?= e(ucfirst($cr['tipo'])) ?></span></td>
+                    <td><span class="badge bg-secondary"><?= e(CREDENCIAL_TIPOS[$cr['tipo']] ?? ucfirst($cr['tipo'])) ?></span></td>
                     <td class="fw-semibold"><?= e($cr['titulo']) ?></td>
                     <td><?= e($cr['host'] ?: '-') ?></td>
                     <td><?= e($cr['porta'] ?: '-') ?></td>
@@ -4165,11 +4165,9 @@ require __DIR__ . '/templates/header.php';
             <div class="col-md-4">
               <label class="form-label">Tipo</label>
               <select name="tipo" id="credencialTipo" class="form-select">
-                <option value="servidor">Servidor</option>
-                <option value="rdp">RDP</option>
-                <option value="anydesk">AnyDesk</option>
-                <option value="vpn">VPN</option>
-                <option value="outro">Outro</option>
+                <?php foreach (CREDENCIAL_TIPOS as $valorTipoCredencial => $labelTipoCredencial): ?>
+                <option value="<?= e($valorTipoCredencial) ?>"><?= e($labelTipoCredencial) ?></option>
+                <?php endforeach; ?>
               </select>
             </div>
             <div class="col-md-8">

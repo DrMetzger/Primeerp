@@ -879,7 +879,7 @@ class Migrations
             CREATE TABLE IF NOT EXISTS cliente_credenciais (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 cliente_id INT NOT NULL,
-                tipo ENUM('servidor','rdp','anydesk','vpn','outro') NOT NULL DEFAULT 'outro',
+                tipo ENUM('servidor','rdp','anydesk','vpn','protheus','sql_server','t_cloud','outro') NOT NULL DEFAULT 'outro',
                 titulo VARCHAR(200) NOT NULL,
                 host VARCHAR(150) NULL,
                 porta VARCHAR(10) NULL,
@@ -893,6 +893,14 @@ class Migrations
                 CONSTRAINT fk_cliente_credenciais_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Tipos novos (Protheus, SQL Server, T-Cloud) pedidos pelo Kleber
+        // depois da tabela já existir em produção -- CREATE TABLE IF NOT
+        // EXISTS não altera enum de tabela já criada.
+        $colunaTipoCredencial = $pdo->query("SHOW COLUMNS FROM cliente_credenciais LIKE 'tipo'")->fetch();
+        if ($colunaTipoCredencial && stripos($colunaTipoCredencial['Type'], 'protheus') === false) {
+            $pdo->exec("ALTER TABLE cliente_credenciais MODIFY COLUMN tipo ENUM('servidor','rdp','anydesk','vpn','protheus','sql_server','t_cloud','outro') NOT NULL DEFAULT 'outro'");
+        }
 
         // Repositório de arquivo de VPN (ex.: .ovpn) pra baixar/repassar --
         // deliberadamente uma tabela PRÓPRIA, não reaproveita "documentos":
