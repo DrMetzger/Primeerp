@@ -229,12 +229,25 @@ define('CREDENCIAL_TIPOS', [
     'outro' => 'Outro',
 ]);
 
-// Aba "T-Cloud" (ver cliente_tcloud_ambientes) -- ambientes fixos (produção
-// e teste) do T-Cloud, cada um com o mesmo conjunto de 4 links. Chave é a
-// coluna da tabela, label é o rótulo do campo no modal.
+// Aba "T-Cloud" (ver cliente_tcloud_ambientes) -- ambientes fixos do
+// T-Cloud, cada um com o mesmo conjunto de 4 links. Chave é o valor gravado
+// no banco (enum), label é o título do card/modal. Ordem aqui é a ordem de
+// exibição dos cards -- segue a esteira normal (dev -> teste -> homologação
+// -> produção).
 define('TCLOUD_AMBIENTES', [
-    'producao' => 'Ambiente de Produção',
+    'dev' => 'Ambiente de Desenvolvimento',
     'teste' => 'Ambiente de Teste',
+    'homologacao' => 'Ambiente de Homologação',
+    'producao' => 'Ambiente de Produção',
+]);
+
+// Ícone (Bootstrap Icons) de cada card de ambiente T-Cloud -- separado de
+// TCLOUD_AMBIENTES pra não misturar rótulo de exibição com estilo visual.
+define('TCLOUD_AMBIENTE_ICONES', [
+    'dev' => 'bi-code-slash',
+    'teste' => 'bi-flask',
+    'homologacao' => 'bi-patch-check',
+    'producao' => 'bi-rocket-takeoff',
 ]);
 
 define('TCLOUD_LINKS', [

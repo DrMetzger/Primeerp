@@ -1335,7 +1335,12 @@ a.card-cliente, a.card-cliente:hover {
 .card-setor.active { border-color: var(--ph-primary); }
 .card-setor.setor-atencao { border-left: 4px solid var(--ph-danger); }
 
-.card-setor-topo { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.card-setor-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+/* Nome de setor sem espaço (ex.: "Comercial/Suprimentos/Produção") não tem
+   ponto de quebra "normal" pro navegador -- sem isso, vaza pra fora do
+   card em vez de quebrar linha. min-width:0 é o que permite o item flex
+   encolher menos que o conteúdo (senão overflow-wrap não faz nada aqui). */
+.card-setor-topo span.fw-semibold { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .card-setor-responsavel { display: flex; align-items: center; gap: .5rem; font-size: .85rem; color: var(--ph-text-muted); }
 .card-setor-insights { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: auto; }
 

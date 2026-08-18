@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'criar_setor') {
         $nomeSetor = trim($_POST['nome'] ?? '');
-        if ($nomeSetor === '') {
-            flash_set('erro', 'Informe o nome do setor.');
+        if ($nomeSetor === '' || !nome_setor_valido($nomeSetor)) {
+            flash_set('erro', 'Informe um nome válido pro setor (só pontuação, como "-", não é um nome).');
         } else {
             $pdo->prepare('INSERT INTO setores (cliente_id, nome, icone) VALUES (?, ?, ?)')
                 ->execute([$clienteId, $nomeSetor, $_POST['icone'] ?: null]);
@@ -53,8 +53,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'atualizar_setor') {
         $setorId = (int) $_POST['setor_id'];
         $nomeSetor = trim($_POST['nome'] ?? '');
-        if ($nomeSetor === '') {
-            flash_set('erro', 'Informe o nome do setor.');
+        if ($nomeSetor === '' || !nome_setor_valido($nomeSetor)) {
+            flash_set('erro', 'Informe um nome válido pro setor (só pontuação, como "-", não é um nome).');
         } else {
             $pdo->prepare('UPDATE setores SET nome = ?, icone = ?, ativo = ? WHERE id = ? AND cliente_id = ?')
                 ->execute([$nomeSetor, $_POST['icone'] ?: null, isset($_POST['ativo']) ? 1 : 0, $setorId, $clienteId]);

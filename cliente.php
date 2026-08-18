@@ -1230,8 +1230,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'criar_setor') {
         $nomeSetor = trim($_POST['nome'] ?? '');
-        if ($nomeSetor === '') {
-            flash_set('erro', 'Informe o nome do setor.');
+        if ($nomeSetor === '' || !nome_setor_valido($nomeSetor)) {
+            flash_set('erro', 'Informe um nome válido pro setor (só pontuação, como "-", não é um nome).');
         } else {
             $pdo->prepare('INSERT INTO setores (cliente_id, nome, icone) VALUES (?, ?, ?)')
                 ->execute([$clienteId, $nomeSetor, $_POST['icone'] ?: null]);
@@ -1242,8 +1242,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'atualizar_setor') {
         $setorId = (int) $_POST['setor_id'];
         $nomeSetor = trim($_POST['nome'] ?? '');
-        if ($nomeSetor === '') {
-            flash_set('erro', 'Informe o nome do setor.');
+        if ($nomeSetor === '' || !nome_setor_valido($nomeSetor)) {
+            flash_set('erro', 'Informe um nome válido pro setor (só pontuação, como "-", não é um nome).');
         } else {
             $pdo->prepare('UPDATE setores SET nome = ?, icone = ?, ativo = ? WHERE id = ? AND cliente_id = ?')
                 ->execute([$nomeSetor, $_POST['icone'] ?: null, isset($_POST['ativo']) ? 1 : 0, $setorId, $clienteId]);
@@ -3750,7 +3750,7 @@ require __DIR__ . '/templates/header.php';
                 <?php endforeach; ?>
             >
                 <div class="card-setor-topo">
-                    <span class="fw-semibold"><i class="bi <?= $tipoAmbienteTcloud === 'producao' ? 'bi-rocket-takeoff' : 'bi-flask' ?>"></i> <?= e($labelAmbienteTcloud) ?></span>
+                    <span class="fw-semibold"><i class="bi <?= e(TCLOUD_AMBIENTE_ICONES[$tipoAmbienteTcloud] ?? 'bi-cloud') ?>"></i> <?= e($labelAmbienteTcloud) ?></span>
                 </div>
                 <div class="card-setor-insights">
                     <span class="badge modulo-pill <?= $qtdLinksAmbienteTcloud > 0 ? 'modulo-ok' : 'modulo-neutro' ?>"><?= $qtdLinksAmbienteTcloud ?>/<?= count(TCLOUD_LINKS) ?> links configurados</span>

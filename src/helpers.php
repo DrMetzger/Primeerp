@@ -271,6 +271,16 @@ function sincronizar_setor_principal_master(\PDO $pdo, int $clienteId): void
 }
 
 /**
+ * Nome de setor precisa ter pelo menos 1 letra ou número -- só "-" (ou
+ * "...", "___" etc.) passa pela checagem de "não vazio" mas não é um nome
+ * de verdade, e polui os cards da aba Chamados.
+ */
+function nome_setor_valido(string $nome): bool
+{
+    return (bool) preg_match('/[\p{L}\p{N}]/u', $nome);
+}
+
+/**
  * Filtra uma lista bruta de setor_id (vinda de $_POST, ex.: setor_ids[])
  * pra só os que realmente pertencem a esse cliente -- sem isso, alguém
  * poderia forjar o id de um setor de OUTRO cliente no formulário e vincular

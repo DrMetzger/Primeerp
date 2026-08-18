@@ -978,7 +978,7 @@ class Migrations
             CREATE TABLE IF NOT EXISTS cliente_tcloud_ambientes (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 cliente_id INT NOT NULL,
-                tipo ENUM('producao','teste') NOT NULL,
+                tipo ENUM('dev','teste','homologacao','producao') NOT NULL,
                 link_protheus VARCHAR(500) NULL,
                 link_rest VARCHAR(500) NULL,
                 link_schedule VARCHAR(500) NULL,
@@ -991,6 +991,14 @@ class Migrations
                 CONSTRAINT fk_tcloud_ambientes_usuario FOREIGN KEY (atualizado_por) REFERENCES usuarios(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Dev e Homologação entraram depois (pedido do Kleber) -- mesmo
+        // motivo do ALTER de cliente_credenciais.tipo acima: CREATE TABLE
+        // IF NOT EXISTS não atualiza enum de tabela que já existe.
+        $colunaTipoTcloudAmbiente = $pdo->query("SHOW COLUMNS FROM cliente_tcloud_ambientes LIKE 'tipo'")->fetch();
+        if ($colunaTipoTcloudAmbiente && stripos($colunaTipoTcloudAmbiente['Type'], 'homologacao') === false) {
+            $pdo->exec("ALTER TABLE cliente_tcloud_ambientes MODIFY COLUMN tipo ENUM('dev','teste','homologacao','producao') NOT NULL");
+        }
 
         // Configurações de acesso via VSCode (link + porta + rótulo do
         // ambiente) -- lista livre, pode ter mais de uma (ex.: uma pra cada
