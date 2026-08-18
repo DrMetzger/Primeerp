@@ -184,11 +184,25 @@ define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
     'application/x-7z-compressed' => '7z',
 ]);
 
+// Fonte/objeto ADVPL do Protheus -- pedido do Kleber pra poder anexar isso
+// num chamado (ex.: mandar o fonte de uma rotina customizada pro suporte
+// analisar). Não dá pra confiar em mime_content_type() pra essas extensões
+// (ANEXO_CHAMADO_TIPOS_PERMITIDOS acima): .prw/.tlpp são texto puro, mas
+// .prx é PRECOMPILADO (binário) e .ptm pode variar -- o libmagic não
+// reconhece nenhuma como um tipo "de verdade" próprio, então cairiam ora
+// em text/plain, ora em application/octet-stream (rejeitado), dependendo
+// do conteúdo. Em vez de depender do que o PHP adivinha do conteúdo,
+// processar_anexos_chamado() confere a extensão ORIGINAL do arquivo contra
+// essa lista antes de mexer com MIME -- garante que essas 4 sempre passam,
+// independente do que o libmagic detectar.
+define('ANEXO_CHAMADO_EXTENSOES_PROTHEUS', ['prw', 'ptm', 'prx', 'tlpp']);
+
 // Atributo "accept" do <input type="file"> dos 3 formulários de anexo de
 // chamado (portal, admin e resposta) -- filtro só de UX (o cliente escolhe
 // mais rápido no seletor do sistema), a validação de verdade é sempre a
-// de ANEXO_CHAMADO_TIPOS_PERMITIDOS acima, no servidor.
-define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.prw,.rtf,.zip,.rar,.7z');
+// de ANEXO_CHAMADO_TIPOS_PERMITIDOS/ANEXO_CHAMADO_EXTENSOES_PROTHEUS acima,
+// no servidor.
+define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.prw,.ptm,.prx,.tlpp,.rtf,.zip,.rar,.7z');
 
 // Vídeo aulas por setor (cliente.php e portal do cliente) -- Kleber sobe uma
 // gravação em MP4 pra cada rotina/processo do setor; reaproveita a mesma

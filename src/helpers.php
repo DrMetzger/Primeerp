@@ -1173,8 +1173,16 @@ function processar_anexos_chamado(\PDO &$pdo, int $chamadoId, ?int $respostaId, 
             continue;
         }
 
-        $tipoMime = mime_content_type($arquivos['tmp_name'][$i]);
-        $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$tipoMime] ?? null;
+        // Fonte/objeto ADVPL do Protheus passa direto pela extensão original
+        // (ver comentário de ANEXO_CHAMADO_EXTENSOES_PROTHEUS) -- só cai no
+        // mime_content_type() pra qualquer outra coisa.
+        $extensaoOriginal = strtolower(pathinfo($arquivos['name'][$i], PATHINFO_EXTENSION));
+        if (in_array($extensaoOriginal, ANEXO_CHAMADO_EXTENSOES_PROTHEUS, true)) {
+            $extensaoPermitida = $extensaoOriginal;
+        } else {
+            $tipoMime = mime_content_type($arquivos['tmp_name'][$i]);
+            $extensaoPermitida = ANEXO_CHAMADO_TIPOS_PERMITIDOS[$tipoMime] ?? null;
+        }
         if (!$extensaoPermitida) {
             $erros[] = '"' . $arquivos['name'][$i] . '" não é um tipo de arquivo permitido (use imagem, PDF, Word/Excel/PowerPoint, texto ou ZIP).';
             continue;

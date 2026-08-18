@@ -3475,7 +3475,7 @@ require __DIR__ . '/templates/header.php';
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                             <div class="col-md-4"><label class="form-label small mb-1">Nome da rotina</label><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Ex.: Bloqueio de faturamento" required></div>
                             <div class="col-md-4"><label class="form-label small mb-1">Ponto de entrada</label><input type="text" name="ponto_entrada" class="form-control form-control-sm" placeholder="Ex.: U_MEUFONTE01"></div>
-                            <div class="col-md-4"><label class="form-label small mb-1">Arquivo fonte</label><input type="file" name="arquivo" class="form-control form-control-sm" accept=".prw,.ptm,.tlpp,.ch,.zip" required></div>
+                            <div class="col-md-4"><label class="form-label small mb-1">Arquivo fonte</label><input type="file" name="arquivo" class="form-control form-control-sm" accept=".prw,.ptm,.prx,.tlpp,.ch,.zip" required></div>
                             <div class="col-12"><label class="form-label small mb-1">Descrição</label><textarea name="descricao" class="form-control form-control-sm" rows="1" placeholder="O que esse fonte faz, opcional"></textarea></div>
                             <div class="col-12"><button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-upload"></i> Enviar</button></div>
                         </form>
