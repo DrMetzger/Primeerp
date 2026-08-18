@@ -343,6 +343,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($_FILES['arquivo']['error'] === UPLOAD_ERR_OK && !isset(VIDEO_AULA_TIPOS_PERMITIDOS[mime_content_type($_FILES['arquivo']['tmp_name'])])) {
             flash_set('erro', 'Envie um arquivo de vídeo no formato MP4.');
         } else {
+            // O upload em si (bytes chegando) já tem max_input_time bem alto
+            // (.htaccess) -- mas o max_execution_time de 45s continua baixo
+            // de propósito pro resto do site (ver comentário lá). Só que
+            // move_uploaded_file() de um vídeo de vários GB pode ele mesmo
+            // passar de 45s se a pasta temporária do PHP estiver num
+            // filesystem diferente de uploads/ (copia byte a byte em vez de
+            // um rename() instantâneo) -- nesse caso o PHP mata o processo
+            // SEM mandar nenhuma resposta, e a barra de "Registrando..." no
+            // navegador fica travada pra sempre (bug real reportado pelo
+            // Kleber). Só essa ação (não o site todo) ganha um tempo bem
+            // maior, e ignore_user_abort garante que, se a pessoa desistir e
+            // sair da página no meio do caminho, o vídeo termina de salvar
+            // em segundo plano em vez de ficar corrompido/pela metade.
+            set_time_limit(600);
+            ignore_user_abort(true);
+
             $erroUploadVideo = null;
             $idVideoNovo = salvar_documento_upload(
                 $pdo,

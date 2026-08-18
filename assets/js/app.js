@@ -79,14 +79,26 @@
         }
     }
 
-    function abrirModal(modalEl) {
+    function abrirModal(modalEl, gatilho) {
         if (!modalEl) return;
-        modalEl.dispatchEvent(new CustomEvent('show.bs.modal', { bubbles: true }));
+        // relatedTarget existe de graça em MouseEvent nativo, mas NÃO em
+        // CustomEvent -- sem atribuir isso à mão, todo código que abre um
+        // modal via data-bs-toggle/data-bs-target e lê event.relatedTarget
+        // pra saber QUAL card/botão foi clicado (ex.: o player de vídeo
+        // aula, os cards de ambiente T-Cloud) recebia sempre undefined e
+        // ficava com o modal vazio/travado, sem nenhum erro no console pra
+        // dar pista do motivo. Bug real reportado pelo Kleber (vídeo aula
+        // "Assistir" abrindo em branco, travado em 0:00).
+        var eventoShow = new CustomEvent('show.bs.modal', { bubbles: true });
+        eventoShow.relatedTarget = gatilho || null;
+        modalEl.dispatchEvent(eventoShow);
         modalEl.classList.add('show');
         modalEl.style.display = 'block';
         document.body.classList.add('modal-open');
         criarBackdrop();
-        modalEl.dispatchEvent(new CustomEvent('shown.bs.modal', { bubbles: true }));
+        var eventoShown = new CustomEvent('shown.bs.modal', { bubbles: true });
+        eventoShown.relatedTarget = gatilho || null;
+        modalEl.dispatchEvent(eventoShown);
     }
 
     function fecharModal(modalEl) {
@@ -102,7 +114,7 @@
         var abridor = e.target.closest('[data-bs-toggle="modal"]');
         if (abridor) {
             var sel = abridor.getAttribute('data-bs-target');
-            abrirModal(sel ? document.querySelector(sel) : null);
+            abrirModal(sel ? document.querySelector(sel) : null, abridor);
             return;
         }
 
@@ -539,10 +551,26 @@
         detalhe.textContent = '';
         overlay.classList.add('show');
 
+        // Enquanto esse overlay estiver na tela, tentar sair/recarregar a
+        // página mostra o aviso nativo do navegador -- sem isso, alguém que
+        // acha que travou (ver fase "Registrando..." abaixo) sai da página
+        // sem querer no meio do envio de um arquivo grande e ele nem termina
+        // de salvar no servidor. Pedido explícito do Kleber depois de quase
+        // sair da página com uma vídeo aula grande travada em "Registrando".
+        var avisarAntesDeSair = function (ev) { ev.preventDefault(); ev.returnValue = ''; };
+        window.addEventListener('beforeunload', avisarAntesDeSair);
+        var pararDeAvisarAntesDeSair = function () { window.removeEventListener('beforeunload', avisarAntesDeSair); };
+
         var dados = new FormData(form);
         var tituloOverlay = overlay.querySelector('.overlay-upload-progresso-titulo');
         var xhr = new XMLHttpRequest();
         xhr.open((form.getAttribute('method') || 'POST').toUpperCase(), form.getAttribute('action') || window.location.href);
+        // Rede de segurança contra qualquer travamento silencioso no
+        // servidor (ex.: um arquivo enorme cujo processamento passa do
+        // esperado) -- sem isso o overlay podia ficar "Registrando..." pra
+        // sempre, sem nenhum jeito de desistir. 15min cobre com folga até o
+        // maior upload previsto (vídeo aula de até 5GB).
+        xhr.timeout = 15 * 60 * 1000;
         xhr.upload.addEventListener('progress', function (ev) {
             if (!ev.lengthComputable) return;
             var pct = Math.round((ev.loaded / ev.total) * 100);
@@ -553,12 +581,17 @@
         // O arquivo já terminou de subir, mas o servidor ainda está
         // processando (salvando no banco, mandando e-mail/WhatsApp etc.) --
         // sem isso a barra ficava travada em "100%" por vários segundos sem
-        // nenhum aviso, parecendo que travou de verdade.
+        // nenhum aviso, parecendo que travou de verdade. O listrado animado
+        // (ver .progress-bar-processando no style.css) deixa claro que ainda
+        // tem coisa rodando mesmo sem um % real pra mostrar -- não dá pra
+        // saber o progresso dessa parte (o navegador já mandou tudo).
         xhr.upload.addEventListener('load', function () {
             if (tituloOverlay) tituloOverlay.textContent = 'Registrando...';
-            detalhe.textContent = '';
+            barra.classList.add('progress-bar-processando');
+            detalhe.textContent = 'Isso pode levar alguns minutos em arquivos grandes. Não saia nem atualize essa página.';
         });
         xhr.addEventListener('load', function () {
+            pararDeAvisarAntesDeSair();
             // Volta pra MESMA aba/página de onde o formulário foi enviado --
             // xhr.responseURL nunca inclui o #fragmento do Location (fragmento
             // é só client-side, o navegador não manda pro servidor e a Graph
@@ -580,8 +613,14 @@
             window.location.href = urlFinal;
         });
         xhr.addEventListener('error', function () {
+            pararDeAvisarAntesDeSair();
             overlay.classList.remove('show');
             alert('Falha ao enviar o arquivo. Verifique sua conexão e tente novamente.');
+        });
+        xhr.addEventListener('timeout', function () {
+            pararDeAvisarAntesDeSair();
+            overlay.classList.remove('show');
+            alert('O envio demorou demais e foi cancelado. Verifique sua conexão e tente novamente -- se o arquivo for muito grande, tente com uma internet mais estável.');
         });
         xhr.send(dados);
     });
