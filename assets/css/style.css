@@ -105,6 +105,12 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .d-flex { display: flex; }
 .d-inline { display: inline; }
 .d-inline-block { display: inline-block; }
+/* Esse projeto não carrega o Bootstrap de verdade (só reimplementa um
+   subconjunto das classes -- ver app.js) -- .text-truncate sozinho não
+   fazia NADA sem essas 3 propriedades, então um texto longo (ex.: link do
+   VSCode na aba T-Cloud) quebrava linha em vez de truncar com "...", e
+   qualquer botão do lado acabava sobrepondo o texto quebrado. */
+.text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-none { display: none !important; }
 .flex-wrap { flex-wrap: wrap; }
 .flex-grow-1 { flex-grow: 1; }
@@ -1415,6 +1421,11 @@ a.card-cliente, a.card-cliente:hover {
 }
 .ver-cliente-stat-valor { font-size: 1.6rem; font-weight: 700; color: var(--ph-text); line-height: 1.1; }
 .ver-cliente-stat-rotulo { font-size: .75rem; color: var(--ph-text-muted); margin-top: .15rem; }
+/* Contagem de urgentes numa linha PRÓPRIA, separada do número grande de
+   pendentes -- antes vinha tudo junto dentro do mesmo elemento (fonte
+   grande de 1.6rem), o número e o aviso de urgente ficavam espremidos e
+   quebrando linha de um jeito ilegível num tile tão estreito. */
+.ver-cliente-stat-urgente { font-size: .72rem; font-weight: 600; color: var(--ph-danger); margin-top: .35rem; }
 
 .ver-cliente-info {
     display: flex;

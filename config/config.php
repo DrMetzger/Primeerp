@@ -259,7 +259,7 @@ define('TCLOUD_AMBIENTES', [
 // TCLOUD_AMBIENTES pra não misturar rótulo de exibição com estilo visual.
 define('TCLOUD_AMBIENTE_ICONES', [
     'dev' => 'bi-code-slash',
-    'teste' => 'bi-flask',
+    'teste' => 'bi-bug',
     'homologacao' => 'bi-patch-check',
     'producao' => 'bi-rocket-takeoff',
 ]);

@@ -260,6 +260,7 @@ require __DIR__ . '/templates/header.php';
                     <div class="ver-cliente-stat">
                         <div class="ver-cliente-stat-valor" id="verChamadosPendentes"></div>
                         <div class="ver-cliente-stat-rotulo">Pendentes</div>
+                        <div id="verChamadosUrgentes" style="display:none;" class="ver-cliente-stat-urgente"><i class="bi bi-exclamation-circle-fill"></i> <span id="verChamadosUrgentesQtd"></span> urgente(s)</div>
                     </div>
                     <div class="ver-cliente-stat">
                         <div class="ver-cliente-stat-valor" id="verChamados"></div>
@@ -459,8 +460,14 @@ document.addEventListener('DOMContentLoaded', function () {
             wrapObs.style.display = 'none';
         }
 
-        document.getElementById('verChamadosPendentes').innerHTML = dados.chamados_pendentes
-            + (dados.urgentes > 0 ? '<span class="badge prio-urgente ms-1" style="font-size:.65rem;vertical-align:middle;"><i class="bi bi-exclamation-circle-fill"></i> ' + dados.urgentes + ' urgente(s)</span>' : '');
+        document.getElementById('verChamadosPendentes').textContent = dados.chamados_pendentes;
+        var linhaUrgentes = document.getElementById('verChamadosUrgentes');
+        if (dados.urgentes > 0) {
+            document.getElementById('verChamadosUrgentesQtd').textContent = dados.urgentes;
+            linhaUrgentes.style.display = '';
+        } else {
+            linhaUrgentes.style.display = 'none';
+        }
         document.getElementById('verChamados').textContent = dados.total_chamados;
         document.getElementById('verLinkAbrir').href = baseUrlCliente + dados.id;
 
