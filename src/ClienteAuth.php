@@ -20,45 +20,23 @@ class ClienteAuth
 {
     public static function attempt(PDO $pdo, string $email, string $senha): bool
     {
-        $identificado = self::identificarPorCredenciais($pdo, $email, $senha);
-        if (!$identificado) {
-            return false;
-        }
-
-        if (!self::dentroHorarioComercial() && !$identificado['registro']['acesso_fora_horario']) {
-            return false;
-        }
-
-        if ($identificado['tipo'] === 'master') {
-            self::iniciarSessaoMaster($identificado['registro']);
-        } else {
-            self::iniciarSessaoSetor($identificado['registro']);
-        }
-        return true;
-    }
-
-    /**
-     * Confere só se EMAIL+SENHA batem (master ou setor) -- sem aplicar a
-     * checagem de horário nem abrir sessão nenhuma. Extraído de attempt()
-     * pra login.php conseguir diferenciar "senha errada de verdade" de
-     * "credenciais certas, mas fora do horário" (ver
-     * credenciaisValidasMasForaDoHorario() logo abaixo) -- as duas coisas
-     * caíam na MESMA mensagem genérica ("e-mail ou senha inválidos"), e
-     * teve cliente que reset a própria senha várias vezes achando que
-     * tinha errado ela, quando na verdade só estava tentando entrar antes
-     * das 09h.
-     */
-    private static function identificarPorCredenciais(PDO $pdo, string $email, string $senha): ?array
-    {
+        // Sem checagem de horário aqui de propósito: login.php já bloqueia
+        // a TELA inteira fora do horário comercial (ver
+        // bloquearForaDoHorario(), chamado antes de qualquer coisa nesse
+        // arquivo) -- pedido explícito do Kleber pra ficar idêntico ao
+        // resto do portal, sem exceção nem mensagem alternativa. Ou seja,
+        // esse método só é alcançável mesmo dentro do horário.
         $stmt = $pdo->prepare("SELECT * FROM clientes WHERE contato_email = ? AND portal_ativo = 1 AND senha_hash IS NOT NULL LIMIT 1");
         $stmt->execute([$email]);
         $cliente = $stmt->fetch();
+
         if ($cliente && password_verify($senha, $cliente['senha_hash'])) {
-            return ['tipo' => 'master', 'registro' => $cliente];
+            self::iniciarSessaoMaster($cliente);
+            return true;
         }
 
         $stmt = $pdo->prepare("
-            SELECT sr.*, s.cliente_id, s.nome AS setor_nome, c.nome AS empresa_nome, c.acesso_fora_horario
+            SELECT sr.*, s.cliente_id, s.nome AS setor_nome, c.nome AS empresa_nome
             FROM setor_responsaveis sr
             JOIN setores s ON s.id = sr.setor_id
             JOIN clientes c ON c.id = s.cliente_id
@@ -67,27 +45,13 @@ class ClienteAuth
         ");
         $stmt->execute([$email]);
         $setorResp = $stmt->fetch();
+
         if ($setorResp && password_verify($senha, $setorResp['senha_hash'])) {
-            return ['tipo' => 'setor', 'registro' => $setorResp];
+            self::iniciarSessaoSetor($setorResp);
+            return true;
         }
 
-        return null;
-    }
-
-    /**
-     * true = o e-mail/senha digitados ESTÃO CERTOS, o único motivo de
-     * attempt() ter recusado foi o horário comercial (sem liberação
-     * especial). login.php usa isso pra mostrar um aviso bem grande e
-     * claro em vez da mensagem genérica de "credenciais inválidas" --
-     * ninguém precisa resetar senha por causa de horário.
-     */
-    public static function credenciaisValidasMasForaDoHorario(PDO $pdo, string $email, string $senha): bool
-    {
-        $identificado = self::identificarPorCredenciais($pdo, $email, $senha);
-        if (!$identificado) {
-            return false;
-        }
-        return !self::dentroHorarioComercial() && !$identificado['registro']['acesso_fora_horario'];
+        return false;
     }
 
     private static function iniciarSessaoMaster(array $cliente): void

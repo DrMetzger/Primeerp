@@ -5,12 +5,12 @@ require_once __DIR__ . '/../bootstrap.php';
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
 
-// Não bloqueia a TELA de login em si (não dá pra saber ainda quem está
-// tentando entrar, e alguns clientes têm liberação pra usar fora do
-// horário -- ver clientes.acesso_fora_horario). O horário é conferido
-// dentro de ClienteAuth::attempt(), depois de confirmar as credenciais.
-// Já quem está com sessão aberta (chamados.php, chamado.php etc.) continua
-// batendo em requireLogin() -> bloquearForaDoHorario() normalmente.
+// Fora do horário comercial, a TELA de login nem chega a aparecer -- mesmo
+// aviso padrão de "portal fora do horário" que qualquer página do portal já
+// mostra pra quem está logado (ver ClienteAuth::bloquearForaDoHorario()).
+// Pedido explícito do Kleber: nada de mensagem alternativa/tela de login
+// liberada fora do horário -- é pra ficar IGUAL ao resto do portal.
+ClienteAuth::bloquearForaDoHorario();
 
 if (ClienteAuth::check()) {
     header('Location: ' . url('portal/chamados.php'));
@@ -18,7 +18,6 @@ if (ClienteAuth::check()) {
 }
 
 $erro = null;
-$bloqueadoPorHorario = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
@@ -31,12 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (ClienteAuth::attempt(Database::connection(), $email, $senha)) {
         header('Location: ' . url('portal/chamados.php'));
         exit;
-    } elseif (ClienteAuth::credenciaisValidasMasForaDoHorario(Database::connection(), $email, $senha)) {
-        // Credenciais CERTAS -- só não entrou por causa do horário. Bug
-        // real reportado pelo Kleber: antes caía na mesma mensagem
-        // genérica de "senha inválida", e teve cliente que resetou a
-        // própria senha várias vezes achando que tinha digitado errado.
-        $bloqueadoPorHorario = true;
     } else {
         $erro = 'E-mail ou senha inválidos.';
     }
@@ -66,25 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <small class="text-white-50">Acompanhe seus chamados</small>
         </div>
         <div class="card-body p-4">
-            <?php if ($bloqueadoPorHorario): ?>
-                <!-- Credenciais CERTAS, só bloqueado pelo horário -- aviso
-                     bem grande de propósito (ver ClienteAuth::
-                     credenciaisValidasMasForaDoHorario()): antes essa mesma
-                     situação caía na mensagem genérica de "senha inválida",
-                     e teve cliente que resetou a própria senha repetidas
-                     vezes achando que tinha digitado errado. -->
-                <div class="alert-horario-grande text-center mb-3">
-                    <div style="font-size:2.5rem;">🕐</div>
-                    <h5 class="fw-bold mb-1">Sua senha está certa!</h5>
-                    <p class="mb-0">O portal só abre das <strong><?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?></strong> às <strong><?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?></strong>. Não precisa trocar/resetar a senha -- é só voltar dentro desse horário.</p>
-                </div>
-            <?php elseif (!ClienteAuth::dentroHorarioComercial()): ?>
-                <div class="alert-horario-grande text-center mb-3">
-                    <div style="font-size:2.5rem;">🕐</div>
-                    <h5 class="fw-bold mb-1">Portal fechado no momento</h5>
-                    <p class="mb-0">Atendimento das <strong><?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?></strong> às <strong><?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?></strong>. Se sua senha estiver certa mas não conseguir entrar agora, é por causa do horário -- volte dentro desse período.</p>
-                </div>
-            <?php endif; ?>
             <?php if ($erro): ?>
                 <div class="alert alert-danger"><?= e($erro) ?></div>
             <?php endif; ?>
