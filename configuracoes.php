@@ -37,10 +37,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Configuracoes::definir($pdo, $chave, $_POST[$chave] ?? '', Auth::userId());
     }
 
-    flash_set('sucesso', 'Configurações salvas.');
+    // Timbrado (cabeçalho/rodapé real do PDF, ver src/PdfExport.php) --
+    // upload é opcional a cada salvamento (só troca a imagem se um arquivo
+    // novo vier junto), mas a altura configurada é sempre atualizada.
+    $errosTimbrado = array_filter([
+        processar_upload_timbrado($pdo, 'cabecalho'),
+        processar_upload_timbrado($pdo, 'rodape'),
+    ]);
+
+    $alturaCabecalhoTimbrado = max(5, min(60, (float) str_replace(',', '.', $_POST['cabecalho_altura_mm'] ?? '28')));
+    $alturaRodapeTimbrado = max(5, min(60, (float) str_replace(',', '.', $_POST['rodape_altura_mm'] ?? '16')));
+    $pdo->prepare('UPDATE timbrado_pdf SET cabecalho_altura_mm = ?, rodape_altura_mm = ?, atualizado_por = ? WHERE id = 1')
+        ->execute([$alturaCabecalhoTimbrado, $alturaRodapeTimbrado, Auth::userId()]);
+
+    if ($errosTimbrado) {
+        flash_set('erro', implode(' ', $errosTimbrado));
+    } else {
+        flash_set('sucesso', 'Configurações salvas.');
+    }
     header('Location: ' . url('configuracoes.php'));
     exit;
 }
+
+$timbrado = $pdo->query('SELECT * FROM timbrado_pdf WHERE id = 1')->fetch();
 
 // Valor efetivo mostrado no formulário: o que estiver salvo no banco (já
 // editado pela tela alguma vez) ou, se nunca foi editado, o valor atual da
@@ -59,7 +78,7 @@ require __DIR__ . '/templates/header.php';
     <h4 class="mb-0"><i class="bi bi-gear"></i> Configurações</h4>
 </div>
 
-<form method="post">
+<form method="post" enctype="multipart/form-data">
     <?= csrf_field() ?>
 
     <div class="card card-stat mb-3">
@@ -161,6 +180,40 @@ require __DIR__ . '/templates/header.php';
                         <button type="button" class="toggle-senha" tabindex="-1" aria-label="Mostrar chave"><i class="bi bi-eye"></i></button>
                     </div>
                     <div class="form-text"><strong>Precisa ser de um projeto Google Cloud SEPARADO da chave de análise</strong>, com faturamento ativado -- ativar a ferramenta de busca do Google remove o plano gratuito do projeto INTEIRO. Se for a mesma chave/projeto da análise, a análise interna que hoje é de graça passa a ser cobrada também.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card card-stat mb-3">
+        <div class="card-body">
+            <strong class="d-block mb-1"><i class="bi bi-file-earmark-pdf"></i> Timbrado dos PDFs</strong>
+            <p class="text-muted small">Cabeçalho e rodapé usados em <strong>todo PDF gerado pelo sistema</strong> (análises de IA, sugestões de implantação etc., ver <code>src/PdfExport.php</code>). Enquanto nenhuma imagem for enviada aqui, o sistema desenha um timbrado padrão automaticamente -- não precisa preencher isso pra continuar funcionando.</p>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Cabeçalho</label>
+                    <?php if (arquivo_publico_existe($timbrado['cabecalho_caminho'])): ?>
+                        <div class="mb-2"><img src="<?= e(asset_url($timbrado['cabecalho_caminho'])) ?>" alt="Cabeçalho atual" style="max-width:100%; max-height:80px; border:1px solid #e5e7eb; border-radius:4px;"></div>
+                    <?php endif; ?>
+                    <input type="file" name="timbrado_cabecalho" class="form-control" accept="image/png,image/jpeg">
+                    <div class="form-text">JPG ou PNG, cobrindo a LARGURA TOTAL da página A4 (recomendado ~2000&times;230px, ou qualquer imagem com essa proporção larga -- ela é esticada pra caber exatamente na altura configurada ao lado).</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Altura do cabeçalho (mm)</label>
+                    <input type="number" step="0.5" min="5" max="60" name="cabecalho_altura_mm" class="form-control" value="<?= e($timbrado['cabecalho_altura_mm']) ?>">
+                    <div class="form-text">Página A4 tem 297mm de altura -- 28mm (padrão) é uma faixa fina no topo.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Rodapé</label>
+                    <?php if (arquivo_publico_existe($timbrado['rodape_caminho'])): ?>
+                        <div class="mb-2"><img src="<?= e(asset_url($timbrado['rodape_caminho'])) ?>" alt="Rodapé atual" style="max-width:100%; max-height:60px; border:1px solid #e5e7eb; border-radius:4px;"></div>
+                    <?php endif; ?>
+                    <input type="file" name="timbrado_rodape" class="form-control" accept="image/png,image/jpeg">
+                    <div class="form-text">Mesma ideia do cabeçalho, só que pra faixa de baixo da página.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Altura do rodapé (mm)</label>
+                    <input type="number" step="0.5" min="5" max="60" name="rodape_altura_mm" class="form-control" value="<?= e($timbrado['rodape_altura_mm']) ?>">
                 </div>
             </div>
         </div>

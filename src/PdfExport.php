@@ -5,15 +5,16 @@ namespace AdminPrime;
 /**
  * PDF timbrado padrão do Prime Hub -- pedido do Kleber pra que TODO export em
  * PDF do sistema (não só as sugestões de IA da Implantação) siga o mesmo
- * timbrado oficial. Como não há acesso, neste ambiente, aos dois arquivos de
- * imagem do timbrado oficial (cabeçalho e rodapé) que ele anexou na
- * conversa, o cabeçalho/rodapé aqui são desenhados em código reaproveitando
- * a identidade visual JÁ usada no app (gradiente índigo/roxo do navbar, ver
+ * timbrado oficial. Enquanto ninguém sobe os arquivos de imagem do timbrado
+ * oficial (cabeçalho e rodapé) pela tela configuracoes.php (ver
+ * processar_upload_timbrado() em src/helpers.php, tabela timbrado_pdf), o
+ * cabeçalho/rodapé aqui são desenhados em código reaproveitando a identidade
+ * visual JÁ usada no app (gradiente índigo/roxo do navbar, ver
  * ".navbar-dark.bg-dark" em assets/css/style.css, e a logo branca
- * assets/img/logo.png sobre fundo colorido, mesma combinação de lá) -- se um
- * dia os arquivos originais do timbrado forem salvos em
- * assets/img/timbrado-cabecalho.png / timbrado-rodape.png, esta classe pode
- * trocar pra usar Image() com eles no lugar da faixa desenhada.
+ * assets/img/logo.png sobre fundo colorido, mesma combinação de lá) -- assim
+ * que uma imagem real for enviada, essa classe troca automaticamente pra
+ * usar Image() com ela no lugar da faixa desenhada (ver timbradoConfigurado()
+ * abaixo), sem precisar mudar nenhum dos lugares que criam um PdfExport.
  *
  * Baseado em FPDF (vendorizado manualmente em vendor/fpdf, sem Composer --
  * mesmo esquema do PHPMailer, ver bootstrap.php).
@@ -25,53 +26,111 @@ class PdfExport extends \FPDF
         [55, 48, 163],  // #3730a3
         [109, 40, 217], // #6d28d9
     ];
-    private const ALTURA_CABECALHO = 28;
-    private const ALTURA_RODAPE = 16;
+    private const ALTURA_CABECALHO_PADRAO = 28;
+    private const ALTURA_RODAPE_PADRAO = 16;
     private const RODAPE_URL = 'www.primeerp.com.br';
 
     private string $tituloDocumento;
+    private ?array $timbrado;
+    private float $alturaCabecalho;
+    private float $alturaRodape;
 
     public function __construct(string $tituloDocumento = '')
     {
         parent::__construct('P', 'mm', 'A4');
         $this->tituloDocumento = $tituloDocumento;
-        $this->SetMargins(15, self::ALTURA_CABECALHO + 6, 15);
-        $this->SetAutoPageBreak(true, self::ALTURA_RODAPE + 10);
+        $this->timbrado = self::timbradoConfigurado();
+        $this->alturaCabecalho = $this->timbrado['cabecalho_caminho'] ?? null ? (float) $this->timbrado['cabecalho_altura_mm'] : self::ALTURA_CABECALHO_PADRAO;
+        $this->alturaRodape = $this->timbrado['rodape_caminho'] ?? null ? (float) $this->timbrado['rodape_altura_mm'] : self::ALTURA_RODAPE_PADRAO;
+        $this->SetMargins(15, $this->alturaCabecalho + 6, 15);
+        $this->SetAutoPageBreak(true, $this->alturaRodape + 10);
         $this->AliasNbPages();
         $this->AddPage();
     }
 
+    /**
+     * Lê a linha única de timbrado_pdf (ver Migrations::run()) -- devolve
+     * null se a tabela ainda não existir (proteção só pra não quebrar em
+     * algum contexto muito antigo/isolado que rode PdfExport antes de
+     * Migrations::run(), o que não deveria acontecer em uso normal via
+     * bootstrap.php).
+     */
+    private static function timbradoConfigurado(): ?array
+    {
+        try {
+            $pdo = \AdminPrime\Database::connection();
+            $stmt = $pdo->query('SELECT * FROM timbrado_pdf WHERE id = 1');
+
+            return $stmt->fetch() ?: null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     public function Header(): void
     {
-        $this->desenharFaixaGradiente(0, self::ALTURA_CABECALHO, false);
+        $caminhoCabecalho = $this->caminhoImagemTimbrado($this->timbrado['cabecalho_caminho'] ?? null);
 
-        $logo = __DIR__ . '/../assets/img/logo.png';
-        if (is_file($logo)) {
-            $this->Image($logo, 15, 8, 40);
+        if ($caminhoCabecalho) {
+            $this->Image($caminhoCabecalho, 0, 0, $this->GetPageWidth(), $this->alturaCabecalho);
+        } else {
+            $this->desenharFaixaGradiente(0, $this->alturaCabecalho, false);
+
+            $logo = __DIR__ . '/../assets/img/logo.png';
+            if (is_file($logo)) {
+                $this->Image($logo, 15, 8, 40);
+            }
         }
 
         if ($this->tituloDocumento !== '') {
             $this->SetFont('Helvetica', 'B', 11);
             $this->SetTextColor(255, 255, 255);
-            $this->SetXY(15, self::ALTURA_CABECALHO - 10);
+            $this->SetXY(15, $this->alturaCabecalho - 10);
             $this->Cell(180, 6, $this->texto($this->tituloDocumento), 0, 0, 'R');
         }
 
-        $this->SetY(self::ALTURA_CABECALHO + 6);
+        $this->SetY($this->alturaCabecalho + 6);
         $this->SetTextColor(20, 20, 20);
     }
 
     public function Footer(): void
     {
-        $yFaixa = $this->GetPageHeight() - self::ALTURA_RODAPE;
-        $this->desenharFaixaGradiente($yFaixa, self::ALTURA_RODAPE, true);
+        $yFaixa = $this->GetPageHeight() - $this->alturaRodape;
+        $caminhoRodape = $this->caminhoImagemTimbrado($this->timbrado['rodape_caminho'] ?? null);
+
+        if ($caminhoRodape) {
+            $this->Image($caminhoRodape, 0, $yFaixa, $this->GetPageWidth(), $this->alturaRodape);
+            return;
+        }
+
+        $this->desenharFaixaGradiente($yFaixa, $this->alturaRodape, true);
 
         // Pedido explícito: NO rodapé só o site da Prime, nada mais (sem
-        // numeração de página, sem outro texto).
-        $this->SetY(-self::ALTURA_RODAPE / 2 - 3);
+        // numeração de página, sem outro texto). Só faz sentido escrever
+        // isso por cima da faixa DESENHADA -- uma imagem de rodapé real
+        // enviada pelo Kleber já vem com o que ele quiser nela.
+        $this->SetY(-$this->alturaRodape / 2 - 3);
         $this->SetFont('Helvetica', 'B', 10.5);
         $this->SetTextColor(255, 255, 255);
         $this->Cell(0, 6, self::RODAPE_URL, 0, 0, 'C');
+    }
+
+    /**
+     * Caminho físico absoluto de uma imagem de timbrado já enviada, ou null
+     * se não tiver sido enviada (cai no desenho em código) ou se o arquivo
+     * tiver sumido do disco por algum motivo (deploy que apagou uploads/,
+     * por exemplo -- diferente dos outros uploads do sistema, aqui não vale
+     * a pena restaurar do blob "de mais barato" a cada PDF gerado, então só
+     * ignora e cai no fallback; o próximo re-upload resolve de vez).
+     */
+    private function caminhoImagemTimbrado(?string $caminhoRelativo): ?string
+    {
+        if (!$caminhoRelativo) {
+            return null;
+        }
+        $caminhoCompleto = __DIR__ . '/../' . $caminhoRelativo;
+
+        return is_file($caminhoCompleto) ? $caminhoCompleto : null;
     }
 
     /**

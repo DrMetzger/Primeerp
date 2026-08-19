@@ -804,6 +804,63 @@ function processar_upload_logo_cliente(\PDO $pdo, int $clienteId): ?string
 }
 
 /**
+ * Processa o upload do timbrado (cabeçalho OU rodapé) real do PDF -- ver
+ * src/PdfExport.php, configuracoes.php. $tipo é 'cabecalho' ou 'rodape',
+ * usado tanto pro nome do campo ($_FILES['timbrado_' . $tipo]) quanto pra
+ * escolher a coluna certa em timbrado_pdf. Só JPG/PNG -- é o que o FPDF
+ * "puro" (sem extensões) sabe decodificar nativamente (nada de WEBP/SVG
+ * aqui, diferente do logo do cliente acima). Opcional: se não veio arquivo
+ * nenhum, não retorna erro (só não troca a imagem já salva). Retorna null
+ * se deu tudo certo, ou uma mensagem de erro pra mostrar via flash_set().
+ */
+function processar_upload_timbrado(\PDO $pdo, string $tipo): ?string
+{
+    $campo = 'timbrado_' . $tipo;
+    if (empty($_FILES[$campo]) || $_FILES[$campo]['error'] === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+
+    $arquivo = $_FILES[$campo];
+    $tiposPermitidos = ['image/jpeg' => 'jpg', 'image/png' => 'png'];
+
+    if ($arquivo['error'] !== UPLOAD_ERR_OK) {
+        return 'Falha no upload da imagem de ' . $tipo . '.';
+    }
+    if ($arquivo['size'] > 5 * 1024 * 1024) {
+        return 'Imagem de ' . $tipo . ' maior que o limite permitido (5MB).';
+    }
+
+    $mime = mime_content_type($arquivo['tmp_name']);
+    if (!isset($tiposPermitidos[$mime])) {
+        return 'Formato não suportado pra ' . $tipo . '. Envie uma imagem JPG ou PNG (é o que o gerador de PDF sabe ler).';
+    }
+
+    $dirTimbrado = __DIR__ . '/../assets/img';
+    foreach (glob($dirTimbrado . '/timbrado-' . $tipo . '.*') as $antigo) {
+        @unlink($antigo);
+    }
+    $nomeArquivo = 'timbrado-' . $tipo . '.' . $tiposPermitidos[$mime];
+    $caminhoDestino = $dirTimbrado . '/' . $nomeArquivo;
+    if (!move_uploaded_file($arquivo['tmp_name'], $caminhoDestino)) {
+        return 'Não foi possível salvar a imagem de ' . $tipo . ' no servidor.';
+    }
+
+    // Cap generoso (largura de banner, não uma foto) -- só pra não guardar
+    // um arquivo do tamanho de uma foto de celular sem necessidade nenhuma,
+    // preservando a proporção (ver redimensionar_imagem_se_necessario()).
+    redimensionar_imagem_se_necessario($caminhoDestino, $mime, 3000, 800);
+
+    $colunaCaminho = $tipo . '_caminho';
+    $colunaDados = $tipo . '_dados';
+    // Backup dos bytes no banco -- mesmo motivo/padrão de logo/foto de
+    // usuário, ver Migrations::restaurarArquivoSeNecessario().
+    $pdo->prepare("UPDATE timbrado_pdf SET $colunaCaminho = ?, $colunaDados = ? WHERE id = 1")
+        ->execute(['assets/img/' . $nomeArquivo, file_get_contents($caminhoDestino)]);
+
+    return null;
+}
+
+/**
  * Salva um upload genérico na tabela documentos -- extraído pra ser
  * reaproveitado tanto pelo upload "solto" (aba Setores/Visão geral) quanto
  * por um anexo de proposta de desenvolvimento (que quer o mesmo
