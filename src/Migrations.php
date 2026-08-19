@@ -1037,6 +1037,26 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
 
+        // Cada análise agora vira um CARD independente (visualizar/editar/
+        // excluir/exportar cada uma na hora, ver cliente.php) em vez de só a
+        // mais recente aparecer na tela -- por isso "editar" passou a
+        // ATUALIZAR o próprio registro (não insere mais uma versão nova no
+        // histórico a cada edição). 'tipo' separa duas análises com
+        // propósito e tom BEM diferentes: 'risco' é uso interno da Prime
+        // (nível de risco de perda do cliente, sem filtro de linguagem) e
+        // 'melhorias' é um relatório com tom profissional pensado pra ser
+        // ENTREGUE ao próprio cliente (nunca menciona risco de cancelamento,
+        // atendente específico ou qualquer comentário interno). 'setor_id'
+        // NULL = análise do cliente inteiro; preenchido = só daquele setor
+        // (ON DELETE SET NULL -- se o setor for excluído depois, a análise
+        // não se perde, só perde o escopo específico).
+        $pdo->exec("ALTER TABLE cliente_analise_risco ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'risco' COMMENT 'risco (interno) ou melhorias (relatorio pro cliente)' AFTER cliente_id");
+        $pdo->exec("ALTER TABLE cliente_analise_risco ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'NULL = cliente inteiro' AFTER tipo");
+        $pdo->exec("ALTER TABLE cliente_analise_risco ADD COLUMN IF NOT EXISTS atualizado_em DATETIME NULL COMMENT 'Preenchido só quando o card é editado depois de gerado' AFTER criado_em");
+        if (!$pdo->query("SHOW KEYS FROM cliente_analise_risco WHERE Key_name = 'fk_analise_risco_setor'")->fetch()) {
+            $pdo->exec('ALTER TABLE cliente_analise_risco ADD CONSTRAINT fk_analise_risco_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE SET NULL');
+        }
+
         // Timbrado (cabeçalho/rodapé) real do PDF (ver src/PdfExport.php) --
         // linha única (id sempre 1) com os arquivos enviados pela tela
         // configuracoes.php. Enquanto ninguém subir os arquivos, PdfExport

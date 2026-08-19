@@ -807,13 +807,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // --- Aba "Análise de Risco" -------------------------------------------
     // Mesma chave Gemini de análise de sempre (AiSugestoes::gerar(), só lê
     // dados JÁ CADASTRADOS -- nunca busca na internet, fica 100% no plano
-    // gratuito). Monta um raio-x do histórico de chamados do cliente
-    // (volume, prioridade, tempo de atendimento, tendência mensal, o que
-    // está aberto há mais tempo sem solução) e pede pra IA apontar o risco
-    // de perda desse cliente e sugestões de melhoria no nosso atendimento.
+    // gratuito). Monta um raio-x do histórico de chamados (do cliente
+    // inteiro ou só de um setor, ver $setorIdAnaliseRisco) e pede pra IA um
+    // de dois tipos de documento BEM diferentes -- ver $tipoAnaliseRisco:
+    // 'risco' é uso interno da Prime (nível de risco de perda do cliente,
+    // sinais preocupantes, sugestões de melhoria NO NOSSO atendimento);
+    // 'melhorias' é um relatório pra ENTREGAR ao próprio cliente (tom
+    // profissional, sem mencionar risco de cancelamento nem atendente
+    // específico -- pedido explícito do Kleber pra nunca vazar linguagem
+    // interna num documento que o cliente vai ler).
     if ($acao === 'gerar_analise_risco') {
         $ehAjaxAnaliseRisco = ($_POST['ajax'] ?? '') === '1';
+        $tipoAnaliseRisco = ($_POST['tipo'] ?? '') === 'melhorias' ? 'melhorias' : 'risco';
+        $setorIdAnaliseRisco = (int) ($_POST['setor_id'] ?? 0) ?: null;
         $respostaAnaliseRisco = ['sucesso' => false, 'mensagem' => 'Não foi possível gerar a análise.', 'analise' => null, 'gerado_em' => null];
+
+        $nomeSetorAnaliseRisco = null;
+        if ($setorIdAnaliseRisco) {
+            $stmtSetorAnaliseRisco = $pdo->prepare('SELECT nome FROM setores WHERE id = ? AND cliente_id = ?');
+            $stmtSetorAnaliseRisco->execute([$setorIdAnaliseRisco, $clienteId]);
+            $nomeSetorAnaliseRisco = $stmtSetorAnaliseRisco->fetchColumn() ?: null;
+            if (!$nomeSetorAnaliseRisco) {
+                $setorIdAnaliseRisco = null;
+            }
+        }
+        $escopoAnaliseRisco = $nomeSetorAnaliseRisco ? "setor \"{$nomeSetorAnaliseRisco}\" do cliente \"{$cliente['nome']}\"" : "cliente \"{$cliente['nome']}\" (todos os setores)";
+        $filtroSetorSql = $setorIdAnaliseRisco ? ' AND setor_id = ?' : '';
+        $parametrosFiltroSetor = $setorIdAnaliseRisco ? [$clienteId, $setorIdAnaliseRisco] : [$clienteId];
 
         $stmtAgregadoRisco = $pdo->prepare("
             SELECT
@@ -826,79 +846,100 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 SUM(prioridade = 'alta') AS altas,
                 SUM(criado_em >= DATE_SUB(NOW(), INTERVAL 90 DAY)) AS ultimos_90_dias,
                 AVG(CASE WHEN fechado_em IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, criado_em, fechado_em) END) AS tempo_medio_min
-            FROM chamados WHERE cliente_id = ?
+            FROM chamados WHERE cliente_id = ?{$filtroSetorSql}
         ");
-        $stmtAgregadoRisco->execute([$clienteId]);
+        $stmtAgregadoRisco->execute($parametrosFiltroSetor);
         $agregadoRisco = $stmtAgregadoRisco->fetch();
 
         $stmtTendenciaRisco = $pdo->prepare("
             SELECT DATE_FORMAT(criado_em, '%Y-%m') AS mes, COUNT(*) AS qtd
-            FROM chamados WHERE cliente_id = ? AND criado_em >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+            FROM chamados WHERE cliente_id = ?{$filtroSetorSql} AND criado_em >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
             GROUP BY mes ORDER BY mes ASC
         ");
-        $stmtTendenciaRisco->execute([$clienteId]);
+        $stmtTendenciaRisco->execute($parametrosFiltroSetor);
         $tendenciaRisco = $stmtTendenciaRisco->fetchAll();
 
         $stmtAbertosAntigosRisco = $pdo->prepare("
             SELECT titulo, status, prioridade, criado_em FROM chamados
-            WHERE cliente_id = ? AND status != 'fechado'
+            WHERE cliente_id = ?{$filtroSetorSql} AND status != 'fechado'
             ORDER BY criado_em ASC LIMIT 5
         ");
-        $stmtAbertosAntigosRisco->execute([$clienteId]);
+        $stmtAbertosAntigosRisco->execute($parametrosFiltroSetor);
         $abertosAntigosRisco = $stmtAbertosAntigosRisco->fetchAll();
 
-        $stmtRecentesRisco = $pdo->prepare('SELECT titulo, categoria, status, prioridade, criado_em, fechado_em FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC LIMIT 25');
-        $stmtRecentesRisco->execute([$clienteId]);
+        $stmtRecentesRisco = $pdo->prepare("SELECT titulo, categoria, status, prioridade, criado_em, fechado_em FROM chamados WHERE cliente_id = ?{$filtroSetorSql} ORDER BY criado_em DESC LIMIT 25");
+        $stmtRecentesRisco->execute($parametrosFiltroSetor);
         $recentesRisco = $stmtRecentesRisco->fetchAll();
 
         $stmtTreinamentosRisco = $pdo->prepare("SELECT COUNT(*) FROM treinamentos WHERE cliente_id = ? AND data_inicio >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)");
         $stmtTreinamentosRisco->execute([$clienteId]);
         $treinamentosRecentesRisco = (int) $stmtTreinamentosRisco->fetchColumn();
 
-        $prompt = "Você é um consultor de Customer Success de uma consultoria de ERP (TOTVS Protheus). "
-            . "Com base nos dados abaixo sobre o cliente \"{$cliente['nome']}\", avalie o RISCO desse cliente cancelar ou "
-            . "deixar de renovar o contrato, e responda em português, em Markdown, com estas seções:\n"
-            . "## Nível de risco\nUma palavra (Baixo, Médio, Alto ou Crítico) seguida de 1-2 frases justificando.\n"
-            . "## Sinais de risco identificados\nLista dos padrões preocupantes que você viu nos dados (se não houver nenhum, diga isso).\n"
-            . "## Sugestões de melhoria\nAções concretas de melhoria no NOSSO atendimento e/ou processo pra reduzir esse risco.\n\n"
-            . "Resumo geral de chamados desse cliente:\n"
-            . "- Total de chamados: {$agregadoRisco['total']}\n"
-            . "- Abertos: {$agregadoRisco['abertos']} | Aguardando nossa equipe: {$agregadoRisco['aguardando_equipe']} | Aguardando o cliente: {$agregadoRisco['aguardando_cliente']} | Fechados: {$agregadoRisco['fechados']}\n"
-            . "- Prioridade urgente: {$agregadoRisco['urgentes']} | Prioridade alta: {$agregadoRisco['altas']}\n"
-            . "- Chamados nos últimos 90 dias: {$agregadoRisco['ultimos_90_dias']}\n"
-            . "- Tempo médio de atendimento (abertura até fechamento): " . ($agregadoRisco['tempo_medio_min'] !== null ? formatar_duracao_minutos((float) $agregadoRisco['tempo_medio_min']) : 'sem chamados fechados ainda') . "\n"
-            . "- Treinamentos/reuniões nos últimos 6 meses: {$treinamentosRecentesRisco}\n\n"
-            . "Tendência mensal de chamados abertos (últimos 6 meses, mês/quantidade):\n";
-        foreach ($tendenciaRisco as $t) {
-            $prompt .= "- {$t['mes']}: {$t['qtd']}\n";
-        }
-        if (!$tendenciaRisco) {
-            $prompt .= "(nenhum chamado nos últimos 6 meses)\n";
-        }
-        $prompt .= "\nChamados ainda NÃO fechados, do mais antigo pro mais novo (título / status / prioridade / aberto em):\n";
-        foreach ($abertosAntigosRisco as $a) {
-            $prompt .= "- {$a['titulo']} | {$a['status']} | {$a['prioridade']} | " . formatar_data($a['criado_em']) . "\n";
-        }
-        if (!$abertosAntigosRisco) {
-            $prompt .= "(nenhum chamado aberto no momento)\n";
-        }
-        $prompt .= "\nÚltimos chamados (título / categoria / status / prioridade / aberto em / fechado em):\n";
-        foreach ($recentesRisco as $r) {
-            $prompt .= "- {$r['titulo']} | {$r['categoria']} | {$r['status']} | {$r['prioridade']} | " . formatar_data($r['criado_em']) . ' | ' . ($r['fechado_em'] ? formatar_data($r['fechado_em']) : 'ainda não fechado') . "\n";
-        }
-        if (!$recentesRisco) {
-            $prompt .= "(nenhum chamado registrado ainda)\n";
+        if ($tipoAnaliseRisco === 'melhorias') {
+            $prompt = "Você é um consultor de processos redigindo um RELATÓRIO OFICIAL que será entregue diretamente ao {$escopoAnaliseRisco}. "
+                . "ATENÇÃO: esse texto vai ser lido pelo cliente -- use um tom profissional, construtivo e respeitoso. "
+                . "NUNCA mencione risco de cancelamento/perda do cliente, NUNCA cite nome de atendente específico da Prime, "
+                . "NUNCA faça comentário interno, negativo ou fora de contexto sobre nossa equipe ou processo interno. "
+                . "Baseado nos temas mais recorrentes dos chamados abaixo, responda em português, em Markdown, com estas seções:\n"
+                . "## Resumo\n2-3 frases sobre como está o uso do sistema/processo nessa área.\n"
+                . "## Oportunidades de melhoria identificadas\nPadrões ou temas recorrentes que sugerem espaço pra melhorar (ex.: retrabalho, dúvidas repetidas, processo manual que poderia ser automatizado).\n"
+                . "## Recomendações\nAções práticas que O CLIENTE pode tomar (treinamento da equipe dele, revisão de processo interno, boas práticas de uso do ERP).\n\n"
+                . "Temas dos chamados mais recentes (título / categoria):\n";
+            foreach ($recentesRisco as $r) {
+                $prompt .= "- {$r['titulo']} | {$r['categoria']}\n";
+            }
+            if (!$recentesRisco) {
+                $prompt .= "(nenhum chamado registrado ainda)\n";
+            }
+        } else {
+            $prompt = "Você é um consultor de Customer Success de uma consultoria de ERP (TOTVS Protheus). "
+                . "Com base nos dados abaixo sobre o {$escopoAnaliseRisco}, avalie o RISCO desse cliente cancelar ou "
+                . "deixar de renovar o contrato, e responda em português, em Markdown, com estas seções:\n"
+                . "## Nível de risco\nUma palavra (Baixo, Médio, Alto ou Crítico) seguida de 1-2 frases justificando.\n"
+                . "## Sinais de risco identificados\nLista dos padrões preocupantes que você viu nos dados (se não houver nenhum, diga isso).\n"
+                . "## Sugestões de melhoria\nAções concretas de melhoria no NOSSO atendimento e/ou processo pra reduzir esse risco.\n\n"
+                . "Resumo geral de chamados:\n"
+                . "- Total de chamados: {$agregadoRisco['total']}\n"
+                . "- Abertos: {$agregadoRisco['abertos']} | Aguardando nossa equipe: {$agregadoRisco['aguardando_equipe']} | Aguardando o cliente: {$agregadoRisco['aguardando_cliente']} | Fechados: {$agregadoRisco['fechados']}\n"
+                . "- Prioridade urgente: {$agregadoRisco['urgentes']} | Prioridade alta: {$agregadoRisco['altas']}\n"
+                . "- Chamados nos últimos 90 dias: {$agregadoRisco['ultimos_90_dias']}\n"
+                . "- Tempo médio de atendimento (abertura até fechamento): " . ($agregadoRisco['tempo_medio_min'] !== null ? formatar_duracao_minutos((float) $agregadoRisco['tempo_medio_min']) : 'sem chamados fechados ainda') . "\n"
+                . "- Treinamentos/reuniões nos últimos 6 meses: {$treinamentosRecentesRisco}\n\n"
+                . "Tendência mensal de chamados abertos (últimos 6 meses, mês/quantidade):\n";
+            foreach ($tendenciaRisco as $t) {
+                $prompt .= "- {$t['mes']}: {$t['qtd']}\n";
+            }
+            if (!$tendenciaRisco) {
+                $prompt .= "(nenhum chamado nos últimos 6 meses)\n";
+            }
+            $prompt .= "\nChamados ainda NÃO fechados, do mais antigo pro mais novo (título / status / prioridade / aberto em):\n";
+            foreach ($abertosAntigosRisco as $a) {
+                $prompt .= "- {$a['titulo']} | {$a['status']} | {$a['prioridade']} | " . formatar_data($a['criado_em']) . "\n";
+            }
+            if (!$abertosAntigosRisco) {
+                $prompt .= "(nenhum chamado aberto no momento)\n";
+            }
+            $prompt .= "\nÚltimos chamados (título / categoria / status / prioridade / aberto em / fechado em):\n";
+            foreach ($recentesRisco as $r) {
+                $prompt .= "- {$r['titulo']} | {$r['categoria']} | {$r['status']} | {$r['prioridade']} | " . formatar_data($r['criado_em']) . ' | ' . ($r['fechado_em'] ? formatar_data($r['fechado_em']) : 'ainda não fechado') . "\n";
+            }
+            if (!$recentesRisco) {
+                $prompt .= "(nenhum chamado registrado ainda)\n";
+            }
         }
 
         $resultadoIaRisco = AiSugestoes::gerar($prompt);
         if (!$resultadoIaRisco['ok']) {
             $respostaAnaliseRisco['mensagem'] = 'Não foi possível gerar a análise: ' . $resultadoIaRisco['erro'];
         } else {
-            $pdo->prepare('INSERT INTO cliente_analise_risco (cliente_id, analise, criado_por) VALUES (?, ?, ?)')
-                ->execute([$clienteId, $resultadoIaRisco['texto'], Auth::userId()]);
+            $pdo->prepare('INSERT INTO cliente_analise_risco (cliente_id, tipo, setor_id, analise, criado_por) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$clienteId, $tipoAnaliseRisco, $setorIdAnaliseRisco, $resultadoIaRisco['texto'], Auth::userId()]);
             $respostaAnaliseRisco = [
                 'sucesso' => true,
                 'mensagem' => 'Análise gerada.',
+                'id' => (int) $pdo->lastInsertId(),
+                'tipo' => $tipoAnaliseRisco,
+                'setor_nome' => $nomeSetorAnaliseRisco,
                 'analise' => $resultadoIaRisco['texto'],
                 'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
             ];
@@ -913,39 +954,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set($respostaAnaliseRisco['sucesso'] ? 'sucesso' : 'erro', $respostaAnaliseRisco['mensagem']);
     }
 
-    // Salva o texto da análise de risco como está na textarea (inclui
-    // qualquer edição manual) -- mesmo padrão de salvar_edicao_sugestao_
-    // implantacao, vira uma nova entrada no histórico (aparece como a mais
-    // recente).
-    if ($acao === 'salvar_edicao_analise_risco') {
-        $textoSalvarAnaliseRisco = trim($_POST['texto'] ?? '');
-        if ($textoSalvarAnaliseRisco === '') {
+    // Cada análise agora é um CARD independente (ver aba Análise de Risco)
+    // -- editar ATUALIZA o próprio registro (id), não cria mais uma versão
+    // nova no histórico.
+    if ($acao === 'atualizar_analise_risco') {
+        $idAtualizarAnaliseRisco = (int) ($_POST['id'] ?? 0);
+        $textoAtualizarAnaliseRisco = trim($_POST['texto'] ?? '');
+        if ($textoAtualizarAnaliseRisco === '') {
             flash_set('erro', 'Não tem texto pra salvar.');
         } else {
-            $pdo->prepare('INSERT INTO cliente_analise_risco (cliente_id, analise, criado_por) VALUES (?, ?, ?)')
-                ->execute([$clienteId, $textoSalvarAnaliseRisco, Auth::userId()]);
+            $pdo->prepare('UPDATE cliente_analise_risco SET analise = ?, atualizado_em = NOW() WHERE id = ? AND cliente_id = ?')
+                ->execute([$textoAtualizarAnaliseRisco, $idAtualizarAnaliseRisco, $clienteId]);
             flash_set('sucesso', 'Alterações salvas.');
         }
     }
 
-    // Exporta a análise de risco em PDF, com o mesmo timbrado usado em
-    // qualquer outro export do sistema (ver src/PdfExport.php) -- mesmo
-    // padrão de exportar_pdf_sugestao_implantacao (exporta o texto que veio
-    // no POST, direto da textarea, pra incluir qualquer edição manual não
-    // salva ainda).
+    // Exclui um card de análise específico -- sem confirmação server-side
+    // (o JS já pede confirm() antes de mandar o POST).
+    if ($acao === 'excluir_analise_risco') {
+        $idExcluirAnaliseRisco = (int) ($_POST['id'] ?? 0);
+        $pdo->prepare('DELETE FROM cliente_analise_risco WHERE id = ? AND cliente_id = ?')->execute([$idExcluirAnaliseRisco, $clienteId]);
+        flash_set('sucesso', 'Análise excluída.');
+    }
+
+    // Exporta uma análise (de risco OU melhorias, cliente inteiro ou setor)
+    // em PDF, com o mesmo timbrado usado em qualquer outro export do
+    // sistema (ver src/PdfExport.php) -- exporta o texto que veio no POST
+    // direto do card/modal, pra incluir qualquer edição manual não salva
+    // ainda.
     if ($acao === 'exportar_pdf_analise_risco') {
         $textoAnaliseRiscoPdf = (string) ($_POST['texto'] ?? '');
+        $labelAnaliseRiscoPdf = trim((string) ($_POST['label'] ?? 'Análise de Risco'));
 
         if ($textoAnaliseRiscoPdf === '') {
             http_response_code(400);
             die('Nada pra exportar.');
         }
 
-        $pdfAnaliseRisco = new PdfExport('Análise de Risco - ' . $cliente['nome']);
+        $pdfAnaliseRisco = new PdfExport($labelAnaliseRiscoPdf . ' - ' . $cliente['nome']);
         $pdfAnaliseRisco->subtitulo('Gerado em ' . formatar_data(date('Y-m-d H:i:s')));
         $pdfAnaliseRisco->escreverMarkdown($textoAnaliseRiscoPdf);
 
-        $nomeArquivoAnaliseRiscoPdf = 'analise-risco-' . preg_replace('/[^a-z0-9]+/i', '-', $cliente['nome']) . '-' . $clienteId . '.pdf';
+        $nomeArquivoAnaliseRiscoPdf = preg_replace('/[^a-z0-9]+/i', '-', $labelAnaliseRiscoPdf . '-' . $cliente['nome']) . '-' . $clienteId . '.pdf';
         header('Content-Type: application/pdf');
         header('Content-Disposition: attachment; filename="' . $nomeArquivoAnaliseRiscoPdf . '"');
         echo $pdfAnaliseRisco->bytes();
@@ -2155,11 +2205,21 @@ $etapasImplantacao = $pdo->prepare('SELECT * FROM implantacao_etapas WHERE clien
 $etapasImplantacao->execute([$clienteId]);
 $etapasImplantacao = $etapasImplantacao->fetchAll();
 
-// Só a análise de risco mais recente -- cada geração fica no histórico
-// (cliente_analise_risco), mas a tela só mostra a última.
-$stmtAnaliseRiscoAtual = $pdo->prepare('SELECT * FROM cliente_analise_risco WHERE cliente_id = ? ORDER BY criado_em DESC LIMIT 1');
-$stmtAnaliseRiscoAtual->execute([$clienteId]);
-$analiseRiscoAtual = $stmtAnaliseRiscoAtual->fetch() ?: null;
+// TODAS as análises já geradas (risco e melhorias, cliente inteiro ou por
+// setor) -- cada uma vira um card na aba Análise de Risco, separadas por
+// tipo (ver $analisesRiscoPorTipo).
+$stmtAnalisesRisco = $pdo->prepare("
+    SELECT r.*, s.nome AS setor_nome
+    FROM cliente_analise_risco r
+    LEFT JOIN setores s ON s.id = r.setor_id
+    WHERE r.cliente_id = ?
+    ORDER BY r.criado_em DESC
+");
+$stmtAnalisesRisco->execute([$clienteId]);
+$analisesRiscoPorTipo = ['risco' => [], 'melhorias' => []];
+foreach ($stmtAnalisesRisco->fetchAll() as $a) {
+    $analisesRiscoPorTipo[$a['tipo'] === 'melhorias' ? 'melhorias' : 'risco'][] = $a;
+}
 
 // Só a sugestão mais recente DE CADA TIPO (ORDER BY criado_em DESC + ??=
 // pega a primeira ocorrência de cada tipo, que é a mais nova).
@@ -3234,32 +3294,89 @@ require __DIR__ . '/templates/header.php';
 
     <!-- ANÁLISE DE RISCO -->
     <div class="tab-pane" id="analise-risco">
-        <p class="text-muted small mb-1"><i class="bi bi-stars"></i> A IA analisa o histórico de chamados desse cliente (volume, prioridade, tempo de atendimento, tendência dos últimos meses e o que está aberto há mais tempo) e aponta o risco de perder esse cliente, com sugestões de melhoria no nosso atendimento.</p>
+        <p class="text-muted small mb-1"><i class="bi bi-stars"></i> A IA analisa o histórico de chamados (do cliente inteiro ou só de um setor) e gera dois tipos BEM diferentes de documento: <strong>Risco</strong> (uso interno da Prime -- nível de risco de perder o cliente e sugestões pro nosso atendimento) e <strong>Melhorias</strong> (relatório com tom profissional, pensado pra ser entregue direto ao cliente).</p>
         <p class="text-muted small mb-3">Mesma IA (Gemini, plano gratuito) já usada nas sugestões de Setores e Implantação -- só lê dados já cadastrados no sistema, nunca busca na internet.</p>
 
-        <form method="post" class="mb-3 form-gerar-analise-risco">
+        <form method="post" class="row g-2 align-items-end mb-4 form-gerar-analise-risco">
             <?= csrf_field() ?>
             <input type="hidden" name="acao" value="gerar_analise_risco">
-            <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $analiseRiscoAtual ? 'Gerar de novo' : 'Gerar análise' ?></button>
-            <?php if (!AiSugestoes::configurada()): ?><span class="text-muted small ms-2">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span><?php endif; ?>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">Tipo de análise</label>
+                <select name="tipo" class="form-select form-select-sm">
+                    <option value="risco">Risco (uso interno)</option>
+                    <option value="melhorias">Melhorias (relatório pro cliente)</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">Escopo</label>
+                <select name="setor_id" class="form-select form-select-sm">
+                    <option value="">Cliente inteiro (todos os setores)</option>
+                    <?php foreach ($setores as $s): ?>
+                        <option value="<?= $s['id'] ?>"><?= e($s['nome']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-sm btn-dark w-100" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> Gerar análise</button>
+            </div>
+            <?php if (!AiSugestoes::configurada()): ?><div class="col-12"><span class="text-muted small">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span></div><?php endif; ?>
         </form>
 
-        <div id="resultadoAnaliseRisco">
-        <?php if ($analiseRiscoAtual): ?>
-            <div class="card card-stat">
-                <div class="card-body">
-                    <p class="text-muted small mb-2">Gerado em <?= formatar_data($analiseRiscoAtual['criado_em']) ?></p>
-                    <textarea class="form-control form-control-sm textarea-analise-risco mb-2" rows="16"><?= e($analiseRiscoAtual['analise']) ?></textarea>
-                    <div class="d-flex gap-2 flex-wrap">
-                        <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise-risco"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>
-                        <button type="button" class="btn btn-sm btn-outline-dark botao-salvar-edicao-analise-risco"><i class="bi bi-save"></i> Salvar alterações</button>
+        <?php foreach (['risco' => ['Análises de Risco', 'uso interno da Prime', 'bg-danger'], 'melhorias' => ['Análises de Melhorias', 'relatório pro cliente', 'bg-success']] as $tipoSecaoAnalise => [$tituloSecaoAnalise, $legendaSecaoAnalise, $corBadgeSecaoAnalise]): ?>
+        <h6 class="text-muted text-uppercase small fw-bold mb-1"><?= $tituloSecaoAnalise ?></h6>
+        <p class="text-muted small mb-2"><?= $legendaSecaoAnalise ?></p>
+        <div class="row g-3 mb-4" id="gridAnalise<?= e($tipoSecaoAnalise) ?>">
+        <?php if (!$analisesRiscoPorTipo[$tipoSecaoAnalise]): ?>
+            <div class="col-12"><p class="text-muted text-center py-3 mb-0">Nenhuma análise de <?= mb_strtolower($tituloSecaoAnalise) ?> gerada ainda.</p></div>
+        <?php else: foreach ($analisesRiscoPorTipo[$tipoSecaoAnalise] as $a): ?>
+            <div class="col-md-6 col-lg-4">
+                <div class="card card-stat analise-card h-100" data-id="<?= $a['id'] ?>" data-tipo="<?= e($a['tipo']) ?>" data-label="<?= e($tituloSecaoAnalise . ($a['setor_nome'] ? ' - ' . $a['setor_nome'] : '')) ?>">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="badge <?= $corBadgeSecaoAnalise ?>"><?= e($a['setor_nome'] ?: 'Cliente inteiro') ?></span>
+                            <span class="text-muted small text-end"><?= formatar_data($a['criado_em']) ?><?= $a['atualizado_em'] ? '<br>editado em ' . formatar_data($a['atualizado_em']) : '' ?></span>
+                        </div>
+                        <p class="small mb-3 flex-grow-1" style="white-space:pre-wrap;"><?= e(mb_substr($a['analise'], 0, 220)) ?><?= mb_strlen($a['analise']) > 220 ? '...' : '' ?></p>
+                        <textarea class="d-none analise-texto-completo"><?= e($a['analise']) ?></textarea>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise"><i class="bi bi-eye"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise"><i class="bi bi-pencil"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise"><i class="bi bi-file-earmark-pdf"></i></button>
+                            <form method="post" class="d-inline form-excluir-analise">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="acao" value="excluir_analise_risco">
+                                <input type="hidden" name="aba_retorno" value="analise-risco">
+                                <input type="hidden" name="id" value="<?= $a['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
-        <?php else: ?>
-            <p class="text-muted text-center py-3">Nenhuma análise gerada ainda pra esse cliente.</p>
-        <?php endif; ?>
+        <?php endforeach; endif; ?>
         </div>
+        <?php endforeach; ?>
+    </div>
+
+    <!-- Visualizar/editar uma análise (Risco ou Melhorias) -- um modal só,
+         reaproveitado pelos dois modos (view = readonly, edit = editável),
+         ver JS do botao-visualizar-analise/botao-editar-analise. -->
+    <div class="modal fade" id="modalAnalise" tabindex="-1">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="modalAnaliseTitulo"></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <textarea class="form-control" id="modalAnaliseTexto" rows="18"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-dark" id="botaoModalAnaliseExportarPdf"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>
+            <button type="button" class="btn btn-sm btn-dark d-none" id="botaoModalAnaliseSalvar"><i class="bi bi-save"></i> Salvar alterações</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- SETORES -->
@@ -5602,40 +5719,34 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // Aba "Análise de Risco" -- mesmo padrão AJAX de cima (form-gerar-
-    // sugestao-ia), mas renderiza com textarea editável + Exportar PDF/
-    // Salvar alterações, igual a Implantação (ver botao-exportar-pdf-
-    // implantacao/botao-salvar-edicao-implantacao abaixo), porque aqui dá
-    // pra querer ajustar o texto antes de mandar pro cliente/gestão.
+    // Aba "Análise de Risco" -- cada geração vira um CARD novo na grade
+    // certa (risco ou melhorias), sem apagar os anteriores. Visualizar/
+    // Editar abrem o mesmo modal (#modalAnalise); Exportar PDF funciona
+    // tanto direto do card quanto de dentro do modal; Excluir é um form
+    // comum (confirm() abaixo).
     document.querySelectorAll('.form-gerar-analise-risco').forEach(function (form) {
         form.addEventListener('submit', function (e) {
             e.preventDefault();
             e.stopPropagation();
-            mostrarCarregando('Gerando análise de risco...', true);
+            mostrarCarregando('Gerando análise...', true);
 
             var dados = new FormData(form);
             dados.set('ajax', '1');
-            var alvo = document.getElementById('resultadoAnaliseRisco');
+            var tipoSelecionado = form.querySelector('[name="tipo"]').value;
+            var setorSelecionado = form.querySelector('[name="setor_id"]');
+            var setorNomeSelecionado = setorSelecionado.selectedIndex > 0 ? setorSelecionado.options[setorSelecionado.selectedIndex].text : null;
 
             fetch(window.location.href, { method: 'POST', body: dados })
                 .then(function (resp) { return resp.json(); })
                 .then(function (json) {
-                    if (!alvo) return;
-                    if (json.sucesso) {
-                        alvo.innerHTML = '<div class="card card-stat"><div class="card-body">'
-                            + '<p class="text-muted small mb-2">Gerado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
-                            + '<textarea class="form-control form-control-sm textarea-analise-risco mb-2" rows="16">' + escaparHtmlCalendario(json.analise) + '</textarea>'
-                            + '<div class="d-flex gap-2 flex-wrap">'
-                            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise-risco"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>'
-                            + '<button type="button" class="btn btn-sm btn-outline-dark botao-salvar-edicao-analise-risco"><i class="bi bi-save"></i> Salvar alterações</button>'
-                            + '</div></div></div>';
-                        form.querySelector('button[type="submit"]').innerHTML = '<i class="bi bi-stars"></i> Gerar de novo';
-                    } else {
-                        alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
+                    if (!json.sucesso) {
+                        alert(json.mensagem || 'Não foi possível gerar a análise.');
+                        return;
                     }
+                    adicionarCardAnalise(tipoSelecionado, json.id, setorNomeSelecionado, json.gerado_em, json.analise);
                 })
                 .catch(function (erro) {
-                    if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a análise: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                    alert('Falha de conexão ao gerar a análise: ' + String(erro));
                 })
                 .finally(function () {
                     escondercarregando();
@@ -5643,14 +5754,104 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // "Exportar PDF" e "Salvar alterações" da análise de risco -- delegado
-    // no document (mesmo motivo do implantação: o botão é recriado
-    // dinamicamente depois de gerar uma análise nova via AJAX acima).
+    function tituloSecaoAnalise(tipo) {
+        return tipo === 'melhorias' ? 'Análises de Melhorias' : 'Análises de Risco';
+    }
+
+    function adicionarCardAnalise(tipo, id, setorNome, geradoEm, texto) {
+        var grade = document.getElementById('gridAnalise' + tipo);
+        if (!grade) return;
+
+        var placeholder = grade.querySelector('.col-12');
+        if (placeholder) placeholder.remove();
+
+        var preview = texto.length > 220 ? texto.slice(0, 220) + '...' : texto;
+        var corBadge = tipo === 'melhorias' ? 'bg-success' : 'bg-danger';
+        var label = tituloSecaoAnalise(tipo) + (setorNome ? ' - ' + setorNome : '');
+
+        var col = document.createElement('div');
+        col.className = 'col-md-6 col-lg-4';
+        col.innerHTML = '<div class="card card-stat analise-card h-100" data-id="' + id + '" data-tipo="' + tipo + '" data-label="' + escaparHtmlCalendario(label) + '">'
+            + '<div class="card-body d-flex flex-column">'
+            + '<div class="d-flex justify-content-between align-items-start mb-2">'
+            + '<span class="badge ' + corBadge + '">' + escaparHtmlCalendario(setorNome || 'Cliente inteiro') + '</span>'
+            + '<span class="text-muted small text-end">' + escaparHtmlCalendario(geradoEm) + '</span>'
+            + '</div>'
+            + '<p class="small mb-3 flex-grow-1" style="white-space:pre-wrap;">' + escaparHtmlCalendario(preview) + '</p>'
+            + '<textarea class="d-none analise-texto-completo">' + escaparHtmlCalendario(texto) + '</textarea>'
+            + '<div class="d-flex gap-2 flex-wrap">'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise"><i class="bi bi-eye"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise"><i class="bi bi-file-earmark-pdf"></i></button>'
+            + '<form method="post" class="d-inline form-excluir-analise">'
+            + '<?= csrf_field() ?>'
+            + '<input type="hidden" name="acao" value="excluir_analise_risco">'
+            + '<input type="hidden" name="aba_retorno" value="analise-risco">'
+            + '<input type="hidden" name="id" value="' + id + '">'
+            + '<button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>'
+            + '</form></div></div></div>';
+        grade.insertBefore(col, grade.firstChild);
+    }
+
+    var modalAnalise = document.getElementById('modalAnalise');
+    var modalAnaliseTexto = document.getElementById('modalAnaliseTexto');
+    var botaoModalAnaliseSalvar = document.getElementById('botaoModalAnaliseSalvar');
+
+    function abrirModalAnalise(card, modoEdicao) {
+        var textoCompleto = card.querySelector('.analise-texto-completo').value;
+        modalAnalise.dataset.id = card.dataset.id;
+        modalAnalise.dataset.label = card.dataset.label;
+        document.getElementById('modalAnaliseTitulo').textContent = card.dataset.label + (modoEdicao ? ' -- editando' : '');
+        modalAnaliseTexto.value = textoCompleto;
+        modalAnaliseTexto.readOnly = !modoEdicao;
+        botaoModalAnaliseSalvar.classList.toggle('d-none', !modoEdicao);
+        PrimeUI.openModal(modalAnalise);
+    }
+
     document.addEventListener('click', function (e) {
-        var botao = e.target.closest('.botao-exportar-pdf-analise-risco');
-        if (!botao) return;
-        var textarea = document.querySelector('#resultadoAnaliseRisco .textarea-analise-risco');
-        if (!textarea) return;
+        var botaoVer = e.target.closest('.botao-visualizar-analise');
+        if (botaoVer) {
+            abrirModalAnalise(botaoVer.closest('.analise-card'), false);
+            return;
+        }
+        var botaoEditar = e.target.closest('.botao-editar-analise');
+        if (botaoEditar) {
+            abrirModalAnalise(botaoEditar.closest('.analise-card'), true);
+        }
+    });
+
+    if (botaoModalAnaliseSalvar) {
+        botaoModalAnaliseSalvar.addEventListener('click', function () {
+            var formTemp = document.createElement('form');
+            formTemp.method = 'post';
+            formTemp.action = window.location.href;
+            formTemp.innerHTML = '<?= csrf_field() ?>'
+                + '<input type="hidden" name="acao" value="atualizar_analise_risco">'
+                + '<input type="hidden" name="aba_retorno" value="analise-risco">'
+                + '<input type="hidden" name="id" value="' + modalAnalise.dataset.id + '">'
+                + '<input type="hidden" name="texto">';
+            formTemp.querySelector('[name="texto"]').value = modalAnaliseTexto.value;
+            document.body.appendChild(formTemp);
+            formTemp.submit();
+        });
+    }
+
+    // Exportar PDF -- direto do card (usa o texto completo salvo, ignora
+    // qualquer edição não salva) ou de dentro do modal (usa o texto que
+    // está na textarea NA HORA, incluindo edição ainda não salva).
+    document.addEventListener('click', function (e) {
+        var botaoCard = e.target.closest('.botao-exportar-pdf-analise');
+        var label, texto;
+        if (botaoCard) {
+            var card = botaoCard.closest('.analise-card');
+            label = card.dataset.label;
+            texto = card.querySelector('.analise-texto-completo').value;
+        } else if (e.target.closest('#botaoModalAnaliseExportarPdf')) {
+            label = modalAnalise.dataset.label;
+            texto = modalAnaliseTexto.value;
+        } else {
+            return;
+        }
 
         var formTemp = document.createElement('form');
         formTemp.method = 'post';
@@ -5658,29 +5859,21 @@ document.addEventListener('DOMContentLoaded', function () {
         formTemp.target = '_blank';
         formTemp.innerHTML = '<?= csrf_field() ?>'
             + '<input type="hidden" name="acao" value="exportar_pdf_analise_risco">'
+            + '<input type="hidden" name="label">'
             + '<input type="hidden" name="texto">';
-        formTemp.querySelector('[name="texto"]').value = textarea.value;
+        formTemp.querySelector('[name="label"]').value = label;
+        formTemp.querySelector('[name="texto"]').value = texto;
         document.body.appendChild(formTemp);
         formTemp.submit();
         formTemp.remove();
     });
 
-    document.addEventListener('click', function (e) {
-        var botao = e.target.closest('.botao-salvar-edicao-analise-risco');
-        if (!botao) return;
-        var textarea = document.querySelector('#resultadoAnaliseRisco .textarea-analise-risco');
-        if (!textarea) return;
-
-        var formTemp = document.createElement('form');
-        formTemp.method = 'post';
-        formTemp.action = window.location.href;
-        formTemp.innerHTML = '<?= csrf_field() ?>'
-            + '<input type="hidden" name="acao" value="salvar_edicao_analise_risco">'
-            + '<input type="hidden" name="aba_retorno" value="analise-risco">'
-            + '<input type="hidden" name="texto">';
-        formTemp.querySelector('[name="texto"]').value = textarea.value;
-        document.body.appendChild(formTemp);
-        formTemp.submit();
+    document.addEventListener('submit', function (e) {
+        var form = e.target.closest('.form-excluir-analise');
+        if (!form) return;
+        if (!confirm('Excluir essa análise? Não tem como desfazer.')) {
+            e.preventDefault();
+        }
     });
 
     function renderizarResultadoSugestaoImplantacao(tipo, label, json) {
