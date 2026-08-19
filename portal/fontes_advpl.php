@@ -35,8 +35,10 @@ $fontesAdvpl->execute([$clienteId]);
 $fontesAdvpl = $fontesAdvpl->fetchAll();
 
 $fontesAdvplPorSetorNome = [];
+$setorIdPorNome = [];
 foreach ($fontesAdvpl as $f) {
     $fontesAdvplPorSetorNome[$f['setor_nome']][] = $f;
+    $setorIdPorNome[$f['setor_nome']] = $f['setor_id'];
 }
 
 $tituloPagina = 'Fontes ADVPL';
@@ -60,7 +62,10 @@ require __DIR__ . '/../templates/portal_header.php';
 <div id="fontesAdvplGridPortal">
 <?php foreach ($fontesAdvplPorSetorNome as $nomeSetorFonte => $fontesDoSetor): ?>
     <div class="fonte-advpl-grupo">
-        <h6 class="text-muted text-uppercase small fw-bold mt-4 mb-2"><?= e($nomeSetorFonte) ?></h6>
+        <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+            <h6 class="text-muted text-uppercase small fw-bold mb-0"><?= e($nomeSetorFonte) ?></h6>
+            <a href="<?= url('download_fontes_advpl_zip.php?setor_id=' . $setorIdPorNome[$nomeSetorFonte]) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-file-earmark-zip"></i> Baixar tudo (ZIP)</a>
+        </div>
         <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
             <thead><tr><th>Rotina</th><th>Ponto de entrada</th><th>Arquivo</th><th>Data</th><th></th></tr></thead>

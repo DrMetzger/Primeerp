@@ -3551,8 +3551,9 @@ require __DIR__ . '/templates/header.php';
                         </form>
 
                         <?php if ($fontesAdvplSetor): ?>
-                        <div class="mb-3">
+                        <div class="mb-3 d-flex gap-2 align-items-center">
                             <input type="text" class="form-control form-control-sm filtro-fonte-advpl" data-alvo="fontesAdvplTbody<?= $idSetorAtual ?>" placeholder="🔎 Filtrar por rotina, ponto de entrada ou arquivo...">
+                            <a href="<?= url('download_fontes_advpl_zip.php?setor_id=' . $idSetorAtual) ?>" class="btn btn-sm btn-outline-dark text-nowrap"><i class="bi bi-file-earmark-zip"></i> Baixar tudo (ZIP)</a>
                         </div>
                         <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
