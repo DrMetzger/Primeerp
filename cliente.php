@@ -3749,6 +3749,7 @@ require __DIR__ . '/templates/header.php';
                         <div class="d-flex align-items-center gap-2 credencial-senha-linha" data-credencial-id="<?= $cr['id'] ?>">
                             <span class="credencial-senha-valor font-monospace">••••••••</span>
                             <button type="button" class="btn btn-sm btn-outline-dark botao-mostrar-senha" title="Mostrar senha"><i class="bi bi-eye"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-dark botao-copiar-senha" title="Copiar senha"><i class="bi bi-clipboard"></i></button>
                         </div>
                     </td>
                     <td class="text-muted small"><?= e($cr['observacoes'] ?: '-') ?></td>
@@ -4904,13 +4905,33 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // "Mostrar senha" na lista de credenciais -- busca a senha decifrada só
-    // na hora do clique (nunca fica em texto puro no HTML da página), e só
-    // busca uma vez (fica em cache no próprio botão pra alternar
-    // mostrar/ocultar sem bater no servidor de novo nem gerar log repetido).
+    // "Mostrar senha" e "Copiar senha" na lista de credenciais -- busca a
+    // senha decifrada só na hora que alguém realmente precisa dela (nunca
+    // fica em texto puro no HTML da página), e só busca uma vez (fica em
+    // cache no próprio elemento pra alternar mostrar/ocultar ou copiar de
+    // novo sem bater no servidor nem gerar log repetido).
     var tabelaCredenciais = document.getElementById('tabelaCredenciais');
     if (tabelaCredenciais) {
         var csrfVerSenha = tabelaCredenciais.dataset.csrfVerSenha;
+
+        var obterSenhaReal = function (linha, valorSpan) {
+            if (valorSpan.dataset.senhaReal !== undefined) {
+                return Promise.resolve(valorSpan.dataset.senhaReal);
+            }
+            var dados = new URLSearchParams();
+            dados.set('csrf_token', csrfVerSenha);
+            dados.set('id', linha.dataset.credencialId);
+            return fetch('<?= url('ver_credencial.php') ?>', { method: 'POST', body: dados })
+                .then(function (r) { return r.json(); })
+                .then(function (json) {
+                    if (!json.sucesso) {
+                        throw new Error(json.mensagem || 'Não foi possível buscar a senha.');
+                    }
+                    valorSpan.dataset.senhaReal = json.senha || '(sem senha cadastrada)';
+                    return valorSpan.dataset.senhaReal;
+                });
+        };
+
         tabelaCredenciais.querySelectorAll('.botao-mostrar-senha').forEach(function (botao) {
             botao.addEventListener('click', function () {
                 var linha = botao.closest('.credencial-senha-linha');
@@ -4923,22 +4944,29 @@ document.addEventListener('DOMContentLoaded', function () {
                     return;
                 }
 
-                var dados = new URLSearchParams();
-                dados.set('csrf_token', csrfVerSenha);
-                dados.set('id', linha.dataset.credencialId);
+                obterSenhaReal(linha, valorSpan).then(function (senha) {
+                    valorSpan.textContent = senha;
+                    botao.querySelector('i').className = 'bi bi-eye-slash';
+                }).catch(function (e) { alert(e.message || 'Falha ao buscar a senha. Tente de novo.'); });
+            });
+        });
 
-                fetch('<?= url('ver_credencial.php') ?>', { method: 'POST', body: dados })
-                    .then(function (r) { return r.json(); })
-                    .then(function (json) {
-                        if (!json.sucesso) {
-                            alert(json.mensagem || 'Não foi possível mostrar a senha.');
-                            return;
-                        }
-                        valorSpan.dataset.senhaReal = json.senha || '(sem senha cadastrada)';
-                        valorSpan.textContent = valorSpan.dataset.senhaReal;
-                        botao.querySelector('i').className = 'bi bi-eye-slash';
+        // Copiar direto pra área de transferência sem precisar mostrar a
+        // senha na tela antes -- pedido do Kleber, útil em call com tela
+        // compartilhada.
+        tabelaCredenciais.querySelectorAll('.botao-copiar-senha').forEach(function (botao) {
+            botao.addEventListener('click', function () {
+                var linha = botao.closest('.credencial-senha-linha');
+                var valorSpan = linha.querySelector('.credencial-senha-valor');
+                var icone = botao.querySelector('i');
+
+                obterSenhaReal(linha, valorSpan)
+                    .then(function (senha) { return navigator.clipboard.writeText(senha); })
+                    .then(function () {
+                        icone.className = 'bi bi-check-lg text-success';
+                        setTimeout(function () { icone.className = 'bi bi-clipboard'; }, 1500);
                     })
-                    .catch(function () { alert('Falha ao buscar a senha. Tente de novo.'); });
+                    .catch(function (e) { alert(e.message || 'Falha ao copiar a senha. Tente de novo.'); });
             });
         });
     }
