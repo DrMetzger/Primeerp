@@ -804,6 +804,154 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set($respostaSugestaoIa['sucesso'] ? 'sucesso' : 'erro', $respostaSugestaoIa['mensagem']);
     }
 
+    // --- Aba "Análise de Risco" -------------------------------------------
+    // Mesma chave Gemini de análise de sempre (AiSugestoes::gerar(), só lê
+    // dados JÁ CADASTRADOS -- nunca busca na internet, fica 100% no plano
+    // gratuito). Monta um raio-x do histórico de chamados do cliente
+    // (volume, prioridade, tempo de atendimento, tendência mensal, o que
+    // está aberto há mais tempo sem solução) e pede pra IA apontar o risco
+    // de perda desse cliente e sugestões de melhoria no nosso atendimento.
+    if ($acao === 'gerar_analise_risco') {
+        $ehAjaxAnaliseRisco = ($_POST['ajax'] ?? '') === '1';
+        $respostaAnaliseRisco = ['sucesso' => false, 'mensagem' => 'Não foi possível gerar a análise.', 'analise' => null, 'gerado_em' => null];
+
+        $stmtAgregadoRisco = $pdo->prepare("
+            SELECT
+                COUNT(*) AS total,
+                SUM(status = 'aberto') AS abertos,
+                SUM(status = 'aguardando_equipe') AS aguardando_equipe,
+                SUM(status = 'aguardando_cliente') AS aguardando_cliente,
+                SUM(status = 'fechado') AS fechados,
+                SUM(prioridade = 'urgente') AS urgentes,
+                SUM(prioridade = 'alta') AS altas,
+                SUM(criado_em >= DATE_SUB(NOW(), INTERVAL 90 DAY)) AS ultimos_90_dias,
+                AVG(CASE WHEN fechado_em IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, criado_em, fechado_em) END) AS tempo_medio_min
+            FROM chamados WHERE cliente_id = ?
+        ");
+        $stmtAgregadoRisco->execute([$clienteId]);
+        $agregadoRisco = $stmtAgregadoRisco->fetch();
+
+        $stmtTendenciaRisco = $pdo->prepare("
+            SELECT DATE_FORMAT(criado_em, '%Y-%m') AS mes, COUNT(*) AS qtd
+            FROM chamados WHERE cliente_id = ? AND criado_em >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+            GROUP BY mes ORDER BY mes ASC
+        ");
+        $stmtTendenciaRisco->execute([$clienteId]);
+        $tendenciaRisco = $stmtTendenciaRisco->fetchAll();
+
+        $stmtAbertosAntigosRisco = $pdo->prepare("
+            SELECT titulo, status, prioridade, criado_em FROM chamados
+            WHERE cliente_id = ? AND status != 'fechado'
+            ORDER BY criado_em ASC LIMIT 5
+        ");
+        $stmtAbertosAntigosRisco->execute([$clienteId]);
+        $abertosAntigosRisco = $stmtAbertosAntigosRisco->fetchAll();
+
+        $stmtRecentesRisco = $pdo->prepare('SELECT titulo, categoria, status, prioridade, criado_em, fechado_em FROM chamados WHERE cliente_id = ? ORDER BY criado_em DESC LIMIT 25');
+        $stmtRecentesRisco->execute([$clienteId]);
+        $recentesRisco = $stmtRecentesRisco->fetchAll();
+
+        $stmtTreinamentosRisco = $pdo->prepare("SELECT COUNT(*) FROM treinamentos WHERE cliente_id = ? AND data_inicio >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)");
+        $stmtTreinamentosRisco->execute([$clienteId]);
+        $treinamentosRecentesRisco = (int) $stmtTreinamentosRisco->fetchColumn();
+
+        $prompt = "Você é um consultor de Customer Success de uma consultoria de ERP (TOTVS Protheus). "
+            . "Com base nos dados abaixo sobre o cliente \"{$cliente['nome']}\", avalie o RISCO desse cliente cancelar ou "
+            . "deixar de renovar o contrato, e responda em português, em Markdown, com estas seções:\n"
+            . "## Nível de risco\nUma palavra (Baixo, Médio, Alto ou Crítico) seguida de 1-2 frases justificando.\n"
+            . "## Sinais de risco identificados\nLista dos padrões preocupantes que você viu nos dados (se não houver nenhum, diga isso).\n"
+            . "## Sugestões de melhoria\nAções concretas de melhoria no NOSSO atendimento e/ou processo pra reduzir esse risco.\n\n"
+            . "Resumo geral de chamados desse cliente:\n"
+            . "- Total de chamados: {$agregadoRisco['total']}\n"
+            . "- Abertos: {$agregadoRisco['abertos']} | Aguardando nossa equipe: {$agregadoRisco['aguardando_equipe']} | Aguardando o cliente: {$agregadoRisco['aguardando_cliente']} | Fechados: {$agregadoRisco['fechados']}\n"
+            . "- Prioridade urgente: {$agregadoRisco['urgentes']} | Prioridade alta: {$agregadoRisco['altas']}\n"
+            . "- Chamados nos últimos 90 dias: {$agregadoRisco['ultimos_90_dias']}\n"
+            . "- Tempo médio de atendimento (abertura até fechamento): " . ($agregadoRisco['tempo_medio_min'] !== null ? formatar_duracao_minutos((float) $agregadoRisco['tempo_medio_min']) : 'sem chamados fechados ainda') . "\n"
+            . "- Treinamentos/reuniões nos últimos 6 meses: {$treinamentosRecentesRisco}\n\n"
+            . "Tendência mensal de chamados abertos (últimos 6 meses, mês/quantidade):\n";
+        foreach ($tendenciaRisco as $t) {
+            $prompt .= "- {$t['mes']}: {$t['qtd']}\n";
+        }
+        if (!$tendenciaRisco) {
+            $prompt .= "(nenhum chamado nos últimos 6 meses)\n";
+        }
+        $prompt .= "\nChamados ainda NÃO fechados, do mais antigo pro mais novo (título / status / prioridade / aberto em):\n";
+        foreach ($abertosAntigosRisco as $a) {
+            $prompt .= "- {$a['titulo']} | {$a['status']} | {$a['prioridade']} | " . formatar_data($a['criado_em']) . "\n";
+        }
+        if (!$abertosAntigosRisco) {
+            $prompt .= "(nenhum chamado aberto no momento)\n";
+        }
+        $prompt .= "\nÚltimos chamados (título / categoria / status / prioridade / aberto em / fechado em):\n";
+        foreach ($recentesRisco as $r) {
+            $prompt .= "- {$r['titulo']} | {$r['categoria']} | {$r['status']} | {$r['prioridade']} | " . formatar_data($r['criado_em']) . ' | ' . ($r['fechado_em'] ? formatar_data($r['fechado_em']) : 'ainda não fechado') . "\n";
+        }
+        if (!$recentesRisco) {
+            $prompt .= "(nenhum chamado registrado ainda)\n";
+        }
+
+        $resultadoIaRisco = AiSugestoes::gerar($prompt);
+        if (!$resultadoIaRisco['ok']) {
+            $respostaAnaliseRisco['mensagem'] = 'Não foi possível gerar a análise: ' . $resultadoIaRisco['erro'];
+        } else {
+            $pdo->prepare('INSERT INTO cliente_analise_risco (cliente_id, analise, criado_por) VALUES (?, ?, ?)')
+                ->execute([$clienteId, $resultadoIaRisco['texto'], Auth::userId()]);
+            $respostaAnaliseRisco = [
+                'sucesso' => true,
+                'mensagem' => 'Análise gerada.',
+                'analise' => $resultadoIaRisco['texto'],
+                'gerado_em' => formatar_data(date('Y-m-d H:i:s')),
+            ];
+        }
+
+        if ($ehAjaxAnaliseRisco) {
+            header('Content-Type: application/json');
+            echo json_encode($respostaAnaliseRisco, JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        flash_set($respostaAnaliseRisco['sucesso'] ? 'sucesso' : 'erro', $respostaAnaliseRisco['mensagem']);
+    }
+
+    // Salva o texto da análise de risco como está na textarea (inclui
+    // qualquer edição manual) -- mesmo padrão de salvar_edicao_sugestao_
+    // implantacao, vira uma nova entrada no histórico (aparece como a mais
+    // recente).
+    if ($acao === 'salvar_edicao_analise_risco') {
+        $textoSalvarAnaliseRisco = trim($_POST['texto'] ?? '');
+        if ($textoSalvarAnaliseRisco === '') {
+            flash_set('erro', 'Não tem texto pra salvar.');
+        } else {
+            $pdo->prepare('INSERT INTO cliente_analise_risco (cliente_id, analise, criado_por) VALUES (?, ?, ?)')
+                ->execute([$clienteId, $textoSalvarAnaliseRisco, Auth::userId()]);
+            flash_set('sucesso', 'Alterações salvas.');
+        }
+    }
+
+    // Exporta a análise de risco em PDF, com o mesmo timbrado usado em
+    // qualquer outro export do sistema (ver src/PdfExport.php) -- mesmo
+    // padrão de exportar_pdf_sugestao_implantacao (exporta o texto que veio
+    // no POST, direto da textarea, pra incluir qualquer edição manual não
+    // salva ainda).
+    if ($acao === 'exportar_pdf_analise_risco') {
+        $textoAnaliseRiscoPdf = (string) ($_POST['texto'] ?? '');
+
+        if ($textoAnaliseRiscoPdf === '') {
+            http_response_code(400);
+            die('Nada pra exportar.');
+        }
+
+        $pdfAnaliseRisco = new PdfExport('Análise de Risco - ' . $cliente['nome']);
+        $pdfAnaliseRisco->subtitulo('Gerado em ' . formatar_data(date('Y-m-d H:i:s')));
+        $pdfAnaliseRisco->escreverMarkdown($textoAnaliseRiscoPdf);
+
+        $nomeArquivoAnaliseRiscoPdf = 'analise-risco-' . preg_replace('/[^a-z0-9]+/i', '-', $cliente['nome']) . '-' . $clienteId . '.pdf';
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . $nomeArquivoAnaliseRiscoPdf . '"');
+        echo $pdfAnaliseRisco->bytes();
+        exit;
+    }
+
     // --- Perfil público da empresa via IA + busca no Google --------------
     // Diferente da sugestão por setor acima (que só lê dados JÁ
     // CADASTRADOS): aqui a IA pesquisa na internet pelo nome/CNPJ da
@@ -2007,6 +2155,12 @@ $etapasImplantacao = $pdo->prepare('SELECT * FROM implantacao_etapas WHERE clien
 $etapasImplantacao->execute([$clienteId]);
 $etapasImplantacao = $etapasImplantacao->fetchAll();
 
+// Só a análise de risco mais recente -- cada geração fica no histórico
+// (cliente_analise_risco), mas a tela só mostra a última.
+$stmtAnaliseRiscoAtual = $pdo->prepare('SELECT * FROM cliente_analise_risco WHERE cliente_id = ? ORDER BY criado_em DESC LIMIT 1');
+$stmtAnaliseRiscoAtual->execute([$clienteId]);
+$analiseRiscoAtual = $stmtAnaliseRiscoAtual->fetch() ?: null;
+
 // Só a sugestão mais recente DE CADA TIPO (ORDER BY criado_em DESC + ??=
 // pega a primeira ocorrência de cada tipo, que é a mais nova).
 $sugestoesImplantacaoIa = $pdo->prepare('SELECT * FROM implantacao_sugestoes_ia WHERE cliente_id = ? ORDER BY criado_em DESC');
@@ -2289,6 +2443,7 @@ require __DIR__ . '/templates/header.php';
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#implantacao"><i class="bi bi-rocket-takeoff"></i> Implantação <span class="badge bg-secondary"><?= count($etapasImplantacao) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados"><i class="bi bi-headset"></i> Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis"><i class="bi bi-graph-up"></i> KPIs</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#analise-risco"><i class="bi bi-stars"></i> Análise de Risco</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores"><i class="bi bi-diagram-3"></i> Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios"><i class="bi bi-people"></i> Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
     <?php if ($podeAcessarDadosSensiveis): ?>
@@ -3074,6 +3229,36 @@ require __DIR__ . '/templates/header.php';
                 </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ANÁLISE DE RISCO -->
+    <div class="tab-pane" id="analise-risco">
+        <p class="text-muted small mb-1"><i class="bi bi-stars"></i> A IA analisa o histórico de chamados desse cliente (volume, prioridade, tempo de atendimento, tendência dos últimos meses e o que está aberto há mais tempo) e aponta o risco de perder esse cliente, com sugestões de melhoria no nosso atendimento.</p>
+        <p class="text-muted small mb-3">Mesma IA (Gemini, plano gratuito) já usada nas sugestões de Setores e Implantação -- só lê dados já cadastrados no sistema, nunca busca na internet.</p>
+
+        <form method="post" class="mb-3 form-gerar-analise-risco">
+            <?= csrf_field() ?>
+            <input type="hidden" name="acao" value="gerar_analise_risco">
+            <button type="submit" class="btn btn-sm btn-dark" <?= AiSugestoes::configurada() ? '' : 'disabled' ?>><i class="bi bi-stars"></i> <?= $analiseRiscoAtual ? 'Gerar de novo' : 'Gerar análise' ?></button>
+            <?php if (!AiSugestoes::configurada()): ?><span class="text-muted small ms-2">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span><?php endif; ?>
+        </form>
+
+        <div id="resultadoAnaliseRisco">
+        <?php if ($analiseRiscoAtual): ?>
+            <div class="card card-stat">
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Gerado em <?= formatar_data($analiseRiscoAtual['criado_em']) ?></p>
+                    <textarea class="form-control form-control-sm textarea-analise-risco mb-2" rows="16"><?= e($analiseRiscoAtual['analise']) ?></textarea>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise-risco"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>
+                        <button type="button" class="btn btn-sm btn-outline-dark botao-salvar-edicao-analise-risco"><i class="bi bi-save"></i> Salvar alterações</button>
+                    </div>
+                </div>
+            </div>
+        <?php else: ?>
+            <p class="text-muted text-center py-3">Nenhuma análise gerada ainda pra esse cliente.</p>
+        <?php endif; ?>
         </div>
     </div>
 
@@ -5415,6 +5600,87 @@ document.addEventListener('DOMContentLoaded', function () {
                     escondercarregando();
                 });
         });
+    });
+
+    // Aba "Análise de Risco" -- mesmo padrão AJAX de cima (form-gerar-
+    // sugestao-ia), mas renderiza com textarea editável + Exportar PDF/
+    // Salvar alterações, igual a Implantação (ver botao-exportar-pdf-
+    // implantacao/botao-salvar-edicao-implantacao abaixo), porque aqui dá
+    // pra querer ajustar o texto antes de mandar pro cliente/gestão.
+    document.querySelectorAll('.form-gerar-analise-risco').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            mostrarCarregando('Gerando análise de risco...', true);
+
+            var dados = new FormData(form);
+            dados.set('ajax', '1');
+            var alvo = document.getElementById('resultadoAnaliseRisco');
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (resp) { return resp.json(); })
+                .then(function (json) {
+                    if (!alvo) return;
+                    if (json.sucesso) {
+                        alvo.innerHTML = '<div class="card card-stat"><div class="card-body">'
+                            + '<p class="text-muted small mb-2">Gerado em ' + escaparHtmlCalendario(json.gerado_em) + '</p>'
+                            + '<textarea class="form-control form-control-sm textarea-analise-risco mb-2" rows="16">' + escaparHtmlCalendario(json.analise) + '</textarea>'
+                            + '<div class="d-flex gap-2 flex-wrap">'
+                            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise-risco"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</button>'
+                            + '<button type="button" class="btn btn-sm btn-outline-dark botao-salvar-edicao-analise-risco"><i class="bi bi-save"></i> Salvar alterações</button>'
+                            + '</div></div></div>';
+                        form.querySelector('button[type="submit"]').innerHTML = '<i class="bi bi-stars"></i> Gerar de novo';
+                    } else {
+                        alvo.innerHTML = '<div class="alert alert-danger">' + escaparHtmlCalendario(json.mensagem) + '</div>';
+                    }
+                })
+                .catch(function (erro) {
+                    if (alvo) alvo.innerHTML = '<div class="alert alert-danger">Falha de conexão ao gerar a análise: ' + escaparHtmlCalendario(String(erro)) + '</div>';
+                })
+                .finally(function () {
+                    escondercarregando();
+                });
+        });
+    });
+
+    // "Exportar PDF" e "Salvar alterações" da análise de risco -- delegado
+    // no document (mesmo motivo do implantação: o botão é recriado
+    // dinamicamente depois de gerar uma análise nova via AJAX acima).
+    document.addEventListener('click', function (e) {
+        var botao = e.target.closest('.botao-exportar-pdf-analise-risco');
+        if (!botao) return;
+        var textarea = document.querySelector('#resultadoAnaliseRisco .textarea-analise-risco');
+        if (!textarea) return;
+
+        var formTemp = document.createElement('form');
+        formTemp.method = 'post';
+        formTemp.action = window.location.href;
+        formTemp.target = '_blank';
+        formTemp.innerHTML = '<?= csrf_field() ?>'
+            + '<input type="hidden" name="acao" value="exportar_pdf_analise_risco">'
+            + '<input type="hidden" name="texto">';
+        formTemp.querySelector('[name="texto"]').value = textarea.value;
+        document.body.appendChild(formTemp);
+        formTemp.submit();
+        formTemp.remove();
+    });
+
+    document.addEventListener('click', function (e) {
+        var botao = e.target.closest('.botao-salvar-edicao-analise-risco');
+        if (!botao) return;
+        var textarea = document.querySelector('#resultadoAnaliseRisco .textarea-analise-risco');
+        if (!textarea) return;
+
+        var formTemp = document.createElement('form');
+        formTemp.method = 'post';
+        formTemp.action = window.location.href;
+        formTemp.innerHTML = '<?= csrf_field() ?>'
+            + '<input type="hidden" name="acao" value="salvar_edicao_analise_risco">'
+            + '<input type="hidden" name="aba_retorno" value="analise-risco">'
+            + '<input type="hidden" name="texto">';
+        formTemp.querySelector('[name="texto"]').value = textarea.value;
+        document.body.appendChild(formTemp);
+        formTemp.submit();
     });
 
     function renderizarResultadoSugestaoImplantacao(tipo, label, json) {

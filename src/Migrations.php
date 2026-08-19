@@ -1018,6 +1018,47 @@ class Migrations
                 CONSTRAINT fk_tcloud_vscode_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+
+        // Aba "Análise de Risco" (cliente.php) -- histórico de análises
+        // geradas por IA (mesma chave Gemini de análise já usada em
+        // Setores/IA e Implantação/IA, ver src/AiSugestoes.php) a partir do
+        // histórico de chamados/tempo de atendimento do cliente. Mesmo
+        // formato de setor_sugestoes_ia: guarda cada geração (não
+        // sobrescreve), a tela mostra sempre a mais recente.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS cliente_analise_risco (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                analise MEDIUMTEXT NOT NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_analise_risco_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_analise_risco_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
+        // Timbrado (cabeçalho/rodapé) real do PDF (ver src/PdfExport.php) --
+        // linha única (id sempre 1) com os arquivos enviados pela tela
+        // configuracoes.php. Enquanto ninguém subir os arquivos, PdfExport
+        // continua caindo no desenho em código de hoje (fallback) -- essa
+        // tabela só existe pra guardar imagem real quando/se ela chegar.
+        // Mesmo padrão de backup em blob (LONGBLOB) usado em clientes.logo
+        // etc., pra sobreviver a um deploy que apague uploads/.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS timbrado_pdf (
+                id INT PRIMARY KEY DEFAULT 1,
+                cabecalho_caminho VARCHAR(255) NULL,
+                cabecalho_dados LONGBLOB NULL,
+                cabecalho_altura_mm DECIMAL(5,2) NOT NULL DEFAULT 28,
+                rodape_caminho VARCHAR(255) NULL,
+                rodape_dados LONGBLOB NULL,
+                rodape_altura_mm DECIMAL(5,2) NOT NULL DEFAULT 16,
+                atualizado_por INT NULL,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT fk_timbrado_pdf_usuario FOREIGN KEY (atualizado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $pdo->exec("INSERT IGNORE INTO timbrado_pdf (id) VALUES (1)");
     }
 
     /**
