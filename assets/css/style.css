@@ -113,11 +113,14 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .text-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-none { display: none !important; }
 .flex-wrap { flex-wrap: wrap; }
+.flex-column { flex-direction: column; }
 .flex-grow-1 { flex-grow: 1; }
 .justify-content-between { justify-content: space-between; }
 .justify-content-end { justify-content: flex-end; }
 .justify-content-center { justify-content: center; }
+.align-items-start { align-items: flex-start; }
 .align-items-center { align-items: center; }
+.align-items-end { align-items: flex-end; }
 .align-middle { vertical-align: middle; }
 .gap-1 { gap: .35rem; }
 .gap-2 { gap: .6rem; }
@@ -128,6 +131,7 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .mb-2 { margin-bottom: .6rem !important; }
 .mb-3 { margin-bottom: 1rem !important; }
 .mb-4 { margin-bottom: 1.5rem !important; }
+.mt-1 { margin-top: .35rem !important; }
 .mt-2 { margin-top: .6rem !important; }
 .mt-3 { margin-top: 1rem !important; }
 .mt-4 { margin-top: 1.5rem !important; }
@@ -140,9 +144,13 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .p-2 { padding: .6rem !important; }
 .p-3 { padding: 1rem !important; }
 .p-4 { padding: 1.5rem !important; }
+.px-0 { padding-left: 0 !important; padding-right: 0 !important; }
+.px-3 { padding-left: 1rem !important; padding-right: 1rem !important; }
+.px-4 { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+.py-2 { padding-top: .6rem !important; padding-bottom: .6rem !important; }
 .py-3 { padding-top: 1rem !important; padding-bottom: 1rem !important; }
 .py-4 { padding-top: 1.5rem !important; padding-bottom: 1.5rem !important; }
-.px-4 { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+.py-5 { padding-top: 3rem !important; padding-bottom: 3rem !important; }
 
 .w-100 { width: 100% !important; }
 .h-100 { height: 100% !important; }
@@ -150,6 +158,9 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .text-center { text-align: center !important; }
 .text-start { text-align: left !important; }
 .text-end { text-align: right !important; }
+.text-nowrap { white-space: nowrap !important; }
+.text-uppercase { text-transform: uppercase !important; }
+.text-decoration-none { text-decoration: none !important; }
 .text-muted { color: var(--ph-text-muted) !important; }
 .text-dark { color: var(--ph-text) !important; }
 .text-light, .text-white { color: #fff !important; }
@@ -164,6 +175,9 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 .fw-semibold { font-weight: 600 !important; }
 
 .border { border: 1px solid var(--ph-border) !important; }
+.border-0 { border: none !important; }
+.border-top { border-top: 1px solid var(--ph-border) !important; }
+.border-bottom { border-bottom: 1px solid var(--ph-border) !important; }
 .overflow-hidden { overflow: hidden !important; }
 .shadow-lg { box-shadow: var(--ph-elev-3) !important; }
 .rounded { border-radius: var(--ph-radius-sm) !important; }
@@ -194,13 +208,19 @@ hr { border: none; border-top: 1px solid var(--ph-border); margin: .75rem 0; }
 }
 
 @media (min-width: 768px) {
+    .col-md-2 { flex: 0 0 16.6667%; max-width: 16.6667%; }
     .col-md-3 { flex: 0 0 25%; max-width: 25%; }
     .col-md-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
+    .col-md-5 { flex: 0 0 41.6667%; max-width: 41.6667%; }
     .col-md-6 { flex: 0 0 50%; max-width: 50%; }
+    .col-md-8 { flex: 0 0 66.6667%; max-width: 66.6667%; }
 }
 
 @media (min-width: 992px) {
     .col-lg-3 { flex: 0 0 25%; max-width: 25%; }
+    .col-lg-4 { flex: 0 0 33.3333%; max-width: 33.3333%; }
+    .col-lg-6 { flex: 0 0 50%; max-width: 50%; }
+    .col-lg-8 { flex: 0 0 66.6667%; max-width: 66.6667%; }
 }
 
 /* ------------------------------------------------------------ Botões */
@@ -485,12 +505,114 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
     color: #fff; font-size: 1.5rem;
 }
 
-/* Cards de KPI (aba KPIs geral + Métricas por setor em cliente.php) --
-   a borda lateral já indica vermelho/amarelo/verde/cinza contra a meta
-   (ver kpi_status() em src/helpers.php); o hover só reforça que dá pra
-   clicar em editar/excluir no rodapé do card. */
-.kpi-card { transition: transform .15s ease, box-shadow .15s ease; }
+/* -------------------------------------------------- Cards de KPI (RAG) */
+/* Aba "KPIs" geral + sub-aba "Métricas" de cada setor em cliente.php --
+   pedido do Kleber: "cards, ter cores... igual ao Power BI". Grid próprio
+   (não Bootstrap) pra controlar a quantidade de colunas via a var --kpi-
+   cols, alterada pelo controle "Personalizar" (ver JS) e compartilhada
+   entre TODOS os grids da página -- mudar uma vez vale pra aba geral e
+   pra cada setor. */
+.kpi-mes-titulo {
+    font-size: .78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--ph-text-muted);
+    margin: 1.5rem 0 .75rem;
+    padding-bottom: .5rem;
+    border-bottom: 2px solid var(--ph-border);
+}
+.kpi-mes-titulo:first-child { margin-top: 0; }
+
+.kpi-personalizar select { width: auto; }
+
+.kpi-grade {
+    display: grid;
+    grid-template-columns: repeat(var(--kpi-cols, 4), minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+@media (max-width: 1200px) { .kpi-grade { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
+@media (max-width: 860px) { .kpi-grade { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width: 560px) { .kpi-grade { grid-template-columns: 1fr !important; } }
+
+.kpi-card {
+    background: var(--ph-surface);
+    border-radius: var(--ph-radius);
+    box-shadow: var(--ph-elev-1);
+    border-left: 5px solid var(--kpi-cor, var(--ph-neutral));
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
 .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--ph-elev-2, 0 8px 20px rgba(0,0,0,.1)); }
+
+.kpi-card-topo { display: flex; justify-content: space-between; align-items: center; }
+.kpi-card-icone {
+    width: 32px; height: 32px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background-color: var(--ph-neutral-bg);
+    background-color: color-mix(in srgb, var(--kpi-cor, var(--ph-neutral)) 15%, transparent);
+    color: var(--kpi-cor, var(--ph-neutral));
+    font-size: .95rem;
+}
+.kpi-card-periodo {
+    font-size: .72rem; font-weight: 600;
+    padding: .25rem .6rem; border-radius: 999px;
+    background-color: var(--ph-neutral-bg); color: var(--ph-text-muted);
+}
+.kpi-card-nome { font-size: .82rem; font-weight: 600; color: var(--ph-text-muted); }
+.kpi-card-valor { font-size: 1.85rem; font-weight: 800; line-height: 1.1; color: var(--ph-text); }
+.kpi-card-barra { height: 6px; border-radius: 999px; background-color: var(--ph-neutral-bg); overflow: hidden; }
+.kpi-card-barra-preenchida { height: 100%; border-radius: 999px; background-color: var(--kpi-cor, var(--ph-neutral)); }
+.kpi-card-status { font-size: .78rem; font-weight: 600; color: var(--kpi-cor, var(--ph-neutral)); }
+.kpi-card-status-neutro { color: var(--ph-text-muted); font-weight: 500; }
+.kpi-card-meta { font-size: .76rem; color: var(--ph-text-muted); }
+.kpi-card-obs { font-size: .76rem; color: var(--ph-text-muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kpi-card-rodape { display: flex; justify-content: flex-end; gap: .4rem; margin-top: auto; padding-top: .35rem; }
+
+/* -------------------------------------------- Cards de Análise de IA */
+/* Aba "Análise de Risco" em cliente.php -- mesma linguagem visual dos
+   cards de KPI acima (acento colorido, ícone, hover-lift), corrigindo o
+   card antigo que dependia de classes que não existiam neste CSS
+   (col-lg-4/flex-column/bg-danger) e por isso saía com o layout quebrado
+   (queixa real do Kleber, não só estética). */
+.analise-grade {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+}
+
+.analise-card {
+    background: var(--ph-surface);
+    border-radius: var(--ph-radius);
+    box-shadow: var(--ph-elev-1);
+    border-left: 5px solid var(--analise-cor, var(--ph-primary));
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.analise-card:hover { transform: translateY(-2px); box-shadow: var(--ph-elev-2, 0 8px 20px rgba(0,0,0,.1)); }
+
+.analise-card-topo { display: flex; align-items: center; gap: .5rem; }
+.analise-card-icone {
+    flex: 0 0 auto;
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background-color: var(--ph-primary-light);
+    background-color: color-mix(in srgb, var(--analise-cor, var(--ph-primary)) 15%, transparent);
+    color: var(--analise-cor, var(--ph-primary));
+    font-size: .85rem;
+}
+.analise-card-escopo { flex: 1 1 auto; font-size: .82rem; font-weight: 600; color: var(--ph-text); min-width: 0; }
+.analise-card-data { flex: 0 0 auto; font-size: .72rem; color: var(--ph-text-muted); text-align: right; }
+.analise-card-nivel { font-size: .78rem; font-weight: 700; color: var(--analise-cor, var(--ph-primary)); }
+.analise-card-preview { font-size: .84rem; color: var(--ph-text); margin: 0; flex-grow: 1; }
+.analise-card-rodape { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: auto; padding-top: .35rem; }
 
 /* Círculo colorido com ícone -- usado no ícone do setor (icone_setor_html)
    e nos cards do dashboard (icone_circulo_html), mesmo componente visual
@@ -608,9 +730,11 @@ a.filtro-card:hover { box-shadow: var(--ph-elev-2); transform: translateY(-2px);
 }
 
 .bg-dark { background-color: var(--ph-primary) !important; color: #fff !important; }
+.bg-primary { background-color: var(--ph-primary-light) !important; color: var(--ph-primary) !important; }
 .bg-secondary { background-color: var(--ph-neutral-bg) !important; color: var(--ph-neutral) !important; }
 .bg-success { background-color: var(--ph-success-bg) !important; color: var(--ph-success) !important; }
 .bg-warning { background-color: var(--ph-warning-bg) !important; color: var(--ph-warning) !important; }
+.bg-danger { background-color: var(--ph-danger-bg) !important; color: var(--ph-danger) !important; }
 .bg-white { background-color: #fff !important; }
 .bg-light { background-color: var(--ph-neutral-bg) !important; }
 

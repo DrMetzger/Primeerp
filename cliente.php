@@ -117,13 +117,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // já definida pra aquele KPI/setor, senão o valor calculado sobrescreve
     // um número mas nunca inventa uma meta que ninguém definiu).
     if ($acao === 'calcular_kpis_automaticos') {
-        // setor_id vazio = KPI GERAL do cliente (chamados sem setor
-        // vinculado) -- precisa virar NULL de verdade, não 0: "0" não bate
-        // com nenhum chamado (nem os com setor de verdade, nem os sem
-        // setor, que ficam com setor_id IS NULL no banco).
+        // setor_id vazio = KPI GERAL do cliente. Antes isso significava
+        // "só chamados sem setor vinculado" -- pra cliente que usa setores
+        // (a grande maioria) isso dava sempre 0, parecendo que o cálculo
+        // "não fazia nada" (reclamação real do Kleber). Agora GERAL passa a
+        // ser o CONSOLIDADO: todos os chamados do cliente, com ou sem
+        // setor. Quem quiser o número só de um setor usa "Registrar
+        // métrica" de dentro daquele setor (aba Setores), que continua
+        // filtrando por setor_id normalmente.
         $setorIdCalculo = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
-        $condicaoSetor = $setorIdCalculo !== null ? 'setor_id = ?' : 'setor_id IS NULL';
-        $paramsSetor = $setorIdCalculo !== null ? [$setorIdCalculo] : [];
+        $condicaoSetorChamados = $setorIdCalculo !== null ? 'setor_id = ?' : '1 = 1';
+        $paramsSetorChamados = $setorIdCalculo !== null ? [$setorIdCalculo] : [];
+        // Mas o KPI em si (na tabela kpis) continua marcado como "geral"
+        // (setor_id NULL) pra não se misturar com as métricas específicas
+        // de cada setor na tela.
+        $condicaoSetorKpis = $setorIdCalculo !== null ? 'setor_id = ?' : 'setor_id IS NULL';
+        $paramsSetorKpis = $setorIdCalculo !== null ? [$setorIdCalculo] : [];
 
         $periodoCalculo = $_POST['periodo'] . '-01';
         $inicioPeriodo = $periodoCalculo . ' 00:00:00';
@@ -133,15 +142,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             SELECT
                 COUNT(*) AS total_abertos,
                 SUM(CASE WHEN prioridade IN ('alta', 'urgente') THEN 1 ELSE 0 END) AS total_urgentes,
-                (SELECT COUNT(*) FROM chamados WHERE {$condicaoSetor} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS total_resolvidos,
-                (SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) FROM chamados WHERE {$condicaoSetor} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS tempo_medio_min
+                (SELECT COUNT(*) FROM chamados WHERE {$condicaoSetorChamados} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS total_resolvidos,
+                (SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) FROM chamados WHERE {$condicaoSetorChamados} AND cliente_id = ? AND fechado_em BETWEEN ? AND ?) AS tempo_medio_min
             FROM chamados
-            WHERE {$condicaoSetor} AND cliente_id = ? AND criado_em BETWEEN ? AND ?
+            WHERE {$condicaoSetorChamados} AND cliente_id = ? AND criado_em BETWEEN ? AND ?
         ");
         $stmtCalculo->execute([
-            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
-            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
-            ...$paramsSetor, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetorChamados, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetorChamados, $clienteId, $inicioPeriodo, $fimPeriodo,
+            ...$paramsSetorChamados, $clienteId, $inicioPeriodo, $fimPeriodo,
         ]);
         $resultadoCalculo = $stmtCalculo->fetch();
 
@@ -156,21 +165,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
 
         foreach ($kpisAutomaticos as [$nomeKpiAuto, $valorKpiAuto, $unidadeKpiAuto, $direcaoKpiAuto]) {
-            $stmtMetaAnterior = $pdo->prepare("SELECT meta FROM kpis WHERE {$condicaoSetor} AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1");
-            $stmtMetaAnterior->execute([...$paramsSetor, $nomeKpiAuto]);
+            $stmtMetaAnterior = $pdo->prepare("SELECT meta FROM kpis WHERE {$condicaoSetorKpis} AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1");
+            $stmtMetaAnterior->execute([...$paramsSetorKpis, $nomeKpiAuto]);
             $metaAnteriorKpi = $stmtMetaAnterior->fetchColumn();
             $metaAnteriorKpi = $metaAnteriorKpi !== false ? $metaAnteriorKpi : null;
 
-            $stmtKpiExistente = $pdo->prepare("SELECT id FROM kpis WHERE {$condicaoSetor} AND nome_kpi = ? AND periodo = ?");
-            $stmtKpiExistente->execute([...$paramsSetor, $nomeKpiAuto, $periodoCalculo]);
+            // "Inteligência" sem depender de IA nenhuma: se ninguém nunca
+            // definiu uma meta pra esse KPI, sugere a média dos últimos até
+            // 3 meses anteriores como ponto de partida (em vez de deixar
+            // sempre em branco pra sempre). Só é usada UMA vez -- a partir
+            // daí ela conta como "meta definida" e o COALESCE acima passa a
+            // preservá-la normalmente, então isso nunca sobrescreve um
+            // ajuste manual do usuário depois.
+            $observacaoAuto = 'Calculado automaticamente a partir dos chamados.';
+            if ($metaAnteriorKpi === null) {
+                $stmtHistorico = $pdo->prepare("SELECT valor FROM kpis WHERE {$condicaoSetorKpis} AND nome_kpi = ? AND periodo < ? ORDER BY periodo DESC LIMIT 3");
+                $stmtHistorico->execute([...$paramsSetorKpis, $nomeKpiAuto, $periodoCalculo]);
+                $valoresHistoricos = $stmtHistorico->fetchAll(PDO::FETCH_COLUMN);
+                if ($valoresHistoricos) {
+                    $metaAnteriorKpi = round(array_sum($valoresHistoricos) / count($valoresHistoricos), 2);
+                    $observacaoAuto .= ' Meta sugerida com base na média dos últimos meses -- ajuste como preferir.';
+                }
+            }
+
+            $stmtKpiExistente = $pdo->prepare("SELECT id FROM kpis WHERE {$condicaoSetorKpis} AND nome_kpi = ? AND periodo = ?");
+            $stmtKpiExistente->execute([...$paramsSetorKpis, $nomeKpiAuto, $periodoCalculo]);
             $idKpiExistente = $stmtKpiExistente->fetchColumn();
 
             if ($idKpiExistente) {
                 $pdo->prepare('UPDATE kpis SET valor = ?, unidade = ?, meta = COALESCE(meta, ?), direcao_melhor = ?, observacoes = ? WHERE id = ?')
-                    ->execute([$valorKpiAuto, $unidadeKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, 'Calculado automaticamente a partir dos chamados.', $idKpiExistente]);
+                    ->execute([$valorKpiAuto, $unidadeKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, $observacaoAuto, $idKpiExistente]);
             } else {
                 $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, direcao_melhor, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdCalculo, $nomeKpiAuto, $valorKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, $unidadeKpiAuto, $periodoCalculo, 'Calculado automaticamente a partir dos chamados.']);
+                    ->execute([$clienteId, $setorIdCalculo, $nomeKpiAuto, $valorKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, $unidadeKpiAuto, $periodoCalculo, $observacaoAuto]);
             }
         }
 
@@ -3244,30 +3271,33 @@ require __DIR__ . '/templates/header.php';
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
         <p class="text-muted small mb-1"><i class="bi bi-graph-up"></i> KPI (métrica) é qualquer número que ajuda a acompanhar a saúde do atendimento -- ex.: quantos chamados abriram, quantos foram resolvidos, tempo médio de resposta. A <strong>meta</strong> é o número que você quer bater; sem meta cadastrada o card fica cinza (neutro), não vermelho -- ausência de meta não é meta não batida.</p>
-        <p class="text-muted small mb-2">Essa aba aqui é só o <strong>geral do cliente</strong> (chamados sem setor vinculado) -- se esse cliente tem setores (aba Setores), a métrica de cada setor fica dentro dele mesmo, não aqui. <?= $setores ? 'Como esse cliente tem setor cadastrado, o normal é a maioria (ou todos) dos KPIs aparecerem lá, não aqui.' : '' ?> Importante: KPI é só acompanhamento manual/automático deste cliente -- a seção <a href="<?= url('relatorios.php') ?>">Relatórios</a> (chamados geral, estatísticas etc.) é independente e não lê esses valores.</p>
-        <div class="toolbar d-flex flex-wrap gap-2 align-items-end">
-            <button type="button" class="btn btn-dark btn-sm botao-novo-kpi-geral"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
-            <form method="post" class="d-flex gap-2 align-items-end">
-                <?= csrf_field() ?>
-                <input type="hidden" name="acao" value="calcular_kpis_automaticos">
-                <input type="hidden" name="aba_retorno" value="kpis">
-                <input type="hidden" name="setor_id" value="">
-                <div>
-                    <label class="form-label small mb-1">Calcular a partir dos chamados sem setor</label>
-                    <input type="month" name="periodo" class="form-control form-control-sm" value="<?= date('Y-m') ?>" required>
-                </div>
-                <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Calcular automaticamente</button>
-            </form>
+        <p class="text-muted small mb-2">Essa aba aqui é o <strong>consolidado do cliente inteiro</strong> (todos os chamados, de qualquer setor) -- <?= $setores ? 'se quiser o número só de UM setor específico, use "Registrar métrica" dentro da aba Setores.' : 'esse cliente ainda não tem setor cadastrado, então é a única visão que existe por enquanto.' ?> Importante: KPI é só acompanhamento manual/automático deste cliente -- a seção <a href="<?= url('relatorios.php') ?>">Relatórios</a> (chamados geral, estatísticas etc.) é independente e não lê esses valores.</p>
+        <div class="toolbar d-flex flex-wrap gap-2 align-items-end justify-content-between">
+            <div class="d-flex flex-wrap gap-2 align-items-end">
+                <button type="button" class="btn btn-dark btn-sm botao-novo-kpi-geral"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
+                <form method="post" class="d-flex gap-2 align-items-end">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="calcular_kpis_automaticos">
+                    <input type="hidden" name="aba_retorno" value="kpis">
+                    <input type="hidden" name="setor_id" value="">
+                    <div>
+                        <label class="form-label small mb-1">Calcular a partir de TODOS os chamados do cliente</label>
+                        <input type="month" name="periodo" class="form-control form-control-sm" value="<?= date('Y-m') ?>" required>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Calcular automaticamente</button>
+                </form>
+            </div>
+            <div class="kpi-personalizar d-flex align-items-center gap-2">
+                <label class="form-label small mb-0" for="kpiColunasSelect"><i class="bi bi-grid-3x3-gap"></i> Cards por linha</label>
+                <select id="kpiColunasSelect" class="form-select form-select-sm">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="6">6</option>
+                </select>
+            </div>
         </div>
-        <?php if ($kpisGerais): ?>
-        <div class="row g-3">
-            <?php foreach ($kpisGerais as $k): ?>
-                <?= kpi_card_html($k, 'kpis') ?>
-            <?php endforeach; ?>
-        </div>
-        <?php else: ?>
-            <p class="text-muted text-center py-4">Nenhum KPI geral registrado ainda -- use "Registrar KPI" ou "Calcular automaticamente" acima.</p>
-        <?php endif; ?>
+        <?= kpi_grades_html($kpisGerais, 'kpis', 'Nenhum KPI geral registrado ainda -- use "Registrar KPI" ou "Calcular automaticamente" acima.') ?>
     </div>
 
     <!-- ANÁLISE DE RISCO -->
@@ -3300,39 +3330,20 @@ require __DIR__ . '/templates/header.php';
             <?php if (!AiSugestoes::configurada()): ?><div class="col-12"><span class="text-muted small">IA ainda não configurada (ver Configurações &gt; IA Gemini).</span></div><?php endif; ?>
         </form>
 
-        <?php foreach (['risco' => ['Análises de Risco', 'uso interno da Prime', 'bg-danger'], 'melhorias' => ['Análises de Melhorias', 'relatório pro cliente', 'bg-success']] as $tipoSecaoAnalise => [$tituloSecaoAnalise, $legendaSecaoAnalise, $corBadgeSecaoAnalise]): ?>
+        <?php foreach (['risco' => ['Análises de Risco', 'uso interno da Prime'], 'melhorias' => ['Análises de Melhorias', 'relatório pro cliente']] as $tipoSecaoAnalise => [$tituloSecaoAnalise, $legendaSecaoAnalise]): ?>
         <h6 class="text-muted text-uppercase small fw-bold mb-1"><?= $tituloSecaoAnalise ?></h6>
         <p class="text-muted small mb-2"><?= $legendaSecaoAnalise ?></p>
-        <div class="row g-3 mb-4" id="gridAnalise<?= e($tipoSecaoAnalise) ?>">
         <?php if (!$analisesRiscoPorTipo[$tipoSecaoAnalise]): ?>
-            <div class="col-12"><p class="text-muted text-center py-3 mb-0">Nenhuma análise de <?= mb_strtolower($tituloSecaoAnalise) ?> gerada ainda.</p></div>
-        <?php else: foreach ($analisesRiscoPorTipo[$tipoSecaoAnalise] as $a): ?>
-            <div class="col-md-6 col-lg-4">
-                <div class="card card-stat analise-card h-100" data-id="<?= $a['id'] ?>" data-tipo="<?= e($a['tipo']) ?>" data-label="<?= e($tituloSecaoAnalise . ($a['setor_nome'] ? ' - ' . $a['setor_nome'] : '')) ?>">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <span class="badge <?= $corBadgeSecaoAnalise ?>"><?= e($a['setor_nome'] ?: 'Cliente inteiro') ?></span>
-                            <span class="text-muted small text-end"><?= formatar_data($a['criado_em']) ?><?= $a['atualizado_em'] ? '<br>editado em ' . formatar_data($a['atualizado_em']) : '' ?></span>
-                        </div>
-                        <p class="small mb-3 flex-grow-1" style="white-space:pre-wrap;"><?= e(mb_substr($a['analise'], 0, 220)) ?><?= mb_strlen($a['analise']) > 220 ? '...' : '' ?></p>
-                        <textarea class="d-none analise-texto-completo"><?= e($a['analise']) ?></textarea>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise"><i class="bi bi-eye"></i></button>
-                            <button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise"><i class="bi bi-pencil"></i></button>
-                            <button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise"><i class="bi bi-file-earmark-pdf"></i></button>
-                            <form method="post" class="d-inline form-excluir-analise">
-                                <?= csrf_field() ?>
-                                <input type="hidden" name="acao" value="excluir_analise_risco">
-                                <input type="hidden" name="aba_retorno" value="analise-risco">
-                                <input type="hidden" name="id" value="<?= $a['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
+            <div class="analise-grade mb-4" id="gridAnalise<?= e($tipoSecaoAnalise) ?>">
+                <p class="analise-grade-vazio text-muted text-center py-3 mb-0">Nenhuma análise de <?= mb_strtolower($tituloSecaoAnalise) ?> gerada ainda.</p>
             </div>
-        <?php endforeach; endif; ?>
-        </div>
+        <?php else: ?>
+            <div class="analise-grade mb-4" id="gridAnalise<?= e($tipoSecaoAnalise) ?>">
+            <?php foreach ($analisesRiscoPorTipo[$tipoSecaoAnalise] as $a): ?>
+                <?= analise_card_html($a, $tituloSecaoAnalise) ?>
+            <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
         <?php endforeach; ?>
     </div>
 
@@ -3687,15 +3698,7 @@ require __DIR__ . '/templates/header.php';
                             </form>
                         </div>
                         <p class="text-muted small">O cálculo automático usa os chamados desse setor no mês escolhido: quantos abriram, quantos foram resolvidos, quantos eram urgente/alta prioridade e o tempo médio de atendimento. Se já existir um KPI com o mesmo nome nesse mês, ele é atualizado (não duplica); uma meta cadastrada manualmente antes é preservada.</p>
-                        <?php if ($kpisSetor): ?>
-                        <div class="row g-3">
-                            <?php foreach ($kpisSetor as $k): ?>
-                                <?= kpi_card_html($k, 'setores') ?>
-                            <?php endforeach; ?>
-                        </div>
-                        <?php else: ?>
-                            <p class="text-muted text-center py-3">Nenhuma métrica registrada ainda pra esse setor -- registre pra ajudar a IA a avaliar o processo.</p>
-                        <?php endif; ?>
+                        <?= kpi_grades_html($kpisSetor, 'setores', 'Nenhuma métrica registrada ainda pra esse setor -- registre pra ajudar a IA a avaliar o processo.') ?>
                     </div>
 
                     <!-- IA -->
@@ -4907,6 +4910,22 @@ require __DIR__ . '/templates/header.php';
 <script>
 // Ativa a aba certa com base no hash da URL (ex: #chamados) ou abre "Visão geral" por padrão.
 document.addEventListener('DOMContentLoaded', function () {
+    // "Personalizar" cards por linha dos KPIs -- preferência é do
+    // NAVEGADOR (localStorage), não por cliente, então escolher uma vez
+    // vale pra todo mundo que essa pessoa for ver depois (aba KPIs geral E
+    // qualquer sub-aba Métricas de setor, todas usam a mesma var CSS
+    // --kpi-cols, aplicada aqui na raiz do documento).
+    var seletorColunasKpi = document.getElementById('kpiColunasSelect');
+    var colunasKpiSalvas = localStorage.getItem('kpiColunasPorLinha') || '4';
+    document.documentElement.style.setProperty('--kpi-cols', colunasKpiSalvas);
+    if (seletorColunasKpi) {
+        seletorColunasKpi.value = colunasKpiSalvas;
+        seletorColunasKpi.addEventListener('change', function () {
+            document.documentElement.style.setProperty('--kpi-cols', seletorColunasKpi.value);
+            localStorage.setItem('kpiColunasPorLinha', seletorColunasKpi.value);
+        });
+    }
+
     // Mesma trava contra duplo-clique/duplo-toque do formulário do portal
     // do cliente -- ver bug de chamados duplicados criados de uma vez.
     var formNovoChamadoEquipe = document.querySelector('#modalNovoChamado form');
@@ -5729,39 +5748,73 @@ document.addEventListener('DOMContentLoaded', function () {
         return tipo === 'melhorias' ? 'Análises de Melhorias' : 'Análises de Risco';
     }
 
+    // Espelha markdown_para_texto_simples() do helpers.php -- card novo
+    // criado aqui via AJAX (sem recarregar a página) precisa ficar
+    // idêntico ao que o PHP renderiza depois de um F5.
+    function textoSimplesAnalise(texto) {
+        var limpo = texto
+            .replace(/^#{1,6}\s*/gm, '')
+            .replace(/\*\*(.+?)\*\*/gs, '$1')
+            .replace(/__(.+?)__/gs, '$1')
+            .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/gs, '$1')
+            .replace(/^[-*]\s+/gm, '• ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return limpo.length > 240 ? limpo.slice(0, 239) + '…' : limpo;
+    }
+
+    // Espelha analise_risco_cor() do helpers.php.
+    function corNivelAnalise(tipo, texto) {
+        if (tipo !== 'melhorias') {
+            var m = texto.match(/\*\*\s*(alto|m[eé]dio|baixo)\s*\*\*/i);
+            if (m) {
+                var nivel = m[1].toLowerCase();
+                if (nivel === 'alto') return { cor: '#b91c1c', icone: 'bi-exclamation-triangle-fill', label: 'Risco alto' };
+                if (nivel === 'baixo') return { cor: '#15803d', icone: 'bi-check-circle-fill', label: 'Risco baixo' };
+                return { cor: '#b45309', icone: 'bi-exclamation-circle-fill', label: 'Risco médio' };
+            }
+            return { cor: '#52525b', icone: 'bi-dash-circle', label: null };
+        }
+        return { cor: '#4f46e5', icone: 'bi-stars', label: null };
+    }
+
     function adicionarCardAnalise(tipo, id, setorNome, geradoEm, texto) {
         var grade = document.getElementById('gridAnalise' + tipo);
         if (!grade) return;
 
-        var placeholder = grade.querySelector('.col-12');
+        var placeholder = grade.querySelector('.analise-grade-vazio');
         if (placeholder) placeholder.remove();
 
-        var preview = texto.length > 220 ? texto.slice(0, 220) + '...' : texto;
-        var corBadge = tipo === 'melhorias' ? 'bg-success' : 'bg-danger';
+        var preview = textoSimplesAnalise(texto);
+        var nivel = corNivelAnalise(tipo, texto);
         var label = tituloSecaoAnalise(tipo) + (setorNome ? ' - ' + setorNome : '');
 
-        var col = document.createElement('div');
-        col.className = 'col-md-6 col-lg-4';
-        col.innerHTML = '<div class="card card-stat analise-card h-100" data-id="' + id + '" data-tipo="' + tipo + '" data-label="' + escaparHtmlCalendario(label) + '">'
-            + '<div class="card-body d-flex flex-column">'
-            + '<div class="d-flex justify-content-between align-items-start mb-2">'
-            + '<span class="badge ' + corBadge + '">' + escaparHtmlCalendario(setorNome || 'Cliente inteiro') + '</span>'
-            + '<span class="text-muted small text-end">' + escaparHtmlCalendario(geradoEm) + '</span>'
+        var card = document.createElement('div');
+        card.className = 'analise-card';
+        card.style.setProperty('--analise-cor', nivel.cor);
+        card.dataset.id = id;
+        card.dataset.tipo = tipo;
+        card.dataset.label = label;
+        card.innerHTML = '<div class="analise-card-topo">'
+            + '<span class="analise-card-icone"><i class="bi ' + nivel.icone + '"></i></span>'
+            + '<span class="analise-card-escopo text-truncate">' + escaparHtmlCalendario(setorNome || 'Cliente inteiro') + '</span>'
+            + '<span class="analise-card-data">' + escaparHtmlCalendario(geradoEm) + '</span>'
             + '</div>'
-            + '<p class="small mb-3 flex-grow-1" style="white-space:pre-wrap;">' + escaparHtmlCalendario(preview) + '</p>'
+            + (nivel.label ? '<div class="analise-card-nivel">' + nivel.label + '</div>' : '')
+            + '<p class="analise-card-preview">' + escaparHtmlCalendario(preview) + '</p>'
             + '<textarea class="d-none analise-texto-completo">' + escaparHtmlCalendario(texto) + '</textarea>'
-            + '<div class="d-flex gap-2 flex-wrap">'
-            + '<button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise"><i class="bi bi-eye"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise"><i class="bi bi-file-earmark-pdf"></i></button>'
+            + '<div class="analise-card-rodape">'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise" title="Visualizar"><i class="bi bi-eye"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise" title="Editar"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise" title="Exportar PDF"><i class="bi bi-file-earmark-pdf"></i></button>'
             + '<form method="post" class="d-inline form-excluir-analise">'
             + '<?= csrf_field() ?>'
             + '<input type="hidden" name="acao" value="excluir_analise_risco">'
             + '<input type="hidden" name="aba_retorno" value="analise-risco">'
             + '<input type="hidden" name="id" value="' + id + '">'
-            + '<button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>'
-            + '</form></div></div></div>';
-        grade.insertBefore(col, grade.firstChild);
+            + '<button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir"><i class="bi bi-trash"></i></button>'
+            + '</form></div>';
+        grade.insertBefore(card, grade.firstChild);
     }
 
     var modalAnalise = document.getElementById('modalAnalise');

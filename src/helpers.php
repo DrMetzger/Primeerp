@@ -1129,43 +1129,99 @@ function kpi_status(array $kpi): array
     return ['vermelho', 'Fora da meta', 'danger', 'bi-x-circle-fill'];
 }
 
+const KPI_CORES_HEX = [
+    'success' => '#15803d',
+    'warning' => '#b45309',
+    'danger' => '#b91c1c',
+    'secondary' => '#52525b',
+];
+
+/**
+ * Nome do mês em português + ano, tipo "Agosto de 2026" -- usado pra
+ * agrupar os cards de KPI por período (pedido do Kleber: "separar eles por
+ * mes"). $periodo é a data (YYYY-MM-DD, sempre dia 01) que vem da coluna
+ * kpis.periodo.
+ */
+function mes_ano_extenso(string $periodo): string
+{
+    static $meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    $timestamp = strtotime($periodo);
+
+    return $meses[((int) date('n', $timestamp)) - 1] . ' de ' . date('Y', $timestamp);
+}
+
+/**
+ * Agrupa uma lista de KPIs (já ordenada por periodo DESC) em blocos por
+ * mês, cada um com o título por extenso e os KPIs daquele mês -- pra
+ * renderizar "Agosto de 2026 / cards..." depois "Julho de 2026 / cards..."
+ * em vez de uma lista só misturando todos os meses (pedido do Kleber).
+ * Não precisa reordenar nada: só quebra a lista onde o período muda.
+ */
+function agrupar_kpis_por_periodo(array $kpis): array
+{
+    $grupos = [];
+    foreach ($kpis as $kpi) {
+        $chave = $kpi['periodo'];
+        if (!isset($grupos[$chave])) {
+            $grupos[$chave] = ['label' => mes_ano_extenso($chave), 'itens' => []];
+        }
+        $grupos[$chave]['itens'][] = $kpi;
+    }
+
+    return $grupos;
+}
+
 /**
  * Card colorido (vermelho/amarelo/verde/cinza) de um KPI de cliente --
  * substitui a antiga linha de tabela (pedido do Kleber: "as KPIS pra mim
- * precisam ser em CARDS ter cores"). Reaproveitado tanto na aba "KPIs"
- * (geral do cliente) quanto na sub-aba "Métricas" de cada setor, pra não
- * duplicar marcação e os dois nunca ficarem diferentes um do outro.
+ * precisam ser em CARDS ter cores... igual ao POWER BI"). Reaproveitado
+ * tanto na aba "KPIs" (geral do cliente) quanto na sub-aba "Métricas" de
+ * cada setor, pra não duplicar marcação e os dois nunca ficarem diferentes
+ * um do outro. Item de grid direto (o pai precisa ter a classe
+ * .kpi-grade) -- não depende de nenhuma classe tipo "col-md-*", de
+ * propósito: a quantidade de colunas é controlada pelo seletor
+ * "Personalizar" (var CSS --kpi-cols), não por breakpoint fixo.
  * $abaRetorno é "kpis" ou "setores" -- pra onde a página volta depois de
  * editar/excluir (mesma convenção já usada nos botões antigos).
  */
 function kpi_card_html(array $kpi, string $abaRetorno): string
 {
     [, $statusLabel, $corClasse, $icone] = kpi_status($kpi);
+    $corHex = KPI_CORES_HEX[$corClasse] ?? KPI_CORES_HEX['secondary'];
     $unidade = $kpi['unidade'] ?? '';
     $valorFormatado = formatar_numero_kpi((float) $kpi['valor'], $unidade);
-    $metaFormatada = ($kpi['meta'] !== null && $kpi['meta'] !== '') ? formatar_numero_kpi((float) $kpi['meta'], $unidade) : null;
+    $metaDefinida = ($kpi['meta'] !== null && $kpi['meta'] !== '');
+    $metaFormatada = $metaDefinida ? formatar_numero_kpi((float) $kpi['meta'], $unidade) : null;
     $periodoFormatado = date('m/Y', strtotime($kpi['periodo']));
 
-    $html = '<div class="col-md-6 col-lg-4 col-xl-3">';
-    $html .= '<div class="card kpi-card border-start border-4 border-' . e($corClasse) . ' h-100">';
-    $html .= '<div class="card-body pb-2">';
-    $html .= '<div class="d-flex justify-content-between align-items-start mb-1">';
-    $html .= '<span class="badge bg-light text-dark border">' . e($periodoFormatado) . '</span>';
-    $html .= '<span class="text-' . e($corClasse) . ' fs-5"><i class="bi ' . e($icone) . '"></i></span>';
+    // Barra de progresso: sempre expressa "quanto da meta já foi
+    // alcançado" (0-100%+), mesmo quando o bom é o valor ser MENOR --
+    // nesse caso passar de 100% é ruim, não bom, mas a barra preenche na
+    // MESMA cor do status (vermelho), então continua lendo certo.
+    $percentualBarra = 0;
+    if ($metaDefinida) {
+        $metaFloat = (float) $kpi['meta'];
+        $percentualBarra = $metaFloat > 0 ? min(140, round(((float) $kpi['valor'] / $metaFloat) * 100)) : ((float) $kpi['valor'] > 0 ? 100 : 0);
+    }
+
+    $html = '<div class="kpi-card" style="--kpi-cor:' . e($corHex) . ';">';
+    $html .= '<div class="kpi-card-topo">';
+    $html .= '<span class="kpi-card-icone"><i class="bi ' . e($icone) . '"></i></span>';
+    $html .= '<span class="kpi-card-periodo">' . e($periodoFormatado) . '</span>';
     $html .= '</div>';
-    $html .= '<div class="fw-semibold small text-muted text-truncate" title="' . e($kpi['nome_kpi']) . '">' . e($kpi['nome_kpi']) . '</div>';
-    $html .= '<div class="fs-4 fw-bold">' . e($valorFormatado) . '</div>';
-    if ($metaFormatada !== null) {
-        $html .= '<div class="small text-' . e($corClasse) . ' fw-semibold">' . e($statusLabel) . '</div>';
-        $html .= '<div class="small text-muted">Meta: ' . e($metaFormatada) . '</div>';
+    $html .= '<div class="kpi-card-nome text-truncate" title="' . e($kpi['nome_kpi']) . '">' . e($kpi['nome_kpi']) . '</div>';
+    $html .= '<div class="kpi-card-valor">' . e($valorFormatado) . '</div>';
+    if ($metaDefinida) {
+        $html .= '<div class="kpi-card-barra"><div class="kpi-card-barra-preenchida" style="width:' . min(100, $percentualBarra) . '%"></div></div>';
+        $html .= '<div class="kpi-card-status">' . e($statusLabel) . ' &middot; ' . $percentualBarra . '% da meta</div>';
+        $html .= '<div class="kpi-card-meta">Meta: ' . e($metaFormatada) . '</div>';
     } else {
-        $html .= '<div class="small text-muted">' . e($statusLabel) . '</div>';
+        $html .= '<div class="kpi-card-status kpi-card-status-neutro">' . e($statusLabel) . '</div>';
     }
     if (!empty($kpi['observacoes'])) {
-        $html .= '<div class="small text-muted mt-1">' . e($kpi['observacoes']) . '</div>';
+        $html .= '<div class="kpi-card-obs" title="' . e($kpi['observacoes']) . '">' . e($kpi['observacoes']) . '</div>';
     }
-    $html .= '</div>';
-    $html .= '<div class="card-footer bg-transparent d-flex justify-content-end gap-1 py-2">';
+    $html .= '<div class="kpi-card-rodape">';
     $html .= '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"'
         . ' data-id="' . (int) $kpi['id'] . '" data-nome="' . e($kpi['nome_kpi']) . '" data-valor="' . e($kpi['valor']) . '"'
         . ' data-meta="' . e($kpi['meta'] ?? '') . '" data-unidade="' . e($unidade) . '"'
@@ -1182,7 +1238,149 @@ function kpi_card_html(array $kpi, string $abaRetorno): string
     $html .= '</form>';
     $html .= '</div>';
     $html .= '</div>';
+    return $html;
+}
+
+/**
+ * Controle "Personalizar" (quantos cards por linha) + o wrapper de um
+ * grupo de cards de KPI de um mês. Reaproveitado pela aba KPIs geral e por
+ * cada sub-aba Métricas de setor -- o controle de quantidade É COMPARTILHADO
+ * entre todos eles (guarda em localStorage, aplica via CSS var --kpi-cols
+ * na raiz do documento, ver app.js) -- mudar num lugar muda em todos.
+ */
+function kpi_grades_html(array $kpis, string $abaRetorno, string $mensagemVazio): string
+{
+    if (!$kpis) {
+        return '<p class="text-muted text-center py-4 mb-0">' . e($mensagemVazio) . '</p>';
+    }
+
+    $html = '';
+    foreach (agrupar_kpis_por_periodo($kpis) as $grupo) {
+        $html .= '<h6 class="kpi-mes-titulo">' . e($grupo['label']) . '</h6>';
+        $html .= '<div class="kpi-grade">';
+        foreach ($grupo['itens'] as $kpi) {
+            $html .= kpi_card_html($kpi, $abaRetorno);
+        }
+        $html .= '</div>';
+    }
+
+    return $html;
+}
+
+/**
+ * Reduz um texto em Markdown (gerado pela IA) a uma prévia em texto corrido
+ * -- usado no card de Análise de Risco/Melhorias, que antes mostrava o
+ * Markdown crú escapado (tipo "## Nível de risco" aparecendo literalmente
+ * com os "##", colado no timestamp do card -- reclamação do Kleber: "coisa
+ * horrível... tudo descompensado"). Não é um renderizador de Markdown de
+ * verdade (a exportação em PDF já tem um em src/PdfExport.php) -- só tira
+ * os símbolos de heading/negrito/itálico/lista pra virar um parágrafo
+ * legível, que depois passa por e() normalmente antes de imprimir.
+ */
+function markdown_para_texto_simples(string $texto, int $maximoCaracteres = 220): string
+{
+    $limpo = preg_replace('/^#{1,6}\s*/m', '', $texto);
+    $limpo = preg_replace('/\*\*(.+?)\*\*/s', '$1', $limpo);
+    $limpo = preg_replace('/__(.+?)__/s', '$1', $limpo);
+    $limpo = preg_replace('/(?<!\*)\*([^*\n]+)\*(?!\*)/s', '$1', $limpo);
+    $limpo = preg_replace('/^[-*]\s+/m', '• ', $limpo);
+    $limpo = trim(preg_replace('/\s+/', ' ', $limpo));
+
+    return mb_strlen($limpo) > $maximoCaracteres ? mb_substr($limpo, 0, $maximoCaracteres - 1) . '…' : $limpo;
+}
+
+/**
+ * Detecta o nível de risco ("**Alto**", "**Médio**", "**Baixo**") que a IA
+ * escreve logo no início da análise de tipo "risco" (ver prompt em
+ * cliente.php) e devolve uma cor pra colorir o card -- mesma linguagem
+ * visual dos cards de KPI (vermelho/amarelo/verde), em vez do card ficar
+ * cinza sem informação nenhuma. Análises de "melhorias" não têm nível de
+ * risco (não faz sentido pra um relatório pro cliente), ficam sempre no
+ * acento neutro da marca.
+ */
+function analise_risco_cor(string $tipo, string $texto): array
+{
+    if ($tipo !== 'risco') {
+        return ['primary', null];
+    }
+    if (preg_match('/\*\*\s*(alto|m[eé]dio|baixo)\s*\*\*/iu', $texto, $m)) {
+        $mapa = [
+            'alto' => ['danger', 'Risco alto'],
+            'medio' => ['warning', 'Risco médio'],
+            'médio' => ['warning', 'Risco médio'],
+            'baixo' => ['success', 'Risco baixo'],
+        ];
+
+        return $mapa[mb_strtolower($m[1])] ?? ['secondary', null];
+    }
+
+    return ['secondary', null];
+}
+
+const ANALISE_CORES_HEX = [
+    'danger' => '#b91c1c',
+    'warning' => '#b45309',
+    'success' => '#15803d',
+    'secondary' => '#52525b',
+    'primary' => '#4f46e5',
+];
+
+const ANALISE_ICONES_COR = [
+    'danger' => 'bi-exclamation-triangle-fill',
+    'warning' => 'bi-exclamation-circle-fill',
+    'success' => 'bi-check-circle-fill',
+    'secondary' => 'bi-dash-circle',
+    'primary' => 'bi-stars',
+];
+
+/**
+ * Card de uma Análise de Risco/Melhorias gerada pela IA -- mesma
+ * linguagem visual dos cards de KPI (acento colorido lateral, ícone,
+ * badge, hover-lift), corrigindo o card antigo que dependia de classes
+ * "col-lg-4"/"flex-column"/"bg-danger" que nem existiam no CSS do projeto
+ * (por isso saía torto/descompensado -- reclamação real do Kleber, não só
+ * gosto: o card-body virava uma linha horizontal em vez de empilhar por
+ * cima, já que .flex-column não tinha efeito nenhum). A prévia do texto
+ * agora passa por markdown_para_texto_simples() -- antes mostrava o
+ * Markdown crú escapado ("## Nível de risco" aparecendo literalmente).
+ * $tituloSecao/$corBadgeSecaoLabel são só o rótulo da seção (Risco ou
+ * Melhorias), não confundir com a cor de risco individual do card.
+ */
+function analise_card_html(array $analise, string $tituloSecao): string
+{
+    [$corClasse, $nivelLabel] = analise_risco_cor($analise['tipo'], $analise['analise']);
+    $corHex = ANALISE_CORES_HEX[$corClasse] ?? ANALISE_CORES_HEX['primary'];
+    $icone = ANALISE_ICONES_COR[$corClasse] ?? ANALISE_ICONES_COR['primary'];
+    $escopo = $analise['setor_nome'] ?: 'Cliente inteiro';
+    $dataLabel = formatar_data($analise['criado_em']) . (!empty($analise['atualizado_em']) ? ' · editado em ' . formatar_data($analise['atualizado_em']) : '');
+    $preview = markdown_para_texto_simples($analise['analise'], 240);
+    $labelCompleto = $tituloSecao . ($analise['setor_nome'] ? ' - ' . $analise['setor_nome'] : '');
+
+    $html = '<div class="analise-card" style="--analise-cor:' . e($corHex) . ';" data-id="' . (int) $analise['id'] . '" data-tipo="' . e($analise['tipo']) . '" data-label="' . e($labelCompleto) . '">';
+    $html .= '<div class="analise-card-topo">';
+    $html .= '<span class="analise-card-icone"><i class="bi ' . e($icone) . '"></i></span>';
+    $html .= '<span class="analise-card-escopo text-truncate" title="' . e($escopo) . '">' . e($escopo) . '</span>';
+    $html .= '<span class="analise-card-data">' . e($dataLabel) . '</span>';
     $html .= '</div>';
+    if ($nivelLabel !== null) {
+        $html .= '<div class="analise-card-nivel">' . e($nivelLabel) . '</div>';
+    }
+    $html .= '<p class="analise-card-preview">' . e($preview) . '</p>';
+    $html .= '<textarea class="d-none analise-texto-completo">' . e($analise['analise']) . '</textarea>';
+    $html .= '<div class="analise-card-rodape">';
+    $html .= '<button type="button" class="btn btn-sm btn-outline-dark botao-visualizar-analise" title="Visualizar"><i class="bi bi-eye"></i></button>';
+    $html .= '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-analise" title="Editar"><i class="bi bi-pencil"></i></button>';
+    $html .= '<button type="button" class="btn btn-sm btn-outline-dark botao-exportar-pdf-analise" title="Exportar PDF"><i class="bi bi-file-earmark-pdf"></i></button>';
+    $html .= '<form method="post" class="d-inline form-excluir-analise">';
+    $html .= csrf_field();
+    $html .= '<input type="hidden" name="acao" value="excluir_analise_risco">';
+    $html .= '<input type="hidden" name="aba_retorno" value="analise-risco">';
+    $html .= '<input type="hidden" name="id" value="' . (int) $analise['id'] . '">';
+    $html .= '<button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir"><i class="bi bi-trash"></i></button>';
+    $html .= '</form>';
+    $html .= '</div>';
+    $html .= '</div>';
+
     return $html;
 }
 
