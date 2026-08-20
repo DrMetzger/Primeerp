@@ -472,6 +472,19 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
 .card-stat.acento-violeta { border-left: 4px solid #7c3aed; }
 .card-stat.acento-laranja { border-left: 4px solid #c2410c; }
 
+/* Cards da tela inicial de Relatórios (relatorios.php) -- pedido do Kleber
+   pra essa seção ser "glamorosa", então em vez do card-stat padrão (borda
+   lateral fina) ganham um ícone grande num círculo com o mesmo gradiente
+   do timbrado/navbar e sobem levemente no hover, convidando o clique. */
+.relatorio-card { transition: transform .15s ease, box-shadow .15s ease; }
+.relatorio-card:hover { transform: translateY(-3px); box-shadow: var(--ph-elev-2, 0 8px 20px rgba(0,0,0,.1)); }
+.relatorio-card-icone {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1e1b4b, #3730a3, #6d28d9);
+    color: #fff; font-size: 1.5rem;
+}
+
 /* Círculo colorido com ícone -- usado no ícone do setor (icone_setor_html)
    e nos cards do dashboard (icone_circulo_html), mesmo componente visual
    reaproveitado nos dois lugares. */

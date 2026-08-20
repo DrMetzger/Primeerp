@@ -34,6 +34,7 @@ use AdminPrime\Auth;
         <li class="nav-item"><a class="nav-link" href="<?= url('clientes.php') ?>"><i class="bi bi-people-fill"></i> Clientes</a></li>
         <?php if (Auth::isAdmin()): ?>
         <li class="nav-item"><a class="nav-link" href="<?= url('usuarios.php') ?>"><i class="bi bi-person-gear"></i> Usuários</a></li>
+        <li class="nav-item"><a class="nav-link" href="<?= url('relatorios.php') ?>"><i class="bi bi-clipboard-data"></i> Relatórios</a></li>
         <?php endif; ?>
       </ul>
       <?php if (Auth::isAdmin()): ?>

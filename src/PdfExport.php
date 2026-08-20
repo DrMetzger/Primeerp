@@ -155,6 +155,75 @@ class PdfExport extends \FPDF
         $this->Ln(1);
     }
 
+    /** Título de bloco/seção dentro do documento (ver relatorios.php -- um relatório pode ter mais de uma tabela, cada uma com seu próprio título). */
+    public function tituloBloco(string $texto): void
+    {
+        $this->Ln(2);
+        $this->SetFont('Helvetica', 'B', 11);
+        $this->SetTextColor(55, 48, 163);
+        $this->Cell(0, 8, $this->texto($texto), 0, 1);
+        $this->SetTextColor(20, 20, 20);
+    }
+
+    /**
+     * Tabela com cabeçalho colorido (mesmo tom do timbrado) + zebra nas
+     * linhas -- usada pelos relatórios (ver relatorios.php). $colunas é
+     * ['Rótulo' => larguraMm, ...] (a soma das larguras deve caber na área
+     * útil da página, ~180mm em A4 com as margens padrão). $alinhamentos é
+     * opcional, mesmo índice de $colunas ('L'/'C'/'R', padrão 'L').
+     *
+     * Usa Cell() (uma linha só, sem quebra automática de texto) em vez de
+     * MultiCell -- suficiente pra dado tabular curto (título, status, data,
+     * número). Quem monta os dados deve truncar texto muito longo antes de
+     * chamar isso (ver truncarTexto() em relatorios.php); implementar
+     * altura de linha variável com MultiCell por célula é bem mais
+     * complexo e essa classe não precisava disso até agora.
+     */
+    public function tabela(array $colunas, array $linhas, array $alinhamentos = []): void
+    {
+        $rotulos = array_keys($colunas);
+        $larguras = array_values($colunas);
+
+        $desenharCabecalho = function () use ($rotulos, $larguras): void {
+            $this->SetFont('Helvetica', 'B', 9);
+            $this->SetFillColor(55, 48, 163);
+            $this->SetTextColor(255, 255, 255);
+            $this->SetDrawColor(55, 48, 163);
+            foreach ($rotulos as $i => $rotulo) {
+                $this->Cell($larguras[$i], 7, $this->texto($rotulo), 1, 0, 'L', true);
+            }
+            $this->Ln();
+            $this->SetFont('Helvetica', '', 8.5);
+            $this->SetTextColor(20, 20, 20);
+            $this->SetDrawColor(224, 224, 231);
+        };
+
+        $desenharCabecalho();
+
+        $alturaLinha = 6.2;
+        $zebraLigada = false;
+        foreach ($linhas as $linha) {
+            // SetAutoPageBreak cuida do resto do documento, mas o CABEÇALHO
+            // da tabela precisa ser redesenhado manualmente em toda página
+            // nova, senão a segunda página de um relatório grande vira uma
+            // parede de números sem ninguém saber o que é cada coluna.
+            if ($this->GetY() + $alturaLinha > $this->GetPageHeight() - $this->bMargin) {
+                $this->AddPage();
+                $desenharCabecalho();
+            }
+
+            $corFundo = $zebraLigada ? 245 : 255;
+            $this->SetFillColor($corFundo, $corFundo, $corFundo + ($zebraLigada ? 3 : 0));
+            foreach (array_values($linha) as $i => $valor) {
+                $this->Cell($larguras[$i] ?? 30, $alturaLinha, $this->texto((string) $valor), 1, 0, $alinhamentos[$i] ?? 'L', true);
+            }
+            $this->Ln();
+            $zebraLigada = !$zebraLigada;
+        }
+
+        $this->SetTextColor(20, 20, 20);
+    }
+
     /**
      * Renderiza um texto em MARKDOWN simples (o formato que a IA já é
      * instruída a usar, ver cliente.php/AiSugestoes) com hierarquia visual
