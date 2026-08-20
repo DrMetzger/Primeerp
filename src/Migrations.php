@@ -659,6 +659,12 @@ class Migrations
         $pdo->exec("ALTER TABLE documentos ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor específico, ou NULL = documento geral do cliente' AFTER cliente_id");
         $pdo->exec("ALTER TABLE kpis ADD COLUMN IF NOT EXISTS setor_id INT NULL COMMENT 'Setor específico, ou NULL = KPI geral do cliente' AFTER cliente_id");
 
+        // Redesign dos cards de KPI (cores vermelho/amarelo/verde contra a
+        // meta): sem saber se "maior é melhor" ou "menor é melhor" pra cada
+        // KPI não dá pra colorir nada -- ex.: "chamados urgentes" quanto
+        // menor melhor, já "chamados resolvidos" quanto maior melhor.
+        $pdo->exec("ALTER TABLE kpis ADD COLUMN IF NOT EXISTS direcao_melhor ENUM('maior','menor') NOT NULL DEFAULT 'maior' COMMENT 'maior=quanto mais alto melhor, menor=quanto mais baixo melhor (usado para colorir o card contra a meta)' AFTER meta");
+
         // Propostas de melhoria/desenvolvimento registradas dentro de um
         // setor -- pedido do Kleber pra ter um lugar de acompanhar ideias de
         // evolução do processo daquele setor, separado do chamado normal

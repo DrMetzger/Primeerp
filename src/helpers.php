@@ -1076,6 +1076,117 @@ function formatar_duracao_minutos(?float $minutos): string
 }
 
 /**
+ * Formata o valor/meta de um KPI de cliente (aba KPIs/Métricas) -- número
+ * de chamados não pode ganhar duas casas decimais à toa ("0,00 chamados"
+ * não faz sentido nenhum), então só mostra decimal quando o valor realmente
+ * tem parte fracionária. Unidade "min" delega pra formatar_duracao_minutos()
+ * (fica "2h 5min" em vez de "125,00 min").
+ */
+function formatar_numero_kpi(float $valor, string $unidade = ''): string
+{
+    if ($unidade === 'min') {
+        return formatar_duracao_minutos($valor);
+    }
+    $temFracao = abs($valor - round($valor)) > 0.001;
+    $numeroFormatado = number_format($valor, $temFracao ? 2 : 0, ',', '.');
+    return $unidade !== '' ? $numeroFormatado . ' ' . $unidade : $numeroFormatado;
+}
+
+/**
+ * Classifica um KPI contra a meta em vermelho/amarelo/verde. Sem saber se
+ * pra esse KPI é melhor o valor ser MAIOR (ex.: chamados resolvidos) ou
+ * MENOR (ex.: chamados urgentes, tempo médio) não tem como colorir nada --
+ * 5 chamados urgentes pode ser ótimo ou péssimo dependendo da meta e da
+ * direção. Sem meta cadastrada o card fica neutro (cinza), nunca "vermelho
+ * por padrão" -- ausência de meta não é a mesma coisa que meta não batida.
+ * Retorna [status, texto, classe-bootstrap-de-cor, ícone-bootstrap].
+ */
+function kpi_status(array $kpi): array
+{
+    if ($kpi['meta'] === null || $kpi['meta'] === '') {
+        return ['neutro', 'Sem meta definida', 'secondary', 'bi-dash-circle'];
+    }
+    $valor = (float) $kpi['valor'];
+    $meta = (float) $kpi['meta'];
+    $menorMelhor = ($kpi['direcao_melhor'] ?? 'maior') === 'menor';
+
+    if ($menorMelhor) {
+        if ($valor <= $meta) {
+            return ['verde', 'Dentro da meta', 'success', 'bi-check-circle-fill'];
+        }
+        if ($valor <= $meta * 1.2) {
+            return ['amarelo', 'Perto da meta', 'warning', 'bi-exclamation-triangle-fill'];
+        }
+        return ['vermelho', 'Fora da meta', 'danger', 'bi-x-circle-fill'];
+    }
+
+    if ($valor >= $meta) {
+        return ['verde', 'Dentro da meta', 'success', 'bi-check-circle-fill'];
+    }
+    if ($meta > 0 && $valor >= $meta * 0.8) {
+        return ['amarelo', 'Perto da meta', 'warning', 'bi-exclamation-triangle-fill'];
+    }
+    return ['vermelho', 'Fora da meta', 'danger', 'bi-x-circle-fill'];
+}
+
+/**
+ * Card colorido (vermelho/amarelo/verde/cinza) de um KPI de cliente --
+ * substitui a antiga linha de tabela (pedido do Kleber: "as KPIS pra mim
+ * precisam ser em CARDS ter cores"). Reaproveitado tanto na aba "KPIs"
+ * (geral do cliente) quanto na sub-aba "Métricas" de cada setor, pra não
+ * duplicar marcação e os dois nunca ficarem diferentes um do outro.
+ * $abaRetorno é "kpis" ou "setores" -- pra onde a página volta depois de
+ * editar/excluir (mesma convenção já usada nos botões antigos).
+ */
+function kpi_card_html(array $kpi, string $abaRetorno): string
+{
+    [, $statusLabel, $corClasse, $icone] = kpi_status($kpi);
+    $unidade = $kpi['unidade'] ?? '';
+    $valorFormatado = formatar_numero_kpi((float) $kpi['valor'], $unidade);
+    $metaFormatada = ($kpi['meta'] !== null && $kpi['meta'] !== '') ? formatar_numero_kpi((float) $kpi['meta'], $unidade) : null;
+    $periodoFormatado = date('m/Y', strtotime($kpi['periodo']));
+
+    $html = '<div class="col-md-6 col-lg-4 col-xl-3">';
+    $html .= '<div class="card kpi-card border-start border-4 border-' . e($corClasse) . ' h-100">';
+    $html .= '<div class="card-body pb-2">';
+    $html .= '<div class="d-flex justify-content-between align-items-start mb-1">';
+    $html .= '<span class="badge bg-light text-dark border">' . e($periodoFormatado) . '</span>';
+    $html .= '<span class="text-' . e($corClasse) . ' fs-5"><i class="bi ' . e($icone) . '"></i></span>';
+    $html .= '</div>';
+    $html .= '<div class="fw-semibold small text-muted text-truncate" title="' . e($kpi['nome_kpi']) . '">' . e($kpi['nome_kpi']) . '</div>';
+    $html .= '<div class="fs-4 fw-bold">' . e($valorFormatado) . '</div>';
+    if ($metaFormatada !== null) {
+        $html .= '<div class="small text-' . e($corClasse) . ' fw-semibold">' . e($statusLabel) . '</div>';
+        $html .= '<div class="small text-muted">Meta: ' . e($metaFormatada) . '</div>';
+    } else {
+        $html .= '<div class="small text-muted">' . e($statusLabel) . '</div>';
+    }
+    if (!empty($kpi['observacoes'])) {
+        $html .= '<div class="small text-muted mt-1">' . e($kpi['observacoes']) . '</div>';
+    }
+    $html .= '</div>';
+    $html .= '<div class="card-footer bg-transparent d-flex justify-content-end gap-1 py-2">';
+    $html .= '<button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"'
+        . ' data-id="' . (int) $kpi['id'] . '" data-nome="' . e($kpi['nome_kpi']) . '" data-valor="' . e($kpi['valor']) . '"'
+        . ' data-meta="' . e($kpi['meta'] ?? '') . '" data-unidade="' . e($unidade) . '"'
+        . ' data-direcao="' . e($kpi['direcao_melhor'] ?? 'maior') . '"'
+        . ' data-periodo="' . e(date('Y-m', strtotime($kpi['periodo']))) . '" data-setor-id="' . e((string) ($kpi['setor_id'] ?? '')) . '"'
+        . ' data-observacoes="' . e($kpi['observacoes'] ?? '') . '" data-aba-retorno="' . e($abaRetorno) . '"'
+        . ' title="Editar"><i class="bi bi-pencil"></i></button>';
+    $html .= '<form method="post" class="d-inline" onsubmit="return confirm(\'Excluir esse KPI? Essa ação não pode ser desfeita.\');">';
+    $html .= csrf_field();
+    $html .= '<input type="hidden" name="acao" value="excluir_kpi">';
+    $html .= '<input type="hidden" name="aba_retorno" value="' . e($abaRetorno) . '">';
+    $html .= '<input type="hidden" name="kpi_id" value="' . (int) $kpi['id'] . '">';
+    $html .= '<button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir"><i class="bi bi-trash"></i></button>';
+    $html .= '</form>';
+    $html .= '</div>';
+    $html .= '</div>';
+    $html .= '</div>';
+    return $html;
+}
+
+/**
  * Texto pequeno de comparação com o mês anterior, usado nos cards de KPI do
  * dashboard (chamados abertos/fechados no mês). Não usa cor de "bom/ruim"
  * -- mais chamado aberto não é necessariamente uma notícia ruim (pode ser só

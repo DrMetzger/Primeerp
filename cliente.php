@@ -69,13 +69,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'criar_kpi') {
-        $stmt = $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $direcaoMelhorKpi = in_array($_POST['direcao_melhor'] ?? '', ['maior', 'menor'], true) ? $_POST['direcao_melhor'] : 'maior';
+        $stmt = $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, direcao_melhor, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([
             $clienteId,
             $_POST['setor_id'] ?: null,
             trim($_POST['nome_kpi']),
             str_replace(',', '.', $_POST['valor']),
             $_POST['meta'] !== '' ? str_replace(',', '.', $_POST['meta']) : null,
+            $direcaoMelhorKpi,
             trim($_POST['unidade']) ?: null,
             $_POST['periodo'] . '-01',
             trim($_POST['observacoes']) ?: null,
@@ -84,12 +86,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'editar_kpi') {
-        $stmt = $pdo->prepare('UPDATE kpis SET setor_id = ?, nome_kpi = ?, valor = ?, meta = ?, unidade = ?, periodo = ?, observacoes = ? WHERE id = ? AND cliente_id = ?');
+        $direcaoMelhorKpi = in_array($_POST['direcao_melhor'] ?? '', ['maior', 'menor'], true) ? $_POST['direcao_melhor'] : 'maior';
+        $stmt = $pdo->prepare('UPDATE kpis SET setor_id = ?, nome_kpi = ?, valor = ?, meta = ?, direcao_melhor = ?, unidade = ?, periodo = ?, observacoes = ? WHERE id = ? AND cliente_id = ?');
         $stmt->execute([
             $_POST['setor_id'] ?: null,
             trim($_POST['nome_kpi']),
             str_replace(',', '.', $_POST['valor']),
             $_POST['meta'] !== '' ? str_replace(',', '.', $_POST['meta']) : null,
+            $direcaoMelhorKpi,
             trim($_POST['unidade']) ?: null,
             $_POST['periodo'] . '-01',
             trim($_POST['observacoes']) ?: null,
@@ -141,14 +145,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         $resultadoCalculo = $stmtCalculo->fetch();
 
+        // Direção de cada métrica automática -- "quanto MAIOR melhor" pra
+        // volume/resolução, "quanto MENOR melhor" pra urgência/tempo de
+        // espera. Sem isso o card não sabe se pintar de verde ou vermelho.
         $kpisAutomaticos = [
-            ['Chamados abertos', (int) $resultadoCalculo['total_abertos'], 'chamados'],
-            ['Chamados urgentes/alta prioridade', (int) $resultadoCalculo['total_urgentes'], 'chamados'],
-            ['Chamados resolvidos', (int) $resultadoCalculo['total_resolvidos'], 'chamados'],
-            ['Tempo médio de atendimento', $resultadoCalculo['tempo_medio_min'] !== null ? round((float) $resultadoCalculo['tempo_medio_min'], 2) : 0, 'min'],
+            ['Chamados abertos', (int) $resultadoCalculo['total_abertos'], 'chamados', 'maior'],
+            ['Chamados urgentes/alta prioridade', (int) $resultadoCalculo['total_urgentes'], 'chamados', 'menor'],
+            ['Chamados resolvidos', (int) $resultadoCalculo['total_resolvidos'], 'chamados', 'maior'],
+            ['Tempo médio de atendimento', $resultadoCalculo['tempo_medio_min'] !== null ? round((float) $resultadoCalculo['tempo_medio_min'], 2) : 0, 'min', 'menor'],
         ];
 
-        foreach ($kpisAutomaticos as [$nomeKpiAuto, $valorKpiAuto, $unidadeKpiAuto]) {
+        foreach ($kpisAutomaticos as [$nomeKpiAuto, $valorKpiAuto, $unidadeKpiAuto, $direcaoKpiAuto]) {
             $stmtMetaAnterior = $pdo->prepare("SELECT meta FROM kpis WHERE {$condicaoSetor} AND nome_kpi = ? AND meta IS NOT NULL ORDER BY periodo DESC LIMIT 1");
             $stmtMetaAnterior->execute([...$paramsSetor, $nomeKpiAuto]);
             $metaAnteriorKpi = $stmtMetaAnterior->fetchColumn();
@@ -159,11 +166,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $idKpiExistente = $stmtKpiExistente->fetchColumn();
 
             if ($idKpiExistente) {
-                $pdo->prepare('UPDATE kpis SET valor = ?, unidade = ?, meta = COALESCE(meta, ?), observacoes = ? WHERE id = ?')
-                    ->execute([$valorKpiAuto, $unidadeKpiAuto, $metaAnteriorKpi, 'Calculado automaticamente a partir dos chamados.', $idKpiExistente]);
+                $pdo->prepare('UPDATE kpis SET valor = ?, unidade = ?, meta = COALESCE(meta, ?), direcao_melhor = ?, observacoes = ? WHERE id = ?')
+                    ->execute([$valorKpiAuto, $unidadeKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, 'Calculado automaticamente a partir dos chamados.', $idKpiExistente]);
             } else {
-                $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$clienteId, $setorIdCalculo, $nomeKpiAuto, $valorKpiAuto, $metaAnteriorKpi, $unidadeKpiAuto, $periodoCalculo, 'Calculado automaticamente a partir dos chamados.']);
+                $pdo->prepare('INSERT INTO kpis (cliente_id, setor_id, nome_kpi, valor, meta, direcao_melhor, unidade, periodo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$clienteId, $setorIdCalculo, $nomeKpiAuto, $valorKpiAuto, $metaAnteriorKpi, $direcaoKpiAuto, $unidadeKpiAuto, $periodoCalculo, 'Calculado automaticamente a partir dos chamados.']);
             }
         }
 
@@ -3236,8 +3243,8 @@ require __DIR__ . '/templates/header.php';
 
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
-        <p class="text-muted small mb-1"><i class="bi bi-graph-up"></i> KPI (métrica) é qualquer número que ajuda a acompanhar a saúde do atendimento -- ex.: quantos chamados abriram, quantos foram resolvidos, tempo médio de resposta, % dentro do prazo (SLA). Serve pra comparar mês a mês e enxergar se o processo está piorando ou melhorando.</p>
-        <p class="text-muted small mb-2">Essa aba aqui é só o <strong>geral do cliente</strong> (chamados sem setor vinculado) -- se esse cliente tem setores (aba Setores), a métrica de cada setor fica dentro dele mesmo, não aqui. <?= $setores ? 'Como esse cliente tem setor cadastrado, o normal é a maioria (ou todos) dos KPIs aparecerem lá, não aqui.' : '' ?></p>
+        <p class="text-muted small mb-1"><i class="bi bi-graph-up"></i> KPI (métrica) é qualquer número que ajuda a acompanhar a saúde do atendimento -- ex.: quantos chamados abriram, quantos foram resolvidos, tempo médio de resposta. A <strong>meta</strong> é o número que você quer bater; sem meta cadastrada o card fica cinza (neutro), não vermelho -- ausência de meta não é meta não batida.</p>
+        <p class="text-muted small mb-2">Essa aba aqui é só o <strong>geral do cliente</strong> (chamados sem setor vinculado) -- se esse cliente tem setores (aba Setores), a métrica de cada setor fica dentro dele mesmo, não aqui. <?= $setores ? 'Como esse cliente tem setor cadastrado, o normal é a maioria (ou todos) dos KPIs aparecerem lá, não aqui.' : '' ?> Importante: KPI é só acompanhamento manual/automático deste cliente -- a seção <a href="<?= url('relatorios.php') ?>">Relatórios</a> (chamados geral, estatísticas etc.) é independente e não lê esses valores.</p>
         <div class="toolbar d-flex flex-wrap gap-2 align-items-end">
             <button type="button" class="btn btn-dark btn-sm botao-novo-kpi-geral"><i class="bi bi-plus-lg"></i> Registrar KPI</button>
             <form method="post" class="d-flex gap-2 align-items-end">
@@ -3252,44 +3259,15 @@ require __DIR__ . '/templates/header.php';
                 <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-magic"></i> Calcular automaticamente</button>
             </form>
         </div>
-        <div class="card card-stat">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                    <tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($kpisGerais as $k): ?>
-                        <tr>
-                            <td><?= date('m/Y', strtotime($k['periodo'])) ?></td>
-                            <td class="fw-semibold"><?= e($k['nome_kpi']) ?></td>
-                            <td><?= e(number_format((float)$k['valor'], 2, ',', '.')) ?> <?= e($k['unidade']) ?></td>
-                            <td>
-                                <?php if ($k['meta'] !== null): ?>
-                                    <?= e(number_format((float)$k['meta'], 2, ',', '.')) ?>
-                                    <?= (float)$k['valor'] >= (float)$k['meta'] ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-exclamation-circle-fill text-warning"></i>' ?>
-                                <?php else: ?>-<?php endif; ?>
-                            </td>
-                            <td class="text-muted small"><?= e($k['observacoes']) ?></td>
-                            <td class="text-end">
-                                <button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"
-                                    data-id="<?= $k['id'] ?>" data-nome="<?= e($k['nome_kpi']) ?>" data-valor="<?= e($k['valor']) ?>"
-                                    data-meta="<?= e($k['meta'] ?? '') ?>" data-unidade="<?= e($k['unidade']) ?>"
-                                    data-periodo="<?= date('Y-m', strtotime($k['periodo'])) ?>" data-setor-id="<?= $k['setor_id'] ?? '' ?>"
-                                    data-observacoes="<?= e($k['observacoes']) ?>" data-aba-retorno="kpis"
-                                ><i class="bi bi-pencil"></i></button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($kpisGerais)): ?>
-                        <tr><td colspan="6" class="text-muted text-center py-3">Nenhum KPI geral registrado ainda.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-                </div>
-            </div>
+        <?php if ($kpisGerais): ?>
+        <div class="row g-3">
+            <?php foreach ($kpisGerais as $k): ?>
+                <?= kpi_card_html($k, 'kpis') ?>
+            <?php endforeach; ?>
         </div>
+        <?php else: ?>
+            <p class="text-muted text-center py-4">Nenhum KPI geral registrado ainda -- use "Registrar KPI" ou "Calcular automaticamente" acima.</p>
+        <?php endif; ?>
     </div>
 
     <!-- ANÁLISE DE RISCO -->
@@ -3710,34 +3688,10 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <p class="text-muted small">O cálculo automático usa os chamados desse setor no mês escolhido: quantos abriram, quantos foram resolvidos, quantos eram urgente/alta prioridade e o tempo médio de atendimento. Se já existir um KPI com o mesmo nome nesse mês, ele é atualizado (não duplica); uma meta cadastrada manualmente antes é preservada.</p>
                         <?php if ($kpisSetor): ?>
-                        <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
-                            <thead><tr><th>Período</th><th>KPI</th><th>Valor</th><th>Meta</th><th>Observações</th><th></th></tr></thead>
-                            <tbody>
+                        <div class="row g-3">
                             <?php foreach ($kpisSetor as $k): ?>
-                                <tr>
-                                    <td><?= date('m/Y', strtotime($k['periodo'])) ?></td>
-                                    <td class="fw-semibold"><?= e($k['nome_kpi']) ?></td>
-                                    <td><?= e(number_format((float) $k['valor'], 2, ',', '.')) ?> <?= e($k['unidade']) ?></td>
-                                    <td>
-                                        <?php if ($k['meta'] !== null): ?>
-                                            <?= e(number_format((float) $k['meta'], 2, ',', '.')) ?>
-                                            <?= (float) $k['valor'] >= (float) $k['meta'] ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-exclamation-circle-fill text-warning"></i>' ?>
-                                        <?php else: ?>-<?php endif; ?>
-                                    </td>
-                                    <td class="text-muted small"><?= e($k['observacoes']) ?></td>
-                                    <td class="text-end">
-                                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-kpi"
-                                            data-id="<?= $k['id'] ?>" data-nome="<?= e($k['nome_kpi']) ?>" data-valor="<?= e($k['valor']) ?>"
-                                            data-meta="<?= e($k['meta'] ?? '') ?>" data-unidade="<?= e($k['unidade']) ?>"
-                                            data-periodo="<?= date('Y-m', strtotime($k['periodo'])) ?>" data-setor-id="<?= $k['setor_id'] ?? '' ?>"
-                                            data-observacoes="<?= e($k['observacoes']) ?>" data-aba-retorno="setores"
-                                        ><i class="bi bi-pencil"></i></button>
-                                    </td>
-                                </tr>
+                                <?= kpi_card_html($k, 'setores') ?>
                             <?php endforeach; ?>
-                            </tbody>
-                        </table>
                         </div>
                         <?php else: ?>
                             <p class="text-muted text-center py-3">Nenhuma métrica registrada ainda pra esse setor -- registre pra ajudar a IA a avaliar o processo.</p>
@@ -4328,7 +4282,13 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-4"><label class="form-label">Meta</label><input type="text" name="meta" class="form-control" placeholder="Ex: 98"></div>
                 <div class="col-4"><label class="form-label">Unidade</label><input type="text" name="unidade" class="form-control" placeholder="%, dias, un."></div>
             </div>
-            <div class="mb-3 mt-2"><label class="form-label">Período (mês/ano) *</label><input type="month" name="periodo" class="form-control" required value="<?= date('Y-m') ?>"></div>
+            <div class="mb-2 mt-2"><label class="form-label">Quando esse KPI é bom?</label>
+                <select name="direcao_melhor" class="form-select">
+                    <option value="maior">Quanto MAIOR o valor, melhor (ex.: chamados resolvidos)</option>
+                    <option value="menor">Quanto MENOR o valor, melhor (ex.: chamados urgentes, tempo médio)</option>
+                </select>
+            </div>
+            <div class="form-text mb-2">A meta é o número que você quer bater nesse KPI. Deixe em branco se ainda não tiver uma meta definida -- o card fica neutro (cinza) até você definir uma.</div>
             <div class="mb-3"><label class="form-label">Setor</label>
                 <select name="setor_id" id="novoKpiSetor" class="form-select">
                     <option value="">Geral (todo o cliente)</option>
@@ -4365,6 +4325,13 @@ require __DIR__ . '/templates/header.php';
                 <div class="col-4"><label class="form-label">Meta</label><input type="text" name="meta" id="editarKpiMeta" class="form-control"></div>
                 <div class="col-4"><label class="form-label">Unidade</label><input type="text" name="unidade" id="editarKpiUnidade" class="form-control"></div>
             </div>
+            <div class="mb-2 mt-2"><label class="form-label">Quando esse KPI é bom?</label>
+                <select name="direcao_melhor" id="editarKpiDirecao" class="form-select">
+                    <option value="maior">Quanto MAIOR o valor, melhor (ex.: chamados resolvidos)</option>
+                    <option value="menor">Quanto MENOR o valor, melhor (ex.: chamados urgentes, tempo médio)</option>
+                </select>
+            </div>
+            <div class="form-text mb-2">A meta é o número que você quer bater nesse KPI. Deixe em branco se ainda não tiver uma meta definida -- o card fica neutro (cinza) até você definir uma.</div>
             <div class="mb-3 mt-2"><label class="form-label">Período (mês/ano) *</label><input type="month" name="periodo" id="editarKpiPeriodo" class="form-control" required></div>
             <div class="mb-3"><label class="form-label">Setor</label>
                 <select name="setor_id" id="editarKpiSetor" class="form-select">
@@ -5628,8 +5595,10 @@ document.addEventListener('DOMContentLoaded', function () {
         botaoNovoKpiGeral.addEventListener('click', function () {
             var campoSetor = document.getElementById('novoKpiSetor');
             var campoRetorno = document.getElementById('novoKpiAbaRetorno');
+            var formNovoKpi = document.getElementById('modalNovoKpi').querySelector('form');
             if (campoSetor) campoSetor.value = '';
             if (campoRetorno) campoRetorno.value = 'kpis';
+            if (formNovoKpi) formNovoKpi.reset();
             PrimeUI.openModal(document.getElementById('modalNovoKpi'));
         });
     }
@@ -5641,6 +5610,8 @@ document.addEventListener('DOMContentLoaded', function () {
         botao.addEventListener('click', function () {
             var campoSetor = document.getElementById('novoKpiSetor');
             var campoRetorno = document.getElementById('novoKpiAbaRetorno');
+            var formNovoKpi = document.getElementById('modalNovoKpi').querySelector('form');
+            if (formNovoKpi) formNovoKpi.reset();
             if (campoSetor) campoSetor.value = botao.getAttribute('data-setor-id');
             if (campoRetorno) campoRetorno.value = 'setores';
             PrimeUI.openModal(document.getElementById('modalNovoKpi'));
@@ -6218,6 +6189,7 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('editarKpiValor').value = botao.getAttribute('data-valor') || '';
             document.getElementById('editarKpiMeta').value = botao.getAttribute('data-meta') || '';
             document.getElementById('editarKpiUnidade').value = botao.getAttribute('data-unidade') || '';
+            document.getElementById('editarKpiDirecao').value = botao.getAttribute('data-direcao') || 'maior';
             document.getElementById('editarKpiPeriodo').value = botao.getAttribute('data-periodo') || '';
             document.getElementById('editarKpiSetor').value = botao.getAttribute('data-setor-id') || '';
             document.getElementById('editarKpiObservacoes').value = botao.getAttribute('data-observacoes') || '';

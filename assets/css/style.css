@@ -485,6 +485,13 @@ select.form-select { appearance: none; background-image: url("data:image/svg+xml
     color: #fff; font-size: 1.5rem;
 }
 
+/* Cards de KPI (aba KPIs geral + Métricas por setor em cliente.php) --
+   a borda lateral já indica vermelho/amarelo/verde/cinza contra a meta
+   (ver kpi_status() em src/helpers.php); o hover só reforça que dá pra
+   clicar em editar/excluir no rodapé do card. */
+.kpi-card { transition: transform .15s ease, box-shadow .15s ease; }
+.kpi-card:hover { transform: translateY(-2px); box-shadow: var(--ph-elev-2, 0 8px 20px rgba(0,0,0,.1)); }
+
 /* Círculo colorido com ícone -- usado no ícone do setor (icone_setor_html)
    e nos cards do dashboard (icone_circulo_html), mesmo componente visual
    reaproveitado nos dois lugares. */
