@@ -31,14 +31,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = $_POST['acao'] ?? '';
 
     if ($acao === 'atualizar_cliente') {
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=?, portal_permite_gerenciar_equipe=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, responsavel_interno_id=?, observacoes=?, portal_permite_gerenciar_equipe=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             apenas_digitos($_POST['cnpj'] ?? ''),
             $_POST['status'],
             $_POST['responsavel_interno_id'] ?: null,
             trim($_POST['observacoes']) ?: null,
-            isset($_POST['acesso_fora_horario']) ? 1 : 0,
             isset($_POST['portal_permite_gerenciar_equipe']) ? 1 : 0,
             $clienteId,
         ]);
@@ -1717,6 +1716,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', 'Liberação de horário do WhatsApp atualizada.');
     }
 
+    // Liberação especial pro PORTAL (site) funcionar fora do horário
+    // comercial (ver PORTAL_CLIENTE_HORARIO_* em config.php e
+    // ClienteAuth::bloquearForaDoHorario()) -- é do CLIENTE inteiro, vale
+    // pro master e qualquer setor dele igual, mesma lógica da liberação de
+    // WhatsApp acima só que pra tela diferente. Antes esse toggle ficava
+    // duplicado em "Visão Geral" (aqui) e no modal de clientes.php -- pedido
+    // do Kleber pra deixar só num lugar, junto com a de WhatsApp.
+    if ($acao === 'alternar_acesso_portal_fora_horario') {
+        $pdo->prepare('UPDATE clientes SET acesso_fora_horario = NOT acesso_fora_horario WHERE id = ?')
+            ->execute([$clienteId]);
+        flash_set('sucesso', 'Liberação de horário do Portal atualizada.');
+    }
+
     // Vincula um usuário JÁ cadastrado a MAIS um setor -- aditivo, não tira
     // os outros setores que ele já tinha (uma pessoa pode estar em vários
     // ao mesmo tempo agora) -- é isso que "Gerenciar setores" usa pra
@@ -2634,17 +2646,12 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="col-12">
                             <div class="form-check">
-                                <input type="checkbox" name="acesso_fora_horario" id="acessoForaHorario" class="form-check-input" value="1" <?= $cliente['acesso_fora_horario'] ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="acessoForaHorario">
-                                    Liberar acesso ao portal fora do horário comercial (<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?>–<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?>) pra esse cliente
-                                </label>
-                            </div>
-                            <div class="form-check">
                                 <input type="checkbox" name="portal_permite_gerenciar_equipe" id="portalPermiteGerenciarEquipe" class="form-check-input" value="1" <?= $cliente['portal_permite_gerenciar_equipe'] ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="portalPermiteGerenciarEquipe">
                                     Deixar o master cadastrar setor/usuário sozinho no portal (aba "Setores e Usuários") -- só CRIAR e ALTERAR, exclusão continua só aqui. Desligado por padrão.
                                 </label>
                             </div>
+                            <div class="form-text mt-1">Liberação de acesso fora do horário comercial (portal e WhatsApp) agora fica só na aba <a href="#" id="linkIrAbaUsuariosHorario">Usuários</a>.</div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3">Salvar alterações</button>
@@ -3870,8 +3877,19 @@ require __DIR__ . '/templates/header.php';
             <div class="card-body p-0">
                 <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th>WhatsApp</th><th>Horário</th><th></th></tr></thead>
+                    <thead><tr><th></th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Setor</th><th>Portal</th><th>WhatsApp</th><th>Horário WhatsApp</th><th>Horário Portal</th><th></th></tr></thead>
                     <tbody>
+                        <?php
+                        // Monta o texto do confirm() inteiro aqui em PHP -- antes esses
+                        // dois botões concatenavam as constantes de horário fora de
+                        // qualquer tag de PHP, então isso saía como texto puro na tela
+                        // (o nome da constante e os pontos de concatenação, ao invés do
+                        // valor de verdade). Bug real, não só estético.
+                        $textoConfirmHorarioWhatsapp = ($cliente['whatsapp_liberacao_horario'] ? 'Remover' : 'Dar') . ' liberação especial pro WHATSAPP de ' . $cliente['nome']
+                            . ' funcionar fora do horário comercial (seg-sex, ' . WHATSAPP_HORARIO_COMERCIAL_INICIO . 'h-' . WHATSAPP_HORARIO_COMERCIAL_FIM . 'h)? Vale pro bot do WhatsApp, não afeta o portal.';
+                        $textoConfirmHorarioPortal = ($cliente['acesso_fora_horario'] ? 'Remover' : 'Dar') . ' liberação especial pro PORTAL de ' . $cliente['nome']
+                            . ' funcionar fora do horário comercial (' . sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) . '-' . sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) . ')? Vale pro portal (site), não afeta o WhatsApp.';
+                        ?>
                         <tr>
                             <td><?= avatar_html($cliente['contato_nome'] ?: $cliente['nome'], resolver_avatar_por_email($pdo, $cliente['contato_email'], $cliente['foto_perfil']), 'cliente') ?></td>
                             <td class="fw-semibold"><?= e($cliente['contato_nome'] ?: $cliente['nome']) ?> <span class="badge bg-dark">Master</span></td>
@@ -3895,16 +3913,26 @@ require __DIR__ . '/templates/header.php';
                                 </form>
                             </td>
                             <td>
-                                <form method="post" class="d-inline" onsubmit="return confirm('<?= $cliente['whatsapp_liberacao_horario'] ? 'Remover' : 'Dar' ?> liberação especial pro WhatsApp de <?= e($cliente['nome']) ?> funcionar fora do horário comercial (seg-sex, ' . WHATSAPP_HORARIO_COMERCIAL_INICIO . 'h-' . WHATSAPP_HORARIO_COMERCIAL_FIM . 'h)?');">
+                                <form method="post" class="d-inline" onsubmit="return confirm('<?= e($textoConfirmHorarioWhatsapp) ?>');">
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="acao" value="alternar_liberacao_horario">
                                     <input type="hidden" name="aba_retorno" value="usuarios">
-                                    <button type="submit" class="btn btn-sm <?= $cliente['whatsapp_liberacao_horario'] ? 'btn-outline-warning' : 'btn-outline-secondary' ?>" title="Vale pra qualquer pessoa desse cliente, no master ou em qualquer setor">
+                                    <button type="submit" class="btn btn-sm <?= $cliente['whatsapp_liberacao_horario'] ? 'btn-outline-warning' : 'btn-outline-secondary' ?>" title="WhatsApp -- vale pra qualquer pessoa desse cliente, no master ou em qualquer setor. Não afeta o portal.">
                                         <i class="bi <?= $cliente['whatsapp_liberacao_horario'] ? 'bi-clock-fill' : 'bi-clock' ?>"></i> <?= $cliente['whatsapp_liberacao_horario'] ? '24h liberado' : 'Só horário comercial' ?>
                                     </button>
                                 </form>
                             </td>
-                            <td class="text-muted small">Editar em "Visão geral"</td>
+                            <td>
+                                <form method="post" class="d-inline" onsubmit="return confirm('<?= e($textoConfirmHorarioPortal) ?>');">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="acao" value="alternar_acesso_portal_fora_horario">
+                                    <input type="hidden" name="aba_retorno" value="usuarios">
+                                    <button type="submit" class="btn btn-sm <?= $cliente['acesso_fora_horario'] ? 'btn-outline-warning' : 'btn-outline-secondary' ?>" title="Portal -- vale pra qualquer pessoa desse cliente, no master ou em qualquer setor. Não afeta o WhatsApp.">
+                                        <i class="bi <?= $cliente['acesso_fora_horario'] ? 'bi-clock-fill' : 'bi-clock' ?>"></i> <?= $cliente['acesso_fora_horario'] ? '24h liberado' : 'Só horário comercial' ?>
+                                    </button>
+                                </form>
+                            </td>
+                            <td></td>
                         </tr>
                         <?php foreach ($usuariosCliente as $uc): ?>
                         <tr class="linha-usuario-cliente" role="button" tabindex="0" data-usuario='<?= e(json_encode($uc, JSON_UNESCAPED_UNICODE)) ?>'>
@@ -3929,7 +3957,8 @@ require __DIR__ . '/templates/header.php';
                                     </button>
                                 </form>
                             </td>
-                            <td class="text-muted small" title="Liberação de horário vale pro cliente inteiro, é configurada só na linha do master">—</td>
+                            <td class="text-muted small" title="Liberação de horário do WhatsApp vale pro cliente inteiro, é configurada só na linha do master">—</td>
+                            <td class="text-muted small" title="Liberação de horário do Portal vale pro cliente inteiro, é configurada só na linha do master">—</td>
                             <td class="text-end" onclick="event.stopPropagation()">
                                 <div class="d-flex flex-wrap gap-1 justify-content-end">
                                     <form method="post" class="d-inline">
@@ -4923,6 +4952,19 @@ document.addEventListener('DOMContentLoaded', function () {
         seletorColunasKpi.addEventListener('change', function () {
             document.documentElement.style.setProperty('--kpi-cols', seletorColunasKpi.value);
             localStorage.setItem('kpiColunasPorLinha', seletorColunasKpi.value);
+        });
+    }
+
+    // Atalho "Usuários" no aviso da aba Visão Geral (liberação de horário
+    // saiu daqui, ver acao=alternar_acesso_portal_fora_horario) -- clica de
+    // verdade na aba real, em vez de só mudar a #url (senão a barra de abas
+    // não atualiza qual está marcada como ativa).
+    var linkIrAbaUsuarios = document.getElementById('linkIrAbaUsuariosHorario');
+    if (linkIrAbaUsuarios) {
+        linkIrAbaUsuarios.addEventListener('click', function (e) {
+            e.preventDefault();
+            var abaUsuarios = document.querySelector('.nav-tabs [data-bs-toggle="tab"][href="#usuarios"]');
+            if (abaUsuarios) abaUsuarios.click();
         });
     }
 

@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'atualizar_cliente') {
         $clienteId = (int) $_POST['cliente_id'];
-        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, acesso_fora_horario=?, portal_permite_gerenciar_equipe=? WHERE id=?');
+        $stmt = $pdo->prepare('UPDATE clientes SET nome=?, status=?, contato_nome=?, contato_email=?, contato_telefone=?, contato_documento=?, responsavel_interno_id=?, observacoes=?, portal_permite_gerenciar_equipe=? WHERE id=?');
         $stmt->execute([
             trim($_POST['nome']),
             $_POST['status'],
@@ -42,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             normalizar_documento($_POST['contato_documento'] ?? ''),
             $_POST['responsavel_interno_id'] ?: null,
             trim($_POST['observacoes']) ?: null,
-            isset($_POST['acesso_fora_horario']) ? 1 : 0,
             isset($_POST['portal_permite_gerenciar_equipe']) ? 1 : 0,
             $clienteId,
         ]);
@@ -356,17 +355,12 @@ require __DIR__ . '/templates/header.php';
                         </div>
                         <div class="col-12">
                             <div class="form-check">
-                                <input type="checkbox" name="acesso_fora_horario" id="alterarAcessoForaHorario" class="form-check-input" value="1">
-                                <label class="form-check-label" for="alterarAcessoForaHorario">
-                                    Liberar acesso ao portal fora do horário comercial (<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) ?>–<?= sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) ?>) pra esse cliente
-                                </label>
-                            </div>
-                            <div class="form-check">
                                 <input type="checkbox" name="portal_permite_gerenciar_equipe" id="alterarPermiteGerenciarEquipe" class="form-check-input" value="1">
                                 <label class="form-check-label" for="alterarPermiteGerenciarEquipe">
                                     Deixar o master cadastrar setor/usuário sozinho no portal -- só CRIAR e ALTERAR, exclusão continua só aqui. Desligado por padrão.
                                 </label>
                             </div>
+                            <div class="form-text mt-1">Liberação de acesso fora do horário comercial (portal e WhatsApp) fica na aba "Usuários" de cada cliente.</div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar alterações</button>
@@ -481,7 +475,6 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('alterarContatoDocumento').value = dados.contato_documento || '';
         document.getElementById('alterarResponsavelInterno').value = dados.responsavel_interno_id || '';
         document.getElementById('alterarObservacoes').value = dados.observacoes || '';
-        document.getElementById('alterarAcessoForaHorario').checked = !!Number(dados.acesso_fora_horario);
         document.getElementById('alterarPermiteGerenciarEquipe').checked = !!Number(dados.portal_permite_gerenciar_equipe);
 
         document.getElementById('excluirId').value = dados.id;
