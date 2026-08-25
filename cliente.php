@@ -3121,6 +3121,7 @@ require __DIR__ . '/templates/header.php';
                 <?php endif; ?>
             </div>
             <div class="toolbar-filtros">
+                <input type="text" id="buscaChamados" class="form-control form-control-sm busca-toolbar" placeholder="🔎 Buscar por número, título, categoria ou conteúdo...">
                 <div class="btn-group flex-wrap" role="group" id="filtroStatusChamados">
                     <button type="button" class="btn btn-sm filtro-pill filtro-pendentes active" data-filtro="pendentes"><i class="bi bi-exclamation-diamond"></i> Pendentes</button>
                     <button type="button" class="btn btn-sm filtro-pill filtro-todos" data-filtro="todos"><i class="bi bi-collection"></i> Todos</button>
@@ -3136,8 +3137,17 @@ require __DIR__ . '/templates/header.php';
         </div>
 
         <div id="listaChamados">
-        <?php foreach ($chamados as $c): ?>
-        <div class="card chamado-card mb-3" id="chamado-<?= (int) $c['id'] ?>" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>">
+        <?php foreach ($chamados as $c):
+            // Texto de busca (client-side, sem recarregar) -- número, título,
+            // categoria, setor e o conteúdo de toda a conversa, pra achar um
+            // chamado antigo sem precisar abrir um por um (pedido do Kleber).
+            $textoBuscaChamado = mb_strtolower(
+                '#' . $c['id'] . ' ' . $c['titulo'] . ' ' . ($c['categoria'] ?? '') . ' ' . ($c['setor_id'] ? ($nomesSetoresPorId[$c['setor_id']] ?? '') : '')
+                . ' ' . implode(' ', array_map(fn ($linha) => $linha['autor_nome'] . ' ' . $linha['mensagem'], $linhasChatPorChamado[$c['id']] ?? [])),
+                'UTF-8'
+            );
+        ?>
+        <div class="card chamado-card mb-3" id="chamado-<?= (int) $c['id'] ?>" data-status="<?= e($c['status']) ?>" data-prioridade="<?= e($c['prioridade']) ?>" data-setor="<?= $c['setor_id'] ? (int) $c['setor_id'] : 'sem-setor' ?>" data-busca="<?= e($textoBuscaChamado) ?>">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                     <div>
@@ -3272,7 +3282,7 @@ require __DIR__ . '/templates/header.php';
         <?php if (empty($chamados)): ?>
             <p class="text-muted text-center py-4">Nenhum chamado registrado ainda.</p>
         <?php endif; ?>
-        <p class="text-muted text-center py-3 d-none" id="avisoFiltroVazio">Nenhum chamado com esse status.</p>
+        <p class="text-muted text-center py-3 d-none" id="avisoFiltroVazio">Nenhum chamado encontrado com esses filtros.</p>
     </div>
 
     <!-- KPIS -->
@@ -5430,6 +5440,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var grupoFiltro = document.getElementById('filtroStatusChamados');
     var filtroAtual = 'pendentes';
     var filtroSetorAtual = 'todos';
+    var buscaAtual = '';
     function aplicarFiltroChamados() {
         var algumVisivel = false;
         document.querySelectorAll('#listaChamados .chamado-card').forEach(function (card) {
@@ -5441,12 +5452,23 @@ document.addEventListener('DOMContentLoaded', function () {
             // parte, não conta como pendência aqui.
             var mostraStatus = filtroAtual === 'todos' || (filtroAtual === 'pendentes' ? (status === 'aberto' || status === 'aguardando_equipe') : status === filtroAtual);
             var mostraSetor = filtroSetorAtual === 'todos' || card.getAttribute('data-setor') === filtroSetorAtual;
-            var mostra = mostraStatus && mostraSetor;
+            // Busca por número, título, categoria, setor ou qualquer trecho
+            // da conversa (ver $textoBuscaChamado no PHP) -- combina com os
+            // outros dois filtros, não substitui.
+            var mostraBusca = buscaAtual === '' || (card.getAttribute('data-busca') || '').indexOf(buscaAtual) !== -1;
+            var mostra = mostraStatus && mostraSetor && mostraBusca;
             card.style.display = mostra ? '' : 'none';
             if (mostra) algumVisivel = true;
         });
         var aviso = document.getElementById('avisoFiltroVazio');
         if (aviso) aviso.classList.toggle('d-none', algumVisivel || document.querySelectorAll('#listaChamados .chamado-card').length === 0);
+    }
+    var campoBuscaChamados = document.getElementById('buscaChamados');
+    if (campoBuscaChamados) {
+        campoBuscaChamados.addEventListener('input', function () {
+            buscaAtual = campoBuscaChamados.value.trim().toLowerCase();
+            aplicarFiltroChamados();
+        });
     }
     if (grupoFiltro) {
         aplicarFiltroChamados();
