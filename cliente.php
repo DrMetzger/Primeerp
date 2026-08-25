@@ -3412,7 +3412,15 @@ require __DIR__ . '/templates/header.php';
 
         <?php foreach ($setores as $indiceSetor => $s):
             $idSetorAtual = (int) $s['id'];
-            $membrosReais = array_filter($responsaveisPorSetorId[$idSetorAtual] ?? [], fn ($m) => empty($m['eh_master']));
+            // Só exclui o placeholder SINTÉTICO do master (id=null, ver
+            // array_unshift acima) -- não pode filtrar por eh_master, porque
+            // isso também é um campo de VERDADE em linhas reais de
+            // setor_responsaveis (uma pessoa vinculada ao setor que também
+            // tem acesso nível master). Filtrar por eh_master fazia essas
+            // pessoas reais somarem "0 responsáveis" mesmo estando de fato
+            // relacionadas (bug real: "Usuários" mostrava o vínculo, mas
+            // "Setores > Configurações" dizia que não tinha nenhum).
+            $membrosReais = array_filter($responsaveisPorSetorId[$idSetorAtual] ?? [], fn ($m) => $m['id'] !== null);
             $treinamentosSetor = $treinamentosPorSetorId[$idSetorAtual] ?? [];
             $documentosSetor = $documentosPorSetorId[$idSetorAtual] ?? [];
             $videoAulasSetor = $videoAulasPorSetorId[$idSetorAtual] ?? [];
