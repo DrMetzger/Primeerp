@@ -32,6 +32,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
     $acao = $_POST['acao'] ?? '';
 
+    // Um chamado FECHADO nessa ação não deve receber o scroll_para (ver
+    // mais abaixo) -- ele sai do filtro padrão "Pendentes" (ver
+    // aplicarFiltroChamados() no JS), então rolar até ele forçava trocar
+    // pra "Todos" e o Kleber tinha que rolar tudo de novo pra voltar a
+    // filtrar só pendentes. Fechou -- volta pro topo da aba Chamados já
+    // filtrado em Pendentes (comportamento padrão da tela), não fica
+    // "preso" olhando pra um chamado que não precisa mais de atenção.
+    $chamadoFoiFechadoNestaAcao = false;
+
     if ($acao === 'atualizar_cliente') {
         $stmt = $pdo->prepare('UPDATE clientes SET nome=?, cnpj=?, status=?, responsavel_interno_id=?, observacoes=?, portal_permite_gerenciar_equipe=? WHERE id=?');
         $stmt->execute([
@@ -1989,6 +1998,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // fechava nada, só voltava pra tela sem avisar que não fez nada).
         if ($statusAposResposta === 'fechado') {
             $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoId]);
+            $chamadoFoiFechadoNestaAcao = true;
         } else {
             $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusAposResposta, $chamadoId]);
         }
@@ -2031,6 +2041,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('erro', 'Você não está vinculado a esse setor.');
         } else {
             $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoIdFechar]);
+            $chamadoFoiFechadoNestaAcao = true;
             flash_set('sucesso', 'Chamado encerrado.');
         }
     }
@@ -2152,7 +2163,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // #fragmento (senão vira parte do hash e o JS não acha via
     // URLSearchParams(location.search)).
     $urlRetorno = 'cliente.php?id=' . $clienteId;
-    $scrollPara = $_POST['scroll_para'] ?? '';
+    // Chamado FECHADO nessa ação não recebe scroll_para (ver comentário no
+    // início do bloco POST) -- some do filtro padrão "Pendentes", então
+    // sem essa exceção a tela forçava "Todos" só pra mostrar um chamado
+    // que não precisa mais de atenção nenhuma.
+    $scrollPara = $chamadoFoiFechadoNestaAcao ? '' : ($_POST['scroll_para'] ?? '');
     if ($scrollPara !== '' && preg_match('/^[a-zA-Z0-9-]+$/', $scrollPara)) {
         $urlRetorno .= '&scroll_para=' . urlencode($scrollPara);
     }
