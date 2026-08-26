@@ -113,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $documento = normalizar_documento($_POST['documento'] ?? '');
         $perfil = array_key_exists($_POST['perfil'] ?? '', PERFIS_USUARIO) ? $_POST['perfil'] : 'colaborador';
         $acessoDadosSensiveis = ($_POST['acesso_dados_sensiveis'] ?? '') === '1' ? 1 : 0;
+        $acessoRestritoPorCliente = ($_POST['acesso_restrito_por_cliente'] ?? '') === '1' ? 1 : 0;
 
         if ($nome === '' || $email === '') {
             flash_set('erro', 'Preencha nome e e-mail.');
@@ -122,11 +123,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($existe->fetchColumn()) {
                 flash_set('erro', 'Já existe outro usuário com esse e-mail.');
             } else {
-                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, documento = ?, perfil = ?, acesso_dados_sensiveis = ? WHERE id = ?')
-                    ->execute([$nome, $email, $telefone, $documento, $perfil, $acessoDadosSensiveis, $usuarioIdAlvo]);
+                $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, telefone = ?, documento = ?, perfil = ?, acesso_dados_sensiveis = ?, acesso_restrito_por_cliente = ? WHERE id = ?')
+                    ->execute([$nome, $email, $telefone, $documento, $perfil, $acessoDadosSensiveis, $acessoRestritoPorCliente, $usuarioIdAlvo]);
                 flash_set('sucesso', 'Dados de "' . $nome . '" atualizados.');
             }
         }
+    }
+
+    // Vínculo de um colaborador com um cliente (opcionalmente restrito a
+    // setores específicos) -- só passa a ter efeito de verdade quando
+    // acesso_restrito_por_cliente também estiver ligado pra esse usuário
+    // (ver Auth::escopoRestrito()); cadastrar o vínculo sem ligar o
+    // toggle não trava nem libera nada, fica só "guardado" pra quando
+    // ligar. setor_ids[] vazio = vínculo com o cliente INTEIRO (todos os
+    // setores, inclusive chamados/itens sem setor).
+    if ($acao === 'adicionar_vinculo_colaborador') {
+        $usuarioIdAlvo = (int) $_POST['usuario_id'];
+        $clienteIdVinculo = (int) ($_POST['cliente_id'] ?? 0);
+        $setorIdsVinculo = array_filter(array_map('intval', $_POST['setor_ids'] ?? []));
+
+        $stmtClienteVinculo = $pdo->prepare('SELECT 1 FROM clientes WHERE id = ?');
+        $stmtClienteVinculo->execute([$clienteIdVinculo]);
+
+        if (!$usuarioIdAlvo || !$clienteIdVinculo || !$stmtClienteVinculo->fetchColumn()) {
+            flash_set('erro', 'Selecione um cliente válido pra vincular.');
+        } else {
+            $stmtInserirVinculo = $pdo->prepare('
+                INSERT INTO usuario_cliente_setores (usuario_id, cliente_id, setor_id) VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE usuario_id = usuario_id
+            ');
+            if ($setorIdsVinculo === []) {
+                // "Cliente inteiro" cobre qualquer setor -- os vínculos de
+                // setor específico que já existiam ficam redundantes,
+                // então remove pra não sobrar lixo na listagem.
+                $pdo->prepare('DELETE FROM usuario_cliente_setores WHERE usuario_id = ? AND cliente_id = ? AND setor_id IS NOT NULL')
+                    ->execute([$usuarioIdAlvo, $clienteIdVinculo]);
+                $stmtInserirVinculo->execute([$usuarioIdAlvo, $clienteIdVinculo, null]);
+            } else {
+                // Confirma que cada setor é mesmo desse cliente -- mesmo
+                // cuidado de sempre, evita vincular a um setor de outro
+                // cliente por engano/manipulação do POST.
+                $stmtSetorVinculo = $pdo->prepare('SELECT 1 FROM setores WHERE id = ? AND cliente_id = ?');
+                foreach ($setorIdsVinculo as $setorIdVinculo) {
+                    $stmtSetorVinculo->execute([$setorIdVinculo, $clienteIdVinculo]);
+                    if ($stmtSetorVinculo->fetchColumn()) {
+                        $stmtInserirVinculo->execute([$usuarioIdAlvo, $clienteIdVinculo, $setorIdVinculo]);
+                    }
+                }
+            }
+            flash_set('sucesso', 'Vínculo adicionado.');
+        }
+    }
+
+    if ($acao === 'remover_vinculo_colaborador') {
+        $pdo->prepare('DELETE FROM usuario_cliente_setores WHERE id = ? AND usuario_id = ?')
+            ->execute([(int) $_POST['vinculo_id'], (int) $_POST['usuario_id']]);
+        flash_set('sucesso', 'Vínculo removido.');
     }
 
     // Admin define uma senha nova diretamente (sem pedir a senha atual, ao
@@ -195,6 +247,48 @@ $usuarios = $pdo->query("
     ORDER BY u.nome ASC
 ")->fetchAll();
 
+// Todos os clientes + setores, pro seletor de "vincular cliente/setor" do
+// perfil Colaborador -- lista pequena (é uma ferramenta B2B com dezenas de
+// clientes, não milhares), então dá pra embutir tudo de uma vez em vez de
+// criar um endpoint AJAX só pra isso.
+$clientesComSetores = $pdo->query("
+    SELECT c.id, c.nome,
+        (SELECT GROUP_CONCAT(s.id, ':', s.nome SEPARATOR '||') FROM setores s WHERE s.cliente_id = c.id AND s.ativo = 1 ORDER BY s.nome) AS setores_concat
+    FROM clientes c
+    ORDER BY c.nome ASC
+")->fetchAll();
+$clientesParaJs = [];
+foreach ($clientesComSetores as $c) {
+    $setoresDoCliente = [];
+    foreach (array_filter(explode('||', $c['setores_concat'] ?? '')) as $par) {
+        [$setorId, $setorNome] = explode(':', $par, 2);
+        $setoresDoCliente[] = ['id' => (int) $setorId, 'nome' => $setorNome];
+    }
+    $clientesParaJs[] = ['id' => (int) $c['id'], 'nome' => $c['nome'], 'setores' => $setoresDoCliente];
+}
+
+// Vínculos de cada colaborador (usuario_cliente_setores), agrupados por
+// usuario_id -- carregado tudo de uma vez (1 query) em vez de 1 por
+// usuário, e embutido no JSON de cada linha da tabela (mesmo padrão já
+// usado pras métricas de atendimento).
+$vinculosPorUsuario = [];
+$stmtVinculos = $pdo->query("
+    SELECT ucs.id, ucs.usuario_id, ucs.cliente_id, c.nome AS cliente_nome, ucs.setor_id, s.nome AS setor_nome
+    FROM usuario_cliente_setores ucs
+    JOIN clientes c ON c.id = ucs.cliente_id
+    LEFT JOIN setores s ON s.id = ucs.setor_id
+    ORDER BY c.nome ASC, s.nome ASC
+");
+foreach ($stmtVinculos->fetchAll() as $v) {
+    $vinculosPorUsuario[(int) $v['usuario_id']][] = [
+        'id' => (int) $v['id'],
+        'cliente_id' => (int) $v['cliente_id'],
+        'cliente_nome' => $v['cliente_nome'],
+        'setor_id' => $v['setor_id'] !== null ? (int) $v['setor_id'] : null,
+        'setor_nome' => $v['setor_nome'],
+    ];
+}
+
 $tituloPagina = 'Usuários';
 require __DIR__ . '/templates/header.php';
 ?>
@@ -223,6 +317,7 @@ require __DIR__ . '/templates/header.php';
                 $uParaJs['tempo_medio_formatado'] = formatar_duracao_minutos(
                     $u['media_minutos_atendimento'] !== null ? (float) $u['media_minutos_atendimento'] : null
                 );
+                $uParaJs['vinculos'] = $vinculosPorUsuario[(int) $u['id']] ?? [];
             ?>
                 <tr class="linha-usuario" role="button" tabindex="0"
                     data-usuario='<?= e(json_encode($uParaJs, JSON_UNESCAPED_UNICODE)) ?>'>
@@ -301,6 +396,7 @@ require __DIR__ . '/templates/header.php';
         <ul class="nav nav-tabs px-3" id="modalUsuarioTabs">
             <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#usuarioMetricas"><i class="bi bi-graph-up"></i> Métricas</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarioEditar"><i class="bi bi-pencil"></i> Editar</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarioVinculos"><i class="bi bi-diagram-3"></i> Vínculos</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarioSenha"><i class="bi bi-shield-lock"></i> Senha</a></li>
         </ul>
         <div class="tab-content">
@@ -413,8 +509,51 @@ require __DIR__ . '/templates/header.php';
                                 <p class="text-muted small mb-0">Admin/Diretor já têm esse acesso por padrão. Marque só pra um colaborador que realmente precisa ver credenciais e código-fonte de cliente -- dado extremamente sensível.</p>
                             </div>
                         </div>
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="acesso_restrito_por_cliente" id="editarAcessoRestrito" value="1">
+                                <label class="form-check-label" for="editarAcessoRestrito">
+                                    <i class="bi bi-diagram-3"></i> Restringir a clientes/setores específicos
+                                </label>
+                                <p class="text-muted small mb-0">Ligado, esse colaborador só vê os clientes/setores vinculados na aba "Vínculos" (chamados, fontes ADVPL, treinamentos) -- o resto do sistema fica invisível pra ele. Desligado (padrão), vê tudo normalmente. Admin/Diretor/CEO nunca ficam restritos, mesmo com isso marcado.</p>
+                            </div>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-dark mt-3"><i class="bi bi-check2"></i> Salvar dados</button>
+                </form>
+            </div>
+
+            <!-- Vínculos: quais clientes/setores esse colaborador enxerga
+                 quando "Restringir a clientes/setores específicos" (aba
+                 Editar) está ligado. -->
+            <div class="tab-pane p-4" id="usuarioVinculos">
+                <p class="text-muted small">Cliente sem setor marcado = acesso ao cliente inteiro (todos os setores, inclusive chamados sem departamento). Só tem efeito com o toggle "Restringir a clientes/setores específicos" ligado, na aba Editar.</p>
+
+                <div id="listaVinculos" class="mb-4"></div>
+
+                <form method="post" id="formAdicionarVinculo" class="card card-stat p-3">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="acao" value="adicionar_vinculo_colaborador">
+                    <input type="hidden" name="usuario_id" id="vinculoUsuarioId">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label small mb-1">Cliente</label>
+                            <select class="form-select form-select-sm" id="vinculoClienteSelect">
+                                <option value="">Selecione...</option>
+                                <?php foreach ($clientesParaJs as $c): ?>
+                                    <option value="<?= (int) $c['id'] ?>"><?= e($c['nome']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small mb-1">Setores (deixe em branco = cliente inteiro)</label>
+                            <select class="form-select form-select-sm" id="vinculoSetorSelect" name="setor_ids[]" multiple disabled></select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-plus-lg"></i> Vincular</button>
+                        </div>
+                    </div>
+                    <input type="hidden" name="cliente_id" id="vinculoClienteIdCampo">
                 </form>
             </div>
 
@@ -466,6 +605,78 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     var baseUrlAvatar = <?= json_encode(url('')) ?>;
+    var clientesComSetores = <?= json_encode($clientesParaJs, JSON_UNESCAPED_UNICODE) ?>;
+    var csrfTokenPagina = <?= json_encode(csrf_token()) ?>;
+
+    var seletorClienteVinculo = document.getElementById('vinculoClienteSelect');
+    var seletorSetorVinculo = document.getElementById('vinculoSetorSelect');
+    var campoClienteIdVinculo = document.getElementById('vinculoClienteIdCampo');
+
+    seletorClienteVinculo.addEventListener('change', function () {
+        var clienteId = seletorClienteVinculo.value;
+        campoClienteIdVinculo.value = clienteId;
+        seletorSetorVinculo.innerHTML = '';
+
+        var cliente = clientesComSetores.find(function (c) { return String(c.id) === clienteId; });
+        if (!cliente || !cliente.setores.length) {
+            seletorSetorVinculo.disabled = true;
+            return;
+        }
+        seletorSetorVinculo.disabled = false;
+        cliente.setores.forEach(function (s) {
+            var opcao = document.createElement('option');
+            opcao.value = s.id;
+            opcao.textContent = s.nome;
+            seletorSetorVinculo.appendChild(opcao);
+        });
+    });
+
+    // Cria e já submete, na hora, um form pequeno pra remover 1 vínculo --
+    // evita ter que espalhar 1 <form> por linha renderizada via JS.
+    function removerVinculo(vinculoId, usuarioId) {
+        if (!confirm('Remover esse vínculo?')) return;
+        var form = document.createElement('form');
+        form.method = 'post';
+        form.innerHTML =
+            '<input type="hidden" name="csrf_token" value="' + csrfTokenPagina + '">' +
+            '<input type="hidden" name="acao" value="remover_vinculo_colaborador">' +
+            '<input type="hidden" name="vinculo_id" value="' + vinculoId + '">' +
+            '<input type="hidden" name="usuario_id" value="' + usuarioId + '">';
+        document.body.appendChild(form);
+        form.submit();
+    }
+    window.removerVinculo = removerVinculo;
+
+    function renderizarVinculos(vinculos, usuarioId) {
+        var lista = document.getElementById('listaVinculos');
+        if (!vinculos.length) {
+            lista.innerHTML = '<p class="text-muted small mb-0">Nenhum vínculo cadastrado ainda -- sem restrição ligada, esse colaborador vê tudo normalmente.</p>';
+            return;
+        }
+        // Agrupa por cliente pra mostrar "Cliente inteiro" OU a lista de
+        // setores específicos numa linha só por cliente.
+        var porCliente = {};
+        vinculos.forEach(function (v) {
+            (porCliente[v.cliente_id] = porCliente[v.cliente_id] || { nome: v.cliente_nome, itens: [] }).itens.push(v);
+        });
+        var html = '<div class="list-group">';
+        Object.keys(porCliente).forEach(function (clienteId) {
+            var grupo = porCliente[clienteId];
+            var clienteInteiro = grupo.itens.find(function (i) { return i.setor_id === null; });
+            html += '<div class="list-group-item">';
+            html += '<div class="fw-semibold mb-1">' + grupo.nome + '</div>';
+            if (clienteInteiro) {
+                html += '<span class="badge bg-dark me-1 mb-1">Cliente inteiro <a href="#" onclick="removerVinculo(' + clienteInteiro.id + ',' + usuarioId + ');return false;" class="text-white ms-1" title="Remover"><i class="bi bi-x-circle"></i></a></span>';
+            } else {
+                grupo.itens.forEach(function (i) {
+                    html += '<span class="badge bg-secondary me-1 mb-1">' + i.setor_nome + ' <a href="#" onclick="removerVinculo(' + i.id + ',' + usuarioId + ');return false;" class="text-white ms-1" title="Remover"><i class="bi bi-x-circle"></i></a></span>';
+                });
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        lista.innerHTML = html;
+    }
 
     function abrirModalUsuario(dados) {
         document.getElementById('modalUsuarioTitulo').textContent = dados.nome;
@@ -487,7 +698,16 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('editarDocumento').value = dados.documento || '';
         document.getElementById('editarPerfil').value = dados.perfil;
         document.getElementById('editarAcessoDadosSensiveis').checked = !!parseInt(dados.acesso_dados_sensiveis, 10);
+        document.getElementById('editarAcessoRestrito').checked = !!parseInt(dados.acesso_restrito_por_cliente, 10);
         document.querySelectorAll('.avatar-usuario-id-campo').forEach(function (campo) { campo.value = dados.id; });
+
+        // Vínculos
+        document.getElementById('vinculoUsuarioId').value = dados.id;
+        seletorClienteVinculo.value = '';
+        seletorSetorVinculo.innerHTML = '';
+        seletorSetorVinculo.disabled = true;
+        campoClienteIdVinculo.value = '';
+        renderizarVinculos(dados.vinculos || [], dados.id);
 
         // Senha
         document.getElementById('senhaUsuarioId').value = dados.id;

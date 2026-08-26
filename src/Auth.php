@@ -22,6 +22,17 @@ class Auth
         $_SESSION['usuario_perfil'] = $usuario['perfil'];
         $_SESSION['usuario_foto'] = $usuario['foto_perfil'] ?? null;
 
+        // Trilha de login (ver usuario_login_log/relatório de atividade do
+        // colaborador) -- não pode travar o login se falhar por qualquer
+        // motivo, então nunca deixa exceção subir daqui.
+        try {
+            $pdo->prepare('UPDATE usuarios SET ultimo_login_em = NOW() WHERE id = ?')->execute([$usuario['id']]);
+            $pdo->prepare('INSERT INTO usuario_login_log (usuario_id, ip) VALUES (?, ?)')
+                ->execute([$usuario['id'], $_SERVER['REMOTE_ADDR'] ?? null]);
+        } catch (\Throwable $e) {
+            error_log('Falha ao registrar login: ' . $e->getMessage());
+        }
+
         return true;
     }
 
@@ -167,5 +178,112 @@ class Auth
             return;
         }
         self::requireAdmin();
+    }
+
+    /**
+     * Perfil "Colaborador" com acesso restrito a cliente/setor específico
+     * (ver usuario_cliente_setores) -- pedido do Kleber pra contratar gente
+     * nova sem dar acesso ao sistema inteiro de cara. admin/diretor/ceo
+     * NUNCA ficam restritos (sempre veem tudo, senão travaria a própria
+     * equipe de gestão). Pra um colaborador comum, só entra em modo
+     * restrito se o toggle `acesso_restrito_por_cliente` estiver ligado --
+     * desligado (padrão pra quem já existia antes dessa feature) continua
+     * vendo tudo, exatamente como sempre foi. SEMPRE busca no banco (mesmo
+     * motivo de podeAcessarDadosSensiveis(): revogar tem que valer na hora).
+     */
+    public static function escopoRestrito(): bool
+    {
+        if (!self::check() || self::isAdmin()) {
+            return false;
+        }
+        $stmt = Database::connection()->prepare('SELECT acesso_restrito_por_cliente FROM usuarios WHERE id = ?');
+        $stmt->execute([self::userId()]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * true se o usuário logado pode abrir a ficha desse cliente -- sempre
+     * true pra quem não está em modo restrito (admin/diretor/ceo, ou
+     * colaborador sem o toggle ligado); pra quem está restrito, só se tiver
+     * pelo menos 1 vínculo (cliente inteiro ou algum setor específico) com
+     * esse cliente em usuario_cliente_setores.
+     */
+    public static function podeAcessarCliente(int $clienteId): bool
+    {
+        if (!self::escopoRestrito()) {
+            return true;
+        }
+        $stmt = Database::connection()->prepare('SELECT 1 FROM usuario_cliente_setores WHERE usuario_id = ? AND cliente_id = ? LIMIT 1');
+        $stmt->execute([self::userId(), $clienteId]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    public static function requireAcessoCliente(int $clienteId): void
+    {
+        self::requireLogin();
+        if (!self::podeAcessarCliente($clienteId)) {
+            http_response_code(403);
+            die('Acesso restrito -- você não está vinculado a esse cliente.');
+        }
+    }
+
+    /**
+     * IDs de setor desse cliente que o colaborador logado pode ver/agir
+     * (chamados, fontes ADVPL, treinamentos) -- null = sem restrição (vê
+     * todos os setores, mesmo comportamento de sempre: admin/diretor/ceo,
+     * colaborador sem escopo restrito, OU colaborador com vínculo "cliente
+     * inteiro" nesse cliente -- setor_id NULL em usuario_cliente_setores).
+     * Array (mesmo vazio) = só pode ver os setores explicitamente listados.
+     */
+    public static function setoresPermitidos(int $clienteId): ?array
+    {
+        if (!self::escopoRestrito()) {
+            return null;
+        }
+        $stmt = Database::connection()->prepare('SELECT setor_id FROM usuario_cliente_setores WHERE usuario_id = ? AND cliente_id = ?');
+        $stmt->execute([self::userId(), $clienteId]);
+        $setorIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        if (in_array(null, $setorIds, true)) {
+            return null; // vínculo "cliente inteiro" -- sem restrição de setor
+        }
+        return array_map('intval', $setorIds);
+    }
+
+    /**
+     * true se o colaborador logado pode agir num item associado a esse
+     * setor específico (ou sem setor nenhum, $setorId = null -- ex.: um
+     * chamado geral do cliente, não ligado a nenhum departamento). Usar
+     * SEMPRE que uma ação mexe em algo de um setor específico (responder/
+     * atribuir/mudar setor de chamado, subir fonte ADVPL, criar
+     * treinamento), depois de já confirmar requireAcessoCliente().
+     */
+    public static function podeAcessarSetor(int $clienteId, ?int $setorId): bool
+    {
+        $permitidos = self::setoresPermitidos($clienteId);
+        if ($permitidos === null) {
+            return true;
+        }
+        if ($setorId === null) {
+            // Item geral do cliente (sem setor) -- qualquer colaborador com
+            // pelo menos 1 vínculo nesse cliente pode ver/agir, senão um
+            // chamado sem departamento ficaria escondido de todo mundo.
+            return $permitidos !== [];
+        }
+        return in_array($setorId, $permitidos, true);
+    }
+
+    /**
+     * IDs de cliente que o usuário logado pode ver -- null = todos (mesmo
+     * comportamento de sempre, ver escopoRestrito()); array = só esses.
+     * Usado pra filtrar a listagem em clientes.php.
+     */
+    public static function clienteIdsPermitidos(): ?array
+    {
+        if (!self::escopoRestrito()) {
+            return null;
+        }
+        $stmt = Database::connection()->prepare('SELECT DISTINCT cliente_id FROM usuario_cliente_setores WHERE usuario_id = ?');
+        $stmt->execute([self::userId()]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 }

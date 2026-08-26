@@ -97,9 +97,24 @@ $sql = "
         (SELECT COUNT(*) FROM kpis k WHERE k.cliente_id = c.id) AS total_kpis,
         (SELECT COUNT(*) FROM treinamentos t WHERE t.cliente_id = c.id) AS total_treinamentos
     FROM clientes c
-    ORDER BY c.nome ASC
 ";
-$clientes = $pdo->query($sql)->fetchAll();
+
+// Colaborador com acesso restrito (ver Auth::escopoRestrito) só vê os
+// clientes que tem vínculo em usuario_cliente_setores -- null (sem
+// restrição) é o comportamento de sempre, mantém a lista completa.
+$clienteIdsPermitidos = Auth::clienteIdsPermitidos();
+if ($clienteIdsPermitidos !== null) {
+    if ($clienteIdsPermitidos === []) {
+        $clientes = [];
+    } else {
+        $placeholders = implode(',', array_fill(0, count($clienteIdsPermitidos), '?'));
+        $stmtClientes = $pdo->prepare($sql . " WHERE c.id IN ($placeholders) ORDER BY c.nome ASC");
+        $stmtClientes->execute($clienteIdsPermitidos);
+        $clientes = $stmtClientes->fetchAll();
+    }
+} else {
+    $clientes = $pdo->query($sql . ' ORDER BY c.nome ASC')->fetchAll();
+}
 
 $usuarios = $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll();
 

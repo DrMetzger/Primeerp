@@ -25,6 +25,8 @@ if (!$cliente) {
     die('Cliente não encontrado.');
 }
 
+Auth::requireAcessoCliente($clienteId);
+
 // --- Ações (POST) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
@@ -203,7 +205,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash_set('sucesso', '4 KPIs calculados automaticamente a partir dos chamados.');
     }
 
-    if ($acao === 'criar_treinamento') {
+    if ($acao === 'criar_treinamento' && !Auth::podeAcessarSetor($clienteId, $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null)) {
+        flash_set('erro', 'Você não está vinculado a esse setor.');
+    } elseif ($acao === 'criar_treinamento') {
         $setorIdTreinamentoNovo = $_POST['setor_id'] ?: null;
         $tiposTreinamentoValidos = ['treinamento', 'reuniao', 'conversa', 'auxilio'];
         $tipoTreinamentoNovo = in_array($_POST['tipo'] ?? '', $tiposTreinamentoValidos, true) ? $_POST['tipo'] : 'treinamento';
@@ -260,9 +264,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'atualizar_treinamento_status') {
-        $stmt = $pdo->prepare('UPDATE treinamentos SET status=? WHERE id=? AND cliente_id=?');
-        $stmt->execute([$_POST['status'], (int) $_POST['treinamento_id'], $clienteId]);
-        flash_set('sucesso', 'Status do treinamento atualizado.');
+        $stmtSetorTreinamentoStatus = $pdo->prepare('SELECT setor_id FROM treinamentos WHERE id = ? AND cliente_id = ?');
+        $stmtSetorTreinamentoStatus->execute([(int) $_POST['treinamento_id'], $clienteId]);
+        $setorTreinamentoStatus = $stmtSetorTreinamentoStatus->fetchColumn();
+        if ($setorTreinamentoStatus !== false && Auth::podeAcessarSetor($clienteId, $setorTreinamentoStatus !== null ? (int) $setorTreinamentoStatus : null)) {
+            $stmt = $pdo->prepare('UPDATE treinamentos SET status=? WHERE id=? AND cliente_id=?');
+            $stmt->execute([$_POST['status'], (int) $_POST['treinamento_id'], $clienteId]);
+            flash_set('sucesso', 'Status do treinamento atualizado.');
+        }
     }
 
     // Editar um treinamento/reunião já existente (clicando nele no
@@ -272,6 +281,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'editar_treinamento') {
         $treinamentoIdEditar = (int) $_POST['treinamento_id'];
         $tiposTreinamentoValidos = ['treinamento', 'reuniao', 'conversa', 'auxilio'];
+        $novoSetorTreinamentoEditar = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
+
+        $stmtSetorAtualTreinamentoEditar = $pdo->prepare('SELECT setor_id FROM treinamentos WHERE id = ? AND cliente_id = ?');
+        $stmtSetorAtualTreinamentoEditar->execute([$treinamentoIdEditar, $clienteId]);
+        $setorAtualTreinamentoEditar = $stmtSetorAtualTreinamentoEditar->fetchColumn();
+
+        if ($setorAtualTreinamentoEditar === false) {
+            flash_set('erro', 'Treinamento não encontrado.');
+        } elseif (
+            !Auth::podeAcessarSetor($clienteId, $setorAtualTreinamentoEditar !== null ? (int) $setorAtualTreinamentoEditar : null)
+            || !Auth::podeAcessarSetor($clienteId, $novoSetorTreinamentoEditar)
+        ) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
+        } else {
 
         $chamadoIdTreinamentoEditar = null;
         if (!empty($_POST['chamado_id'])) {
@@ -305,12 +328,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         salvar_destinatarios_treinamento($pdo, $treinamentoIdEditar, $_POST['destinatarios'] ?? [], $clienteId);
         flash_set('sucesso', 'Treinamento/reunião atualizado.');
+        }
     }
 
     if ($acao === 'excluir_treinamento') {
-        $pdo->prepare('DELETE FROM treinamentos WHERE id = ? AND cliente_id = ?')
-            ->execute([(int) $_POST['treinamento_id'], $clienteId]);
-        flash_set('sucesso', 'Treinamento/reunião removido.');
+        $stmtSetorTreinamentoExcluir = $pdo->prepare('SELECT setor_id FROM treinamentos WHERE id = ? AND cliente_id = ?');
+        $stmtSetorTreinamentoExcluir->execute([(int) $_POST['treinamento_id'], $clienteId]);
+        $setorTreinamentoExcluir = $stmtSetorTreinamentoExcluir->fetchColumn();
+        if ($setorTreinamentoExcluir !== false && Auth::podeAcessarSetor($clienteId, $setorTreinamentoExcluir !== null ? (int) $setorTreinamentoExcluir : null)) {
+            $pdo->prepare('DELETE FROM treinamentos WHERE id = ? AND cliente_id = ?')
+                ->execute([(int) $_POST['treinamento_id'], $clienteId]);
+            flash_set('sucesso', 'Treinamento/reunião removido.');
+        }
     }
 
     // --- Propostas de desenvolvimento (backlog de melhoria por setor) ----
@@ -626,6 +655,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('erro', 'Informe o nome da rotina e o setor.');
         } elseif (!$setorPertenceAoCliente) {
             flash_set('erro', 'Setor inválido.');
+        } elseif (!Auth::podeAcessarSetor($clienteId, $setorIdFonte)) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
         } elseif ($_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
             flash_set('erro', 'Falha no upload do arquivo.');
         } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
@@ -1569,8 +1600,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'criar_chamado_equipe') {
         $categoriaNovoChamado = trim($_POST['categoria'] ?? '');
+        $setorNovoChamado = $_POST['setor_id'] !== '' ? (int) $_POST['setor_id'] : null;
         if (trim($_POST['titulo'] ?? '') === '' || trim($_POST['descricao'] ?? '') === '' || $categoriaNovoChamado === '') {
             flash_set('erro', 'Preencha título, categoria e descrição do chamado.');
+        } elseif (!Auth::podeAcessarSetor($clienteId, $setorNovoChamado)) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
         } else {
             // Título padronizado em MAIÚSCULAS (mesma regra do chamado aberto
             // pelo cliente no portal) -- pedido do Kleber pra não ter títulos
@@ -1592,7 +1626,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['prioridade'] ?? 'media',
                     'equipe',
                     $_POST['responsavel_id'] ?: null,
-                    $_POST['setor_id'] ?: null,
+                    $setorNovoChamado,
                 ]);
                 // resposta_id = null -- anexo entra vinculado à mensagem de
                 // abertura (ver comentário "resposta_id NULL = anexo da
@@ -1901,6 +1935,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'responder_chamado') {
         $chamadoId = (int) $_POST['chamado_id'];
+
+        // Confirma que o chamado é desse cliente E de um setor que o
+        // colaborador logado pode acessar (ver Auth::podeAcessarSetor) --
+        // sem isso, um colaborador restrito a um setor específico poderia
+        // responder um chamado de OUTRO setor (ou até de outro cliente)
+        // só adivinhando/forçando o chamado_id no POST, mesmo sem esse
+        // chamado aparecer pra ele na lista.
+        $stmtChamadoAlvoResposta = $pdo->prepare('SELECT cliente_id, setor_id FROM chamados WHERE id = ?');
+        $stmtChamadoAlvoResposta->execute([$chamadoId]);
+        $chamadoAlvoResposta = $stmtChamadoAlvoResposta->fetch();
+        $setorDoChamadoResposta = $chamadoAlvoResposta && $chamadoAlvoResposta['setor_id'] !== null ? (int) $chamadoAlvoResposta['setor_id'] : null;
+
+        if (!$chamadoAlvoResposta || (int) $chamadoAlvoResposta['cliente_id'] !== $clienteId || !Auth::podeAcessarSetor($clienteId, $setorDoChamadoResposta)) {
+            flash_set('erro', 'Chamado inválido ou fora do seu escopo de acesso.');
+        } else {
         $mensagem = trim($_POST['mensagem'] ?? '');
         $temAnexo = !empty($_FILES['anexos']['name'][0] ?? '');
         $notificarCliente = ($_POST['notificar_cliente'] ?? '') === '1';
@@ -1968,20 +2017,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mensagemSucesso = ($temMensagemOuAnexo ? 'Resposta registrada, chamado ' : 'Chamado ') . $rotuloStatus . '.'
             . ($temMensagemOuAnexo && !$notificarCliente ? ' Cliente NÃO foi notificado.' : '');
         flash_set('sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
+        }
     }
 
     if ($acao === 'fechar_chamado') {
-        $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ? AND cliente_id = ?")
-            ->execute([(int) $_POST['chamado_id'], $clienteId]);
-        flash_set('sucesso', 'Chamado encerrado.');
+        $chamadoIdFechar = (int) $_POST['chamado_id'];
+        $stmtSetorFechar = $pdo->prepare('SELECT setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
+        $stmtSetorFechar->execute([$chamadoIdFechar, $clienteId]);
+        $setorChamadoFechar = $stmtSetorFechar->fetchColumn();
+        if ($setorChamadoFechar === false) {
+            flash_set('erro', 'Chamado não encontrado.');
+        } elseif (!Auth::podeAcessarSetor($clienteId, $setorChamadoFechar !== null ? (int) $setorChamadoFechar : null)) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
+        } else {
+            $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoIdFechar]);
+            flash_set('sucesso', 'Chamado encerrado.');
+        }
     }
 
     if ($acao === 'reabrir_chamado') {
         $chamadoId = (int) $_POST['chamado_id'];
-        // Confirma que o chamado é desse cliente antes de reabrir.
-        $confere = $pdo->prepare('SELECT 1 FROM chamados WHERE id = ? AND cliente_id = ?');
+        // Confirma que o chamado é desse cliente (e que o colaborador
+        // logado tem acesso ao setor dele) antes de reabrir.
+        $confere = $pdo->prepare('SELECT setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
         $confere->execute([$chamadoId, $clienteId]);
-        if ($confere->fetchColumn()) {
+        $setorChamadoReabrir = $confere->fetchColumn();
+        if ($setorChamadoReabrir !== false && Auth::podeAcessarSetor($clienteId, $setorChamadoReabrir !== null ? (int) $setorChamadoReabrir : null)) {
             recalcular_status_chamado($pdo, $chamadoId);
             flash_set('sucesso', 'Chamado reaberto.');
         }
@@ -1994,11 +2055,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $chamadoId = (int) $_POST['chamado_id'];
         $novoResponsavelId = $_POST['responsavel_id'] !== '' ? (int) $_POST['responsavel_id'] : null;
 
-        $confere = $pdo->prepare('SELECT id, titulo, responsavel_id FROM chamados WHERE id = ? AND cliente_id = ?');
+        $confere = $pdo->prepare('SELECT id, titulo, responsavel_id, setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
         $confere->execute([$chamadoId, $clienteId]);
         $chamadoAlvo = $confere->fetch();
 
-        if ($chamadoAlvo) {
+        if ($chamadoAlvo && !Auth::podeAcessarSetor($clienteId, $chamadoAlvo['setor_id'] !== null ? (int) $chamadoAlvo['setor_id'] : null)) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
+        } elseif ($chamadoAlvo) {
             $pdo->prepare('UPDATE chamados SET responsavel_id = ? WHERE id = ?')->execute([$novoResponsavelId, $chamadoId]);
 
             // Só avisa por e-mail se realmente MUDOU pra alguém (não dispara
@@ -2031,6 +2094,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$chamadoAlvo) {
             flash_set('erro', 'Chamado não encontrado.');
+        } elseif (
+            !Auth::podeAcessarSetor($clienteId, $chamadoAlvo['setor_id'] !== null ? (int) $chamadoAlvo['setor_id'] : null)
+            || !Auth::podeAcessarSetor($clienteId, $novoSetorId)
+        ) {
+            flash_set('erro', 'Você não está vinculado a esse setor.');
         } elseif ($novoSetorId === null) {
             $pdo->prepare('UPDATE chamados SET setor_id = NULL WHERE id = ?')->execute([$chamadoId]);
             flash_set('sucesso', 'Chamado sem setor vinculado.');
@@ -2116,6 +2184,15 @@ $chamados = $pdo->prepare('
 ');
 $chamados->execute([$clienteId]);
 $chamados = $chamados->fetchAll();
+
+// Colaborador com acesso restrito (ver Auth::escopoRestrito) só vê os
+// chamados dos setores vinculados a ele nesse cliente (ou sem setor
+// nenhum, contanto que tenha pelo menos 1 vínculo aqui) -- sem restrição
+// (admin/diretor/ceo, ou colaborador sem o toggle), continua vendo todos,
+// exatamente como sempre.
+$chamados = array_values(array_filter($chamados, function ($c) use ($clienteId) {
+    return Auth::podeAcessarSetor($clienteId, $c['setor_id'] !== null ? (int) $c['setor_id'] : null);
+}));
 
 // Monta a conversa completa de cada chamado (mensagem de abertura + todas as
 // respostas + anexos de cada uma), já num formato único pro template só
@@ -2502,6 +2579,18 @@ if ($usuariosCliente) {
         $ucComSetores['setor_ids'] = $setorIdsPorResponsavelId[$ucComSetores['id']] ?? [];
     }
     unset($ucComSetores);
+
+    // Colaborador com acesso restrito só vê, na aba Usuários, os contatos
+    // ligados a algum setor que ele tem vínculo -- nome/e-mail/telefone de
+    // gente de OUTRO departamento do cliente não é da conta dele. Alguém
+    // sem setor nenhum vinculado (raro, mas possível) fica visível, já que
+    // não dá pra saber se é "dele" ou não.
+    $setoresPermitidosParaUsuarios = Auth::setoresPermitidos($clienteId);
+    if ($setoresPermitidosParaUsuarios !== null) {
+        $usuariosCliente = array_values(array_filter($usuariosCliente, function ($uc) use ($setoresPermitidosParaUsuarios) {
+            return $uc['setor_ids'] === [] || array_intersect($uc['setor_ids'], $setoresPermitidosParaUsuarios) !== [];
+        }));
+    }
 }
 
 // Setores (departamentos) cadastrados pra esse cliente, com o responsável
@@ -2523,6 +2612,19 @@ $setores = $pdo->prepare('
 ');
 $setores->execute([$clienteId]);
 $setores = $setores->fetchAll();
+
+// Colaborador com acesso restrito só vê os setores vinculados a ele nesse
+// cliente (ver Auth::setoresPermitidos) -- null = sem restrição (mesmo
+// comportamento de sempre). Filtrando aqui, em cascata, já cobre TODA a
+// tela de uma vez (Setores, Fontes ADVPL, Treinamentos, filtro por setor
+// dos Chamados), já que quase tudo em cliente.php itera sobre $setores.
+$setoresPermitidosColaborador = Auth::setoresPermitidos($clienteId);
+if ($setoresPermitidosColaborador !== null) {
+    $setores = array_values(array_filter($setores, function ($s) use ($setoresPermitidosColaborador) {
+        return in_array((int) $s['id'], $setoresPermitidosColaborador, true);
+    }));
+}
+
 $nomesSetoresPorId = array_column($setores, 'nome', 'id');
 
 // TODOS os setores do contato master (o master pode estar em vários agora,

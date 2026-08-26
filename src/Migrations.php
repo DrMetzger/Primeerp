@@ -1085,6 +1085,54 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $pdo->exec("INSERT IGNORE INTO timbrado_pdf (id) VALUES (1)");
+
+        // Perfil "Colaborador" com acesso restrito por cliente/setor (pedido
+        // do Kleber pra contratar gente nova sem dar acesso ao sistema
+        // inteiro de cara) -- acesso_restrito_por_cliente é um opt-in: fica
+        // 0 (desligado) por padrão pra todo mundo que já existe, então
+        // ninguém que já usava o sistema normalmente fica travado do nada;
+        // só passa a valer pra quem um admin marcar explicitamente em
+        // usuarios.php (e, junto, vincular pelo menos 1 cliente/setor).
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS acesso_restrito_por_cliente TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Só enxerga os clientes/setores vinculados em usuario_cliente_setores, em vez do sistema inteiro' AFTER acesso_dados_sensiveis");
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ultimo_login_em DATETIME NULL AFTER acesso_restrito_por_cliente");
+
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS usuario_cliente_setores (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id INT NOT NULL,
+                cliente_id INT NOT NULL,
+                setor_id INT NULL COMMENT 'NULL = acesso ao cliente inteiro (todos os setores, inclusive chamados sem setor); preenchido = só esse setor',
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_ucs_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+                CONSTRAINT fk_ucs_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE,
+                CONSTRAINT fk_ucs_setor FOREIGN KEY (setor_id) REFERENCES setores(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        // Evita duplicar a MESMA linha (usuario+cliente+setor) -- MySQL/
+        // MariaDB não aplicam UNIQUE em colunas com NULL (cada NULL conta
+        // como diferente), então "setor_id IS NULL" não dá pra proteger só
+        // com UNIQUE KEY; setor_id_norm (0 no lugar de NULL) resolve isso
+        // sem mudar o significado de NULL usado no resto do código.
+        $pdo->exec("ALTER TABLE usuario_cliente_setores ADD COLUMN IF NOT EXISTS setor_id_norm INT AS (IFNULL(setor_id, 0)) STORED AFTER setor_id");
+        $pdo->exec("
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_usuario_cliente_setor
+            ON usuario_cliente_setores (usuario_id, cliente_id, setor_id_norm)
+        ");
+
+        // Trilha de login da equipe (quem entrou e quando) -- base do
+        // relatório de atividade por colaborador (ver relatorios.php),
+        // já que hoje não existe nenhum log de acesso além do de dados
+        // sensíveis (acesso_dados_sensiveis_log, que é só credencial/VPN/
+        // fonte). Nunca guarda senha nem nada sensível, só o fato do login.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS usuario_login_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id INT NOT NULL,
+                ip VARCHAR(45) NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_ull_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     /**

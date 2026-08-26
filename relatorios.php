@@ -64,6 +64,7 @@ const CATALOGO_RELATORIOS = [
     'fontes_cliente' => ['titulo' => 'Fontes ADVPL por Cliente', 'descricao' => 'Relação de todo o código-fonte customizado cadastrado pra um cliente, organizado por setor.', 'icone' => 'bi-file-earmark-code', 'precisaCliente' => true],
     'estatisticas' => ['titulo' => 'Estatísticas Gerais', 'descricao' => 'Panorama do negócio: volume de chamados, tendência mensal e desempenho da equipe de atendimento.', 'icone' => 'bi-graph-up-arrow', 'precisaCliente' => false],
     'clientes_risco' => ['titulo' => 'Clientes em Risco', 'descricao' => 'Consolidado das análises de risco (IA) já geradas por cliente -- prioriza quem tem sinal de risco mais alto.', 'icone' => 'bi-shield-exclamation', 'precisaCliente' => false],
+    'atividade_colaborador' => ['titulo' => 'Atividade do Colaborador', 'descricao' => 'Detalhe do que um colaborador específico fez: logins no sistema, chamados atendidos/fechados e tempo médio de resposta no período.', 'icone' => 'bi-person-check', 'precisaCliente' => false, 'precisaUsuario' => true],
 ];
 
 function gerarRelatorio(string $tipo, array $filtros, PDO $pdo): array
@@ -458,6 +459,109 @@ function gerarRelatorio(string $tipo, array $filtros, PDO $pdo): array
         ];
     }
 
+    if ($tipo === 'atividade_colaborador') {
+        $usuarioIdRelatorio = (int) ($filtros['usuario_id'] ?? 0);
+        $usuarioRelatorio = $pdo->prepare('SELECT * FROM usuarios WHERE id = ?');
+        $usuarioRelatorio->execute([$usuarioIdRelatorio]);
+        $usuarioRelatorio = $usuarioRelatorio->fetch();
+        if (!$usuarioRelatorio) {
+            return ['erro' => 'Selecione um colaborador.'];
+        }
+
+        $filtroDataLogin = '';
+        $filtroDataChamado = '';
+        $paramsLogin = [$usuarioIdRelatorio];
+        $paramsChamado = [$usuarioIdRelatorio];
+        if ($dataDe) {
+            $filtroDataLogin .= ' AND criado_em >= ?';
+            $filtroDataChamado .= ' AND c.criado_em >= ?';
+            $paramsLogin[] = $dataDe . ' 00:00:00';
+            $paramsChamado[] = $dataDe . ' 00:00:00';
+        }
+        if ($dataAte) {
+            $filtroDataLogin .= ' AND criado_em <= ?';
+            $filtroDataChamado .= ' AND c.criado_em <= ?';
+            $paramsLogin[] = $dataAte . ' 23:59:59';
+            $paramsChamado[] = $dataAte . ' 23:59:59';
+        }
+
+        $stmtLogins = $pdo->prepare("SELECT * FROM usuario_login_log WHERE usuario_id = ? {$filtroDataLogin} ORDER BY criado_em DESC");
+        $stmtLogins->execute($paramsLogin);
+        $logins = $stmtLogins->fetchAll();
+
+        $stmtChamadosColab = $pdo->prepare("
+            SELECT c.*, cl.nome AS cliente_nome
+            FROM chamados c
+            LEFT JOIN clientes cl ON cl.id = c.cliente_id
+            WHERE c.responsavel_id = ? {$filtroDataChamado}
+            ORDER BY c.criado_em DESC
+        ");
+        $stmtChamadosColab->execute($paramsChamado);
+        $chamadosColab = $stmtChamadosColab->fetchAll();
+
+        $totalChamados = count($chamadosColab);
+        $fechadosChamados = count(array_filter($chamadosColab, fn ($c) => $c['status'] === 'fechado'));
+        $temposRespostaChamados = array_filter(array_map(
+            fn ($c) => $c['fechado_em'] ? (strtotime($c['fechado_em']) - strtotime($c['criado_em'])) / 60 : null,
+            $chamadosColab
+        ));
+        $tempoMedioChamados = $temposRespostaChamados ? array_sum($temposRespostaChamados) / count($temposRespostaChamados) : null;
+
+        $linhasLogins = [];
+        foreach ($logins as $l) {
+            $linhasLogins[] = [formatar_data($l['criado_em']), $l['ip'] ?: '-'];
+        }
+
+        $linhasChamadosColab = [];
+        foreach ($chamadosColab as $c) {
+            $linhasChamadosColab[] = [
+                truncarTexto($c['titulo'], 45),
+                $c['cliente_nome'] ?? '-',
+                MAPA_STATUS_RELATORIO[$c['status']] ?? $c['status'],
+                formatar_data($c['criado_em']),
+                $c['fechado_em'] ? formatar_data($c['fechado_em']) : '-',
+                $c['fechado_em'] ? formatar_duracao_minutos((strtotime($c['fechado_em']) - strtotime($c['criado_em'])) / 60) : '-',
+            ];
+        }
+
+        return [
+            'titulo' => 'Atividade do Colaborador',
+            'descricaoFiltros' => $usuarioRelatorio['nome'] . ' (' . (PERFIS_USUARIO[$usuarioRelatorio['perfil']] ?? $usuarioRelatorio['perfil']) . ')'
+                . ($dataDe || $dataAte ? ' · Período: ' . ($dataDe ?: 'início') . ' a ' . ($dataAte ?: 'hoje') : ' · Todo o período'),
+            'nomeArquivo' => 'atividade-' . $usuarioRelatorio['nome'],
+            'blocos' => [
+                [
+                    'titulo' => 'Resumo',
+                    'colunas' => ['Métrica' => ['pdf' => 90, 'xlsx' => 40, 'align' => 'L'], 'Valor' => ['pdf' => 90, 'xlsx' => 25, 'align' => 'L']],
+                    'linhas' => [
+                        ['Logins no período', count($logins)],
+                        ['Último login (histórico completo)', $usuarioRelatorio['ultimo_login_em'] ? formatar_data($usuarioRelatorio['ultimo_login_em']) : 'nunca acessou'],
+                        ['Chamados atendidos no período', $totalChamados],
+                        ['Chamados fechados no período', $fechadosChamados],
+                        ['Tempo médio de atendimento (fechados no período)', $tempoMedioChamados !== null ? formatar_duracao_minutos($tempoMedioChamados) : 'sem chamados fechados no período'],
+                    ],
+                ],
+                [
+                    'titulo' => 'Chamados atendidos',
+                    'colunas' => [
+                        'Título' => ['pdf' => 42, 'xlsx' => 35, 'align' => 'L'],
+                        'Cliente' => ['pdf' => 30, 'xlsx' => 22, 'align' => 'L'],
+                        'Status' => ['pdf' => 22, 'xlsx' => 16, 'align' => 'L'],
+                        'Aberto em' => ['pdf' => 24, 'xlsx' => 16, 'align' => 'L'],
+                        'Fechado em' => ['pdf' => 24, 'xlsx' => 16, 'align' => 'L'],
+                        'Tempo de atendimento' => ['pdf' => 34, 'xlsx' => 18, 'align' => 'L'],
+                    ],
+                    'linhas' => $linhasChamadosColab,
+                ],
+                [
+                    'titulo' => 'Logins no período',
+                    'colunas' => ['Data/hora' => ['pdf' => 90, 'xlsx' => 30, 'align' => 'L'], 'IP' => ['pdf' => 90, 'xlsx' => 25, 'align' => 'L']],
+                    'linhas' => $linhasLogins,
+                ],
+            ],
+        ];
+    }
+
     return ['erro' => 'Relatório desconhecido.'];
 }
 
@@ -521,6 +625,7 @@ if ($tipoRelatorio !== '' && isset(CATALOGO_RELATORIOS[$tipoRelatorio])) {
 }
 
 $clientesParaFiltro = $pdo->query("SELECT id, nome FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
+$usuariosParaFiltro = $pdo->query("SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome ASC")->fetchAll();
 
 $tituloPagina = 'Relatórios';
 require __DIR__ . '/templates/header.php';
@@ -568,7 +673,18 @@ require __DIR__ . '/templates/header.php';
                     </select>
                 </div>
                 <?php endif; ?>
-                <?php if (in_array($tipoRelatorio, ['chamados_cliente', 'chamados_geral'], true)): ?>
+                <?php if (!empty($infoRelatorio['precisaUsuario'])): ?>
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Colaborador *</label>
+                    <select name="usuario_id" class="form-select form-select-sm" required>
+                        <option value="">Selecione...</option>
+                        <?php foreach ($usuariosParaFiltro as $u): ?>
+                            <option value="<?= $u['id'] ?>" <?= (int) ($_GET['usuario_id'] ?? 0) === (int) $u['id'] ? 'selected' : '' ?>><?= e($u['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
+                <?php if (in_array($tipoRelatorio, ['chamados_cliente', 'chamados_geral', 'atividade_colaborador'], true)): ?>
                 <div class="col-md-3">
                     <label class="form-label small mb-1">De</label>
                     <input type="date" name="data_de" class="form-control form-control-sm" value="<?= e($_GET['data_de'] ?? '') ?>">
