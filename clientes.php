@@ -13,6 +13,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
     $acao = $_POST['acao'] ?? '';
 
+    // Criar/editar/excluir o CADASTRO do cliente (não o atendimento dele)
+    // é ação administrativa -- um colaborador (restrito ou não) não deve
+    // conseguir mexer na carteira de clientes da empresa, só operar dentro
+    // do(s) cliente(s) que já são dele. Checa aqui, server-side, mesmo que
+    // a tela já esconda os botões -- POST direto não pode furar isso.
+    if (in_array($acao, ['criar_cliente', 'atualizar_cliente', 'excluir_cliente'], true) && !Auth::isAdmin()) {
+        flash_set('erro', 'Só admin/diretor/CEO podem alterar o cadastro de um cliente.');
+        header('Location: ' . url('clientes.php'));
+        exit;
+    }
+
     if ($acao === 'criar_cliente') {
         $nome = trim($_POST['nome'] ?? '');
         if ($nome === '') {
@@ -123,13 +134,15 @@ require __DIR__ . '/templates/header.php';
 ?>
 
 <h4 class="mb-3">Clientes</h4>
-<p class="text-muted small mb-2"><i class="bi bi-info-circle"></i> Clique em um cliente da lista para visualizar, alterar ou excluir.</p>
+<p class="text-muted small mb-2"><i class="bi bi-info-circle"></i> Clique em um cliente da lista pra <?= Auth::isAdmin() ? 'visualizar, alterar ou excluir' : 'visualizar' ?>.</p>
 
 <div class="toolbar">
     <div class="toolbar-acoes">
+        <?php if (Auth::isAdmin()): ?>
         <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#modalNovoCliente">
             <i class="bi bi-plus-lg"></i> Novo cliente
         </button>
+        <?php endif; ?>
     </div>
     <div class="toolbar-filtros">
         <input type="text" class="form-control form-control-sm busca-toolbar" id="buscaClientes" placeholder="Buscar por nome ou contato...">
@@ -250,8 +263,10 @@ require __DIR__ . '/templates/header.php';
       </div>
       <ul class="nav nav-tabs px-3 pt-2" id="modalClienteTabs">
         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#modalClienteVer">Visualizar</a></li>
+        <?php if (Auth::isAdmin()): ?>
         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#modalClienteAlterar">Alterar</a></li>
         <li class="nav-item"><a class="nav-link text-danger" data-bs-toggle="tab" href="#modalClienteExcluir">Excluir</a></li>
+        <?php endif; ?>
       </ul>
       <div class="modal-body">
         <div class="tab-content">
@@ -309,6 +324,7 @@ require __DIR__ . '/templates/header.php';
                 <a href="#" id="verLinkAbrir" class="btn btn-dark w-100 mt-3"><i class="bi bi-box-arrow-up-right"></i> Abrir página completa do cliente</a>
             </div>
 
+            <?php if (Auth::isAdmin()): ?>
             <!-- Alterar -->
             <div class="tab-pane" id="modalClienteAlterar">
                 <form method="post" id="formAlterarCliente" enctype="multipart/form-data">
@@ -399,6 +415,7 @@ require __DIR__ . '/templates/header.php';
                     <button type="submit" class="btn btn-danger" id="btnConfirmarExclusao" disabled><i class="bi bi-trash"></i> Excluir cliente definitivamente</button>
                 </form>
             </div>
+            <?php endif; ?>
 
         </div>
       </div>
@@ -480,28 +497,34 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('verChamados').textContent = dados.total_chamados;
         document.getElementById('verLinkAbrir').href = baseUrlCliente + dados.id;
 
-        aplicarLogoPreview(dados, 'alterarLogoPreview', 'alterarLogoVazio');
-        document.getElementById('alterarId').value = dados.id;
-        document.getElementById('alterarNome').value = dados.nome;
-        document.getElementById('alterarStatus').value = dados.status;
-        document.getElementById('alterarContatoNome').value = dados.contato_nome || '';
-        document.getElementById('alterarContatoEmail').value = dados.contato_email || '';
-        document.getElementById('alterarContatoTelefone').value = dados.contato_telefone ? PrimeUI.formatarTelefone(dados.contato_telefone) : '';
-        document.getElementById('alterarContatoDocumento').value = dados.contato_documento || '';
-        document.getElementById('alterarResponsavelInterno').value = dados.responsavel_interno_id || '';
-        document.getElementById('alterarObservacoes').value = dados.observacoes || '';
-        document.getElementById('alterarPermiteGerenciarEquipe').checked = !!Number(dados.portal_permite_gerenciar_equipe);
+        // Abas Alterar/Excluir nem existem no DOM pra quem não é admin
+        // (ver Auth::isAdmin() no PHP) -- só preenche esses campos se
+        // existirem.
+        var campoAlterarNome = document.getElementById('alterarNome');
+        if (campoAlterarNome) {
+            aplicarLogoPreview(dados, 'alterarLogoPreview', 'alterarLogoVazio');
+            document.getElementById('alterarId').value = dados.id;
+            campoAlterarNome.value = dados.nome;
+            document.getElementById('alterarStatus').value = dados.status;
+            document.getElementById('alterarContatoNome').value = dados.contato_nome || '';
+            document.getElementById('alterarContatoEmail').value = dados.contato_email || '';
+            document.getElementById('alterarContatoTelefone').value = dados.contato_telefone ? PrimeUI.formatarTelefone(dados.contato_telefone) : '';
+            document.getElementById('alterarContatoDocumento').value = dados.contato_documento || '';
+            document.getElementById('alterarResponsavelInterno').value = dados.responsavel_interno_id || '';
+            document.getElementById('alterarObservacoes').value = dados.observacoes || '';
+            document.getElementById('alterarPermiteGerenciarEquipe').checked = !!Number(dados.portal_permite_gerenciar_equipe);
 
-        document.getElementById('excluirId').value = dados.id;
-        document.getElementById('excluirNomeEsperado').textContent = dados.nome;
-        document.getElementById('excluirConfirmarNome').value = '';
-        document.getElementById('btnConfirmarExclusao').disabled = true;
-        var partes = [];
-        if (dados.total_chamados > 0) partes.push(dados.total_chamados + ' chamado(s)');
-        if (dados.total_documentos > 0) partes.push(dados.total_documentos + ' documento(s)');
-        if (dados.total_kpis > 0) partes.push(dados.total_kpis + ' KPI(s)');
-        if (dados.total_treinamentos > 0) partes.push(dados.total_treinamentos + ' treinamento(s)');
-        document.getElementById('excluirContagens').textContent = partes.length ? partes.join(', ') : 'nenhum registro (nada mais além do cadastro dele)';
+            document.getElementById('excluirId').value = dados.id;
+            document.getElementById('excluirNomeEsperado').textContent = dados.nome;
+            document.getElementById('excluirConfirmarNome').value = '';
+            document.getElementById('btnConfirmarExclusao').disabled = true;
+            var partes = [];
+            if (dados.total_chamados > 0) partes.push(dados.total_chamados + ' chamado(s)');
+            if (dados.total_documentos > 0) partes.push(dados.total_documentos + ' documento(s)');
+            if (dados.total_kpis > 0) partes.push(dados.total_kpis + ' KPI(s)');
+            if (dados.total_treinamentos > 0) partes.push(dados.total_treinamentos + ' treinamento(s)');
+            document.getElementById('excluirContagens').textContent = partes.length ? partes.join(', ') : 'nenhum registro (nada mais além do cadastro dele)';
+        }
 
         // Sempre volta pra aba "Visualizar" ao abrir.
         PrimeUI.showTab(document.querySelector('#modalClienteTabs a[href="#modalClienteVer"]'));
@@ -519,10 +542,12 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     var campoConfirmarNome = document.getElementById('excluirConfirmarNome');
-    campoConfirmarNome.addEventListener('input', function () {
-        var nomeEsperado = document.getElementById('excluirNomeEsperado').textContent;
-        document.getElementById('btnConfirmarExclusao').disabled = (campoConfirmarNome.value !== nomeEsperado);
-    });
+    if (campoConfirmarNome) {
+        campoConfirmarNome.addEventListener('input', function () {
+            var nomeEsperado = document.getElementById('excluirNomeEsperado').textContent;
+            document.getElementById('btnConfirmarExclusao').disabled = (campoConfirmarNome.value !== nomeEsperado);
+        });
+    }
 });
 </script>
 

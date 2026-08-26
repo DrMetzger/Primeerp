@@ -149,6 +149,46 @@ class Auth
     }
 
     /**
+     * Acesso ÀS ABAS "Acessos"/"T-Cloud" (não ao conteúdo de TODO MUNDO
+     * dentro delas) -- além de quem já tem podeAcessarDadosSensiveis()
+     * (vê tudo), um colaborador com escopo restrito também pode entrar
+     * nessas abas, mas só pra cadastrar/ver o que ELE MESMO criar (ver
+     * apenasProprios() -- filtra por criado_por na hora de listar). Pedido
+     * do Kleber: "acessos ele só pode ver o que ele cadastrar, deve ser
+     * liberado pra ele -- mas restrito a somente o que ele cadastrar".
+     */
+    public static function podeAcessarAcessosProprios(): bool
+    {
+        return self::podeAcessarDadosSensiveis() || self::escopoRestrito();
+    }
+
+    public static function requireAcessoAcessosProprios(): void
+    {
+        self::requireLogin();
+        if (!self::podeAcessarAcessosProprios()) {
+            http_response_code(403);
+            die('Acesso restrito -- essa área guarda dados sensíveis do cliente (credenciais, código-fonte).');
+        }
+    }
+
+    /**
+     * true quando o usuário logado só pode ver/editar/excluir os próprios
+     * registros de credencial/VPN/fonte ADVPL/T-Cloud (criado_por = ele) --
+     * ou seja, tem acesso à aba (ver podeAcessarAcessosProprios()) mas não
+     * enxerga o que outras pessoas cadastraram. Pedido explícito do Kleber:
+     * "não é questão de poder acessar dados sensíveis, ele pode sim, mas só
+     * o que ele cadastra -- só admin/diretor/CEO podem ver tudo". Ou seja,
+     * o flag manual acesso_dados_sensiveis NÃO promove mais um colaborador
+     * a ver o cofre inteiro -- só libera a aba pra ele, sempre limitado ao
+     * que ele mesmo criou. Únicos que veem TUDO são admin/diretor/CEO
+     * (Auth::isAdmin()).
+     */
+    public static function apenasProprios(): bool
+    {
+        return !self::isAdmin();
+    }
+
+    /**
      * Registra toda vez que alguém autorizado revela uma senha ou baixa um
      * arquivo do cofre de acessos/Fontes ADVPL -- boas práticas de mercado
      * pra dado desse nível de sigilo (trilha de auditoria, mesmo que seja

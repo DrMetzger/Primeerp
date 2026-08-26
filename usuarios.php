@@ -527,7 +527,7 @@ require __DIR__ . '/templates/header.php';
                  quando "Restringir a clientes/setores específicos" (aba
                  Editar) está ligado. -->
             <div class="tab-pane p-4" id="usuarioVinculos">
-                <p class="text-muted small">Cliente sem setor marcado = acesso ao cliente inteiro (todos os setores, inclusive chamados sem departamento). Só tem efeito com o toggle "Restringir a clientes/setores específicos" ligado, na aba Editar.</p>
+                <p class="text-muted small">Marque "Cliente inteiro" pra liberar todos os setores desse cliente (inclusive chamados sem departamento), ou marque só os setores específicos que esse colaborador deve atender. Só tem efeito com o toggle "Restringir a clientes/setores específicos" ligado, na aba Editar.</p>
 
                 <div id="listaVinculos" class="mb-4"></div>
 
@@ -535,25 +535,25 @@ require __DIR__ . '/templates/header.php';
                     <?= csrf_field() ?>
                     <input type="hidden" name="acao" value="adicionar_vinculo_colaborador">
                     <input type="hidden" name="usuario_id" id="vinculoUsuarioId">
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-5">
-                            <label class="form-label small mb-1">Cliente</label>
-                            <select class="form-select form-select-sm" id="vinculoClienteSelect">
-                                <option value="">Selecione...</option>
-                                <?php foreach ($clientesParaJs as $c): ?>
-                                    <option value="<?= (int) $c['id'] ?>"><?= e($c['nome']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-5">
-                            <label class="form-label small mb-1">Setores (deixe em branco = cliente inteiro)</label>
-                            <select class="form-select form-select-sm" id="vinculoSetorSelect" name="setor_ids[]" multiple disabled></select>
-                        </div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-plus-lg"></i> Vincular</button>
-                        </div>
-                    </div>
                     <input type="hidden" name="cliente_id" id="vinculoClienteIdCampo">
+
+                    <label class="form-label small mb-1">Cliente</label>
+                    <select class="form-select form-select-sm mb-3" id="vinculoClienteSelect">
+                        <option value="">Selecione...</option>
+                        <?php foreach ($clientesParaJs as $c): ?>
+                            <option value="<?= (int) $c['id'] ?>"><?= e($c['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="vinculoClienteInteiroCheck" disabled>
+                        <label class="form-check-label fw-semibold" for="vinculoClienteInteiroCheck">Cliente inteiro (todos os setores)</label>
+                    </div>
+
+                    <label class="form-label small mb-1" id="vinculoSetoresLabel" style="display:none;">Ou só setores específicos:</label>
+                    <div id="vinculoSetoresCheckboxes" class="mb-3"></div>
+
+                    <button type="submit" class="btn btn-sm btn-dark" id="vinculoBotaoSubmit" disabled><i class="bi bi-plus-lg"></i> Vincular</button>
                 </form>
             </div>
 
@@ -608,27 +608,64 @@ document.addEventListener('DOMContentLoaded', function () {
     var clientesComSetores = <?= json_encode($clientesParaJs, JSON_UNESCAPED_UNICODE) ?>;
     var csrfTokenPagina = <?= json_encode(csrf_token()) ?>;
 
+    // Checkboxes em vez de <select multiple> -- pedido do Kleber: "o
+    // Petronilho tem mais de 100 anos, ele não vai saber selecionar
+    // segurando Ctrl/Cmd", precisa ser clique direto, sem segredo nenhum.
     var seletorClienteVinculo = document.getElementById('vinculoClienteSelect');
-    var seletorSetorVinculo = document.getElementById('vinculoSetorSelect');
+    var checkClienteInteiro = document.getElementById('vinculoClienteInteiroCheck');
+    var labelSetoresVinculo = document.getElementById('vinculoSetoresLabel');
+    var boxSetoresVinculo = document.getElementById('vinculoSetoresCheckboxes');
     var campoClienteIdVinculo = document.getElementById('vinculoClienteIdCampo');
+    var botaoSubmitVinculo = document.getElementById('vinculoBotaoSubmit');
+
+    function atualizarEstadoCheckboxesSetorVinculo() {
+        var marcandoClienteInteiro = checkClienteInteiro.checked;
+        boxSetoresVinculo.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+            cb.disabled = marcandoClienteInteiro;
+            if (marcandoClienteInteiro) cb.checked = false;
+        });
+    }
 
     seletorClienteVinculo.addEventListener('change', function () {
         var clienteId = seletorClienteVinculo.value;
         campoClienteIdVinculo.value = clienteId;
-        seletorSetorVinculo.innerHTML = '';
+        boxSetoresVinculo.innerHTML = '';
+        checkClienteInteiro.checked = false;
 
         var cliente = clientesComSetores.find(function (c) { return String(c.id) === clienteId; });
-        if (!cliente || !cliente.setores.length) {
-            seletorSetorVinculo.disabled = true;
+        if (!cliente) {
+            checkClienteInteiro.disabled = true;
+            labelSetoresVinculo.style.display = 'none';
+            botaoSubmitVinculo.disabled = true;
             return;
         }
-        seletorSetorVinculo.disabled = false;
+        checkClienteInteiro.disabled = false;
+        botaoSubmitVinculo.disabled = false;
+
+        if (!cliente.setores.length) {
+            labelSetoresVinculo.style.display = 'none';
+            return;
+        }
+        labelSetoresVinculo.style.display = '';
         cliente.setores.forEach(function (s) {
-            var opcao = document.createElement('option');
-            opcao.value = s.id;
-            opcao.textContent = s.nome;
-            seletorSetorVinculo.appendChild(opcao);
+            var id = 'vinculoSetorCheck' + s.id;
+            var wrapper = document.createElement('div');
+            wrapper.className = 'form-check';
+            wrapper.innerHTML =
+                '<input class="form-check-input" type="checkbox" name="setor_ids[]" value="' + s.id + '" id="' + id + '">' +
+                '<label class="form-check-label" for="' + id + '">' + s.nome + '</label>';
+            boxSetoresVinculo.appendChild(wrapper);
         });
+    });
+
+    checkClienteInteiro.addEventListener('change', atualizarEstadoCheckboxesSetorVinculo);
+    // Marcar um setor específico desmarca "Cliente inteiro" automaticamente
+    // -- as duas opções são mutuamente exclusivas, sem precisar entender
+    // isso, só clicando no que faz sentido.
+    boxSetoresVinculo.addEventListener('change', function (e) {
+        if (e.target.type === 'checkbox' && e.target.checked) {
+            checkClienteInteiro.checked = false;
+        }
     });
 
     // Cria e já submete, na hora, um form pequeno pra remover 1 vínculo --
@@ -647,34 +684,37 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     window.removerVinculo = removerVinculo;
 
+    // Cada vínculo numa linha própria, com nome + botão "Remover" grande e
+    // com texto (não um "x" pequeno escondido num badge) -- pedido do
+    // Kleber pra ficar fácil pra qualquer idade. "Trocar" um colaborador de
+    // setor é: Remover a linha antiga aqui + escolher o setor novo no
+    // formulário "Vincular" acima.
     function renderizarVinculos(vinculos, usuarioId) {
         var lista = document.getElementById('listaVinculos');
         if (!vinculos.length) {
             lista.innerHTML = '<p class="text-muted small mb-0">Nenhum vínculo cadastrado ainda -- sem restrição ligada, esse colaborador vê tudo normalmente.</p>';
             return;
         }
-        // Agrupa por cliente pra mostrar "Cliente inteiro" OU a lista de
-        // setores específicos numa linha só por cliente.
+        // Agrupa por cliente só pra mostrar o nome do cliente uma vez,
+        // com uma linha por setor (ou "Cliente inteiro") dentro dele.
         var porCliente = {};
         vinculos.forEach(function (v) {
             (porCliente[v.cliente_id] = porCliente[v.cliente_id] || { nome: v.cliente_nome, itens: [] }).itens.push(v);
         });
-        var html = '<div class="list-group">';
+        var html = '';
         Object.keys(porCliente).forEach(function (clienteId) {
             var grupo = porCliente[clienteId];
-            var clienteInteiro = grupo.itens.find(function (i) { return i.setor_id === null; });
-            html += '<div class="list-group-item">';
-            html += '<div class="fw-semibold mb-1">' + grupo.nome + '</div>';
-            if (clienteInteiro) {
-                html += '<span class="badge bg-dark me-1 mb-1">Cliente inteiro <a href="#" onclick="removerVinculo(' + clienteInteiro.id + ',' + usuarioId + ');return false;" class="text-white ms-1" title="Remover"><i class="bi bi-x-circle"></i></a></span>';
-            } else {
-                grupo.itens.forEach(function (i) {
-                    html += '<span class="badge bg-secondary me-1 mb-1">' + i.setor_nome + ' <a href="#" onclick="removerVinculo(' + i.id + ',' + usuarioId + ');return false;" class="text-white ms-1" title="Remover"><i class="bi bi-x-circle"></i></a></span>';
-                });
-            }
-            html += '</div>';
+            html += '<div class="card card-stat mb-2"><div class="card-body py-2 px-3">';
+            html += '<div class="fw-semibold mb-2">' + grupo.nome + '</div>';
+            grupo.itens.forEach(function (i) {
+                var rotulo = i.setor_id === null ? 'Cliente inteiro (todos os setores)' : i.setor_nome;
+                html += '<div class="d-flex justify-content-between align-items-center py-1 border-top">';
+                html += '<span>' + rotulo + '</span>';
+                html += '<button type="button" class="btn btn-sm btn-outline-danger" onclick="removerVinculo(' + i.id + ',' + usuarioId + ')"><i class="bi bi-trash"></i> Remover</button>';
+                html += '</div>';
+            });
+            html += '</div></div>';
         });
-        html += '</div>';
         lista.innerHTML = html;
     }
 
@@ -704,8 +744,11 @@ document.addEventListener('DOMContentLoaded', function () {
         // Vínculos
         document.getElementById('vinculoUsuarioId').value = dados.id;
         seletorClienteVinculo.value = '';
-        seletorSetorVinculo.innerHTML = '';
-        seletorSetorVinculo.disabled = true;
+        boxSetoresVinculo.innerHTML = '';
+        labelSetoresVinculo.style.display = 'none';
+        checkClienteInteiro.checked = false;
+        checkClienteInteiro.disabled = true;
+        botaoSubmitVinculo.disabled = true;
         campoClienteIdVinculo.value = '';
         renderizarVinculos(dados.vinculos || [], dados.id);
 

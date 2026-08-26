@@ -37,7 +37,8 @@ if (!$fonte) {
 
 $autorizado = false;
 if (Auth::check()) {
-    $autorizado = Auth::podeAcessarDadosSensiveis();
+    $autorizado = Auth::podeAcessarDadosSensiveis()
+        && (!Auth::apenasProprios() || (int) $fonte['criado_por'] === Auth::userId());
 } elseif (ClienteAuth::check()) {
     ClienteAuth::bloquearForaDoHorario();
     $autorizado = ClienteAuth::temPermissaoMaster() && (int) $fonte['setor_cliente_id'] === ClienteAuth::clienteId();

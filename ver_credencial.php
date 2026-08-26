@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-Auth::requireAcessoDadosSensiveis();
+Auth::requireAcessoAcessosProprios();
 csrf_verify();
 
 $pdo = Database::connection();
@@ -36,6 +36,12 @@ $credencial = $stmt->fetch();
 if (!$credencial) {
     http_response_code(404);
     echo json_encode(['sucesso' => false, 'mensagem' => 'Credencial não encontrada.']);
+    exit;
+}
+
+if (Auth::apenasProprios() && (int) $credencial['criado_por'] !== Auth::userId()) {
+    http_response_code(403);
+    echo json_encode(['sucesso' => false, 'mensagem' => 'Você só pode ver credenciais cadastradas por você.']);
     exit;
 }
 

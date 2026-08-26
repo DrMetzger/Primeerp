@@ -477,15 +477,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Dado extremamente sensível -- checa a permissão especial de novo
     // AQUI (server-side), não só escondendo a aba na tela: alguém sem
     // permissão não pode criar/editar/excluir isso nem mandando o POST
-    // direto, mesmo sem ver o botão.
-    $acoesDadosSensiveis = [
+    // direto, mesmo sem ver o botão. Fontes ADVPL continua exigindo a
+    // liberação de dados sensíveis de verdade; Acessos/VPN/T-Cloud também
+    // abrem pra quem só tem escopo restrito (ver Auth::
+    // podeAcessarAcessosProprios()) -- a checagem de "só o que EU
+    // cadastrei" (Auth::apenasProprios()) fica dentro de cada ação de
+    // editar/excluir, comparando com o criado_por do registro.
+    $acoesAcessosProprios = [
         'criar_credencial', 'atualizar_credencial', 'excluir_credencial',
         'upload_vpn_arquivo', 'atualizar_vpn_arquivo', 'excluir_vpn_arquivo',
-        'upload_fonte_advpl', 'atualizar_fonte_advpl', 'excluir_fonte_advpl',
         'salvar_tcloud_ambiente',
         'criar_tcloud_vscode', 'atualizar_tcloud_vscode', 'excluir_tcloud_vscode',
     ];
-    if (in_array($acao, $acoesDadosSensiveis, true) && !Auth::podeAcessarDadosSensiveis()) {
+    $acoesFontesAdvpl = ['upload_fonte_advpl', 'atualizar_fonte_advpl', 'excluir_fonte_advpl'];
+    if (in_array($acao, $acoesAcessosProprios, true) && !Auth::podeAcessarAcessosProprios()) {
+        http_response_code(403);
+        die('Acesso restrito -- essa área guarda dados sensíveis do cliente (credenciais, código-fonte).');
+    }
+    if (in_array($acao, $acoesFontesAdvpl, true) && !Auth::podeAcessarDadosSensiveis()) {
         http_response_code(403);
         die('Acesso restrito -- essa área guarda dados sensíveis do cliente (credenciais, código-fonte).');
     }
@@ -516,7 +525,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $credencialIdAlvo = (int) $_POST['credencial_id'];
         $tipoCredencial = array_key_exists($_POST['tipo'] ?? '', CREDENCIAL_TIPOS) ? $_POST['tipo'] : 'outro';
         $tituloCredencial = trim($_POST['titulo'] ?? '');
-        if ($tituloCredencial === '') {
+        $stmtCredencialDono = $pdo->prepare('SELECT criado_por FROM cliente_credenciais WHERE id = ? AND cliente_id = ?');
+        $stmtCredencialDono->execute([$credencialIdAlvo, $clienteId]);
+        $donoCredencial = $stmtCredencialDono->fetchColumn();
+        if ($donoCredencial === false) {
+            flash_set('erro', 'Credencial não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $donoCredencial !== Auth::userId()) {
+            flash_set('erro', 'Você só pode editar credenciais cadastradas por você.');
+        } elseif ($tituloCredencial === '') {
             flash_set('erro', 'Informe um título/nome pra essa credencial.');
         } else {
             // Senha só é trocada se o campo vier preenchido -- em branco
@@ -545,9 +561,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'excluir_credencial') {
-        $pdo->prepare('DELETE FROM cliente_credenciais WHERE id = ? AND cliente_id = ?')
-            ->execute([(int) $_POST['credencial_id'], $clienteId]);
-        flash_set('sucesso', 'Credencial removida.');
+        $credencialIdExcluir = (int) $_POST['credencial_id'];
+        $stmtCredencialDonoExcluir = $pdo->prepare('SELECT criado_por FROM cliente_credenciais WHERE id = ? AND cliente_id = ?');
+        $stmtCredencialDonoExcluir->execute([$credencialIdExcluir, $clienteId]);
+        $donoCredencialExcluir = $stmtCredencialDonoExcluir->fetchColumn();
+        if ($donoCredencialExcluir === false) {
+            flash_set('erro', 'Credencial não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $donoCredencialExcluir !== Auth::userId()) {
+            flash_set('erro', 'Você só pode excluir credenciais cadastradas por você.');
+        } else {
+            $pdo->prepare('DELETE FROM cliente_credenciais WHERE id = ? AND cliente_id = ?')
+                ->execute([$credencialIdExcluir, $clienteId]);
+            flash_set('sucesso', 'Credencial removida.');
+        }
     }
 
     if ($acao === 'upload_vpn_arquivo' && isset($_FILES['arquivo'])) {
@@ -588,7 +614,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'atualizar_vpn_arquivo') {
         $arquivoIdVpnAlvo = (int) ($_POST['arquivo_id'] ?? 0);
         $novoTituloVpn = trim($_POST['titulo'] ?? '');
-        if ($novoTituloVpn === '') {
+        $stmtVpnDono = $pdo->prepare('SELECT criado_por FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?');
+        $stmtVpnDono->execute([$arquivoIdVpnAlvo, $clienteId]);
+        $donoVpnArquivo = $stmtVpnDono->fetchColumn();
+        if ($donoVpnArquivo === false) {
+            flash_set('erro', 'Arquivo não encontrado.');
+        } elseif (Auth::apenasProprios() && (int) $donoVpnArquivo !== Auth::userId()) {
+            flash_set('erro', 'Você só pode editar arquivos cadastrados por você.');
+        } elseif ($novoTituloVpn === '') {
             flash_set('erro', 'Informe um título pra esse arquivo de VPN.');
         } elseif (!empty($_FILES['arquivo']['name'])) {
             // Trocando o arquivo também -- mesma validação de tamanho do
@@ -638,17 +671,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'excluir_vpn_arquivo') {
-        $stmtVpnExcluir = $pdo->prepare('SELECT arquivo_caminho FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?');
-        $stmtVpnExcluir->execute([(int) $_POST['arquivo_id'], $clienteId]);
-        $caminhoVpnExcluir = $stmtVpnExcluir->fetchColumn();
+        $arquivoIdVpnExcluir = (int) $_POST['arquivo_id'];
+        $stmtVpnExcluir = $pdo->prepare('SELECT arquivo_caminho, criado_por FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?');
+        $stmtVpnExcluir->execute([$arquivoIdVpnExcluir, $clienteId]);
+        $vpnArquivoExcluir = $stmtVpnExcluir->fetch();
 
-        $pdo->prepare('DELETE FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?')
-            ->execute([(int) $_POST['arquivo_id'], $clienteId]);
+        if (!$vpnArquivoExcluir) {
+            flash_set('erro', 'Arquivo não encontrado.');
+        } elseif (Auth::apenasProprios() && (int) $vpnArquivoExcluir['criado_por'] !== Auth::userId()) {
+            flash_set('erro', 'Você só pode excluir arquivos cadastrados por você.');
+        } else {
+            $pdo->prepare('DELETE FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?')
+                ->execute([$arquivoIdVpnExcluir, $clienteId]);
 
-        if ($caminhoVpnExcluir) {
-            @unlink(UPLOADS_DIR . '/' . $caminhoVpnExcluir);
+            if ($vpnArquivoExcluir['arquivo_caminho']) {
+                @unlink(UPLOADS_DIR . '/' . $vpnArquivoExcluir['arquivo_caminho']);
+            }
+            flash_set('sucesso', 'Arquivo de VPN removido.');
         }
-        flash_set('sucesso', 'Arquivo de VPN removido.');
     }
 
     if ($acao === 'upload_fonte_advpl' && isset($_FILES['arquivo'])) {
@@ -707,7 +747,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // cliente_id direto, então o JOIN com setores confirma que essa
         // fonte é mesmo desse cliente antes de editar.
         $stmtFonteEditar = $pdo->prepare('
-            SELECT f.arquivo_caminho FROM setor_fontes_advpl f
+            SELECT f.arquivo_caminho, f.criado_por FROM setor_fontes_advpl f
             INNER JOIN setores s ON s.id = f.setor_id
             WHERE f.id = ? AND s.cliente_id = ?
         ');
@@ -716,6 +756,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$fonteAtual) {
             flash_set('erro', 'Fonte não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $fonteAtual['criado_por'] !== Auth::userId()) {
+            flash_set('erro', 'Você só pode editar fontes cadastradas por você.');
         } elseif ($tituloFonte === '') {
             flash_set('erro', 'Informe o nome da rotina.');
         } else {
@@ -774,22 +816,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // JOIN com setores confirma que essa fonte é mesmo desse cliente
         // antes de excluir, senão alguém com a permissão especial num
         // cliente conseguiria apagar fonte de OUTRO cliente só sabendo o id.
+        $fonteIdExcluir = (int) $_POST['fonte_id'];
         $stmtFonteExcluir = $pdo->prepare('
-            SELECT f.arquivo_caminho FROM setor_fontes_advpl f
+            SELECT f.arquivo_caminho, f.criado_por FROM setor_fontes_advpl f
             INNER JOIN setores s ON s.id = f.setor_id
             WHERE f.id = ? AND s.cliente_id = ?
         ');
-        $stmtFonteExcluir->execute([(int) $_POST['fonte_id'], $clienteId]);
+        $stmtFonteExcluir->execute([$fonteIdExcluir, $clienteId]);
         $fonteEncontrada = $stmtFonteExcluir->fetch();
 
-        if ($fonteEncontrada) {
-            $pdo->prepare('DELETE FROM setor_fontes_advpl WHERE id = ?')->execute([(int) $_POST['fonte_id']]);
+        if (!$fonteEncontrada) {
+            flash_set('erro', 'Fonte não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $fonteEncontrada['criado_por'] !== Auth::userId()) {
+            flash_set('erro', 'Você só pode excluir fontes cadastradas por você.');
+        } else {
+            $pdo->prepare('DELETE FROM setor_fontes_advpl WHERE id = ?')->execute([$fonteIdExcluir]);
             if ($fonteEncontrada['arquivo_caminho']) {
                 @unlink(UPLOADS_DIR . '/' . $fonteEncontrada['arquivo_caminho']);
             }
             flash_set('sucesso', 'Fonte ADVPL removida.');
-        } else {
-            flash_set('erro', 'Fonte não encontrada.');
         }
     }
 
@@ -845,7 +890,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'atualizar_tcloud_vscode') {
         $vscodeIdAlvo = (int) $_POST['vscode_id'];
         $tituloVscode = trim($_POST['titulo'] ?? '');
-        if ($tituloVscode === '') {
+        $stmtVscodeDono = $pdo->prepare('SELECT criado_por FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?');
+        $stmtVscodeDono->execute([$vscodeIdAlvo, $clienteId]);
+        $donoVscode = $stmtVscodeDono->fetchColumn();
+        if ($donoVscode === false) {
+            flash_set('erro', 'Configuração não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $donoVscode !== Auth::userId()) {
+            flash_set('erro', 'Você só pode editar configurações cadastradas por você.');
+        } elseif ($tituloVscode === '') {
             flash_set('erro', 'Informe um título pra essa configuração do VSCode.');
         } else {
             $pdo->prepare('UPDATE cliente_tcloud_vscode SET titulo=?, link=?, porta=?, ambiente=? WHERE id=? AND cliente_id=?')
@@ -862,9 +914,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($acao === 'excluir_tcloud_vscode') {
-        $pdo->prepare('DELETE FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?')
-            ->execute([(int) $_POST['vscode_id'], $clienteId]);
-        flash_set('sucesso', 'Configuração do VSCode removida.');
+        $vscodeIdExcluir = (int) $_POST['vscode_id'];
+        $stmtVscodeDonoExcluir = $pdo->prepare('SELECT criado_por FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?');
+        $stmtVscodeDonoExcluir->execute([$vscodeIdExcluir, $clienteId]);
+        $donoVscodeExcluir = $stmtVscodeDonoExcluir->fetchColumn();
+        if ($donoVscodeExcluir === false) {
+            flash_set('erro', 'Configuração não encontrada.');
+        } elseif (Auth::apenasProprios() && (int) $donoVscodeExcluir !== Auth::userId()) {
+            flash_set('erro', 'Você só pode excluir configurações cadastradas por você.');
+        } else {
+            $pdo->prepare('DELETE FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?')
+                ->execute([$vscodeIdExcluir, $clienteId]);
+            flash_set('sucesso', 'Configuração do VSCode removida.');
+        }
     }
 
     // --- Sugestões de melhoria por setor, geradas com IA -----------------
@@ -1650,6 +1712,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // --- Setores (departamentos independentes do cliente) ---------------
     // Ver src/Migrations.php (tabelas setores/setor_responsaveis) e
     // ClienteAuth (login separado do master pra cada setor).
+    // Colaborador com escopo restrito só pode VER o setor dele -- criar,
+    // editar, excluir e mexer nos responsáveis (convite/senha/desativar/
+    // desvincular/relacionar) é privilégio de quem não é restrito. Checa
+    // de novo aqui (server-side), não só escondendo os botões na tela.
+    $acoesGerenciarSetor = [
+        'criar_setor', 'atualizar_setor', 'excluir_setor',
+        'relacionar_responsavel_setor', 'desvincular_responsavel_setor',
+        'enviar_convite_setor', 'resetar_senha_setor', 'desativar_portal_setor',
+    ];
+    if (in_array($acao, $acoesGerenciarSetor, true) && Auth::escopoRestrito()) {
+        http_response_code(403);
+        die('Acesso restrito -- você só pode visualizar o setor, não gerenciar.');
+    }
 
     if ($acao === 'criar_setor') {
         $nomeSetor = trim($_POST['nome'] ?? '');
@@ -2461,6 +2536,16 @@ foreach ($propostas as $p) {
 // senha só é decifrada sob demanda via ver_credencial.php, quando a pessoa
 // clica em "Mostrar".
 $podeAcessarDadosSensiveis = Auth::podeAcessarDadosSensiveis();
+// Acessos/T-Cloud também abrem pra um colaborador com escopo restrito, e
+// Fontes ADVPL continua exigindo a liberação de dados sensíveis pra sequer
+// aparecer -- mas em NENHUM dos dois casos isso mais significa "ver tudo":
+// só admin/diretor/CEO enxergam todos os registros (Auth::isAdmin()),
+// qualquer outra pessoa só vê o que ELA MESMA cadastrou (ver
+// Auth::apenasProprios()). Pedido do Kleber: "não é questão de pode acessar
+// dados sensiveis, ele pode sim, mas só o que ele cadastra... só o admin e
+// o DIRETOR e CEO podem ver tudo".
+$podeAcessarAcessosProprios = Auth::podeAcessarAcessosProprios();
+$apenasProprios = Auth::apenasProprios();
 $credenciaisCliente = [];
 $vpnArquivosCliente = [];
 $fontesAdvplPorSetorId = [];
@@ -2472,7 +2557,7 @@ foreach (array_keys(TCLOUD_AMBIENTES) as $tipoAmbienteTcloud) {
     $tcloudAmbientesCliente[$tipoAmbienteTcloud] = array_fill_keys(array_keys(TCLOUD_LINKS), null);
 }
 $tcloudVscodeCliente = [];
-if ($podeAcessarDadosSensiveis) {
+if ($podeAcessarAcessosProprios) {
     $stmtCredenciais = $pdo->prepare('SELECT * FROM cliente_credenciais WHERE cliente_id = ? ORDER BY tipo ASC, titulo ASC');
     $stmtCredenciais->execute([$clienteId]);
     $credenciaisCliente = $stmtCredenciais->fetchAll();
@@ -2487,19 +2572,11 @@ if ($podeAcessarDadosSensiveis) {
     $stmtVpnArquivos->execute([$clienteId]);
     $vpnArquivosCliente = $stmtVpnArquivos->fetchAll();
 
-    $stmtFontesAdvpl = $pdo->prepare('
-        SELECT f.*, u.nome AS criado_por_nome
-        FROM setor_fontes_advpl f
-        INNER JOIN setores s ON s.id = f.setor_id
-        LEFT JOIN usuarios u ON u.id = f.criado_por
-        WHERE s.cliente_id = ?
-        ORDER BY f.criado_em DESC
-    ');
-    $stmtFontesAdvpl->execute([$clienteId]);
-    foreach ($stmtFontesAdvpl->fetchAll() as $fonte) {
-        $fontesAdvplPorSetorId[$fonte['setor_id']][] = $fonte;
-    }
-
+    // Ambientes T-Cloud (produção/teste/dev/homologação) são configuração
+    // COMPARTILHADA do cliente (1 registro por tipo, todo mundo edita em
+    // cima do mesmo), não uma lista de itens de cada pessoa -- não faz
+    // sentido "só o que eu cadastrei" aqui, então mostra sempre, mesmo
+    // restrito.
     $stmtTcloudAmbientes = $pdo->prepare('SELECT * FROM cliente_tcloud_ambientes WHERE cliente_id = ?');
     $stmtTcloudAmbientes->execute([$clienteId]);
     foreach ($stmtTcloudAmbientes->fetchAll() as $ambienteTcloud) {
@@ -2511,6 +2588,30 @@ if ($podeAcessarDadosSensiveis) {
     $stmtTcloudVscode = $pdo->prepare('SELECT * FROM cliente_tcloud_vscode WHERE cliente_id = ? ORDER BY titulo ASC');
     $stmtTcloudVscode->execute([$clienteId]);
     $tcloudVscodeCliente = $stmtTcloudVscode->fetchAll();
+
+    if ($apenasProprios) {
+        $credenciaisCliente = array_values(array_filter($credenciaisCliente, fn ($c) => (int) $c['criado_por'] === Auth::userId()));
+        $vpnArquivosCliente = array_values(array_filter($vpnArquivosCliente, fn ($v) => (int) $v['criado_por'] === Auth::userId()));
+        $tcloudVscodeCliente = array_values(array_filter($tcloudVscodeCliente, fn ($v) => (int) $v['criado_por'] === Auth::userId()));
+    }
+}
+
+if ($podeAcessarDadosSensiveis) {
+    $stmtFontesAdvpl = $pdo->prepare('
+        SELECT f.*, u.nome AS criado_por_nome
+        FROM setor_fontes_advpl f
+        INNER JOIN setores s ON s.id = f.setor_id
+        LEFT JOIN usuarios u ON u.id = f.criado_por
+        WHERE s.cliente_id = ?
+        ORDER BY f.criado_em DESC
+    ');
+    $stmtFontesAdvpl->execute([$clienteId]);
+    foreach ($stmtFontesAdvpl->fetchAll() as $fonte) {
+        if ($apenasProprios && (int) $fonte['criado_por'] !== Auth::userId()) {
+            continue;
+        }
+        $fontesAdvplPorSetorId[$fonte['setor_id']][] = $fonte;
+    }
 }
 
 $treinamentos = $pdo->prepare('
@@ -2725,14 +2826,20 @@ require __DIR__ . '/templates/header.php';
 </div>
 
 <ul class="nav nav-tabs mb-3" id="clienteTabs">
+    <?php if (!Auth::escopoRestrito()): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#visao-geral"><i class="bi bi-building"></i> Visão geral</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#implantacao"><i class="bi bi-rocket-takeoff"></i> Implantação <span class="badge bg-secondary"><?= count($etapasImplantacao) ?></span></a></li>
+    <?php endif; ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#chamados"><i class="bi bi-headset"></i> Chamados <span class="badge bg-secondary"><?= count($chamados) ?></span></a></li>
+    <?php if (!Auth::escopoRestrito()): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#kpis"><i class="bi bi-graph-up"></i> KPIs</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#analise-risco"><i class="bi bi-stars"></i> Análise de Risco</a></li>
+    <?php endif; ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setores"><i class="bi bi-diagram-3"></i> Setores <span class="badge bg-secondary"><?= count($setores) ?></span></a></li>
+    <?php if (!Auth::escopoRestrito()): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#usuarios"><i class="bi bi-people"></i> Usuários <span class="badge bg-secondary"><?= count($usuariosCliente) + 1 ?></span></a></li>
-    <?php if ($podeAcessarDadosSensiveis): ?>
+    <?php endif; ?>
+    <?php if ($podeAcessarAcessosProprios): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#acessos"><i class="bi bi-shield-lock"></i> Acessos</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tcloud"><i class="bi bi-cloud"></i> T-Cloud</a></li>
     <?php endif; ?>
@@ -2740,6 +2847,7 @@ require __DIR__ . '/templates/header.php';
 
 <div class="tab-content">
 
+    <?php if (!Auth::escopoRestrito()): ?>
     <!-- VISÃO GERAL -->
     <div class="tab-pane" id="visao-geral">
         <div class="card card-stat">
@@ -3237,6 +3345,7 @@ require __DIR__ . '/templates/header.php';
           </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- CHAMADOS -->
     <div class="tab-pane" id="chamados">
@@ -3465,6 +3574,7 @@ require __DIR__ . '/templates/header.php';
         <p class="text-muted text-center py-3 d-none" id="avisoFiltroVazio">Nenhum chamado encontrado com esses filtros.</p>
     </div>
 
+    <?php if (!Auth::escopoRestrito()): ?>
     <!-- KPIS -->
     <div class="tab-pane" id="kpis">
         <p class="text-muted small mb-1"><i class="bi bi-graph-up"></i> KPI (métrica) é qualquer número que ajuda a acompanhar a saúde do atendimento -- ex.: quantos chamados abriram, quantos foram resolvidos, tempo médio de resposta. A <strong>meta</strong> é o número que você quer bater; sem meta cadastrada o card fica cinza (neutro), não vermelho -- ausência de meta não é meta não batida.</p>
@@ -3543,6 +3653,7 @@ require __DIR__ . '/templates/header.php';
         <?php endif; ?>
         <?php endforeach; ?>
     </div>
+    <?php endif; ?>
 
     <!-- Visualizar/editar uma análise (Risco ou Melhorias) -- um modal só,
          reaproveitado pelos dois modos (view = readonly, edit = editável),
@@ -3569,6 +3680,7 @@ require __DIR__ . '/templates/header.php';
     <div class="tab-pane" id="setores">
         <p class="text-muted small">Cada setor tem seu próprio espaço: configurações, calendário de treinamentos/reuniões, documentos, propostas de melhoria, métricas e sugestões de IA sobre o processo dele.</p>
 
+        <?php if (!Auth::escopoRestrito()): ?>
         <form method="post" class="row g-2 align-items-end mb-2">
             <?= csrf_field() ?>
             <input type="hidden" name="acao" value="criar_setor">
@@ -3594,6 +3706,7 @@ require __DIR__ . '/templates/header.php';
                 <button type="button" class="btn btn-sm btn-outline-secondary mb-1 botao-sugestao-setor" data-nome="<?= e($nomeSug) ?>" data-icone="<?= e($iconeSug) ?>"><i class="bi <?= e($iconeSug) ?>"></i> <?= e($nomeSug) ?></button>
             <?php endforeach; ?>
         </div>
+        <?php endif; ?>
         <?php endif; ?>
 
         <?php if (!$setores): ?>
@@ -3646,6 +3759,7 @@ require __DIR__ . '/templates/header.php';
 
                     <!-- Configurações -->
                     <div class="tab-pane show active" id="setorConfig<?= $idSetorAtual ?>">
+                        <?php if (!Auth::escopoRestrito()): ?>
                         <form method="post" class="row g-2 align-items-end mb-2">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="atualizar_setor">
@@ -3664,6 +3778,14 @@ require __DIR__ . '/templates/header.php';
                                 <button type="button" class="icone-opcao <?= $ic === ($s['icone'] ?: 'bi-diagram-3') ? 'active' : '' ?>" data-icone="<?= $ic ?>" title="<?= $ic ?>"><i class="bi <?= $ic ?>"></i></button>
                             <?php endforeach; ?>
                         </div>
+                        <?php else: ?>
+                        <div class="d-flex align-items-center gap-2 mb-3">
+                            <?= icone_setor_html($s) ?>
+                            <span class="fw-semibold"><?= e($s['nome']) ?></span>
+                            <span class="badge bg-<?= $s['ativo'] ? 'success' : 'secondary' ?>"><?= $s['ativo'] ? 'Ativo' : 'Inativo' ?></span>
+                        </div>
+                        <p class="text-muted small">Você só pode visualizar as configurações desse setor -- edição fica com admin/diretor/CEO.</p>
+                        <?php endif; ?>
 
                         <hr>
                         <p class="text-muted small mb-2"><i class="bi bi-people"></i> Responsáveis (cada um com login próprio no portal, só desse setor)</p>
@@ -3678,6 +3800,7 @@ require __DIR__ . '/templates/header.php';
                                 <div class="text-muted small"><?= e($m['email']) ?></div>
                             </div>
                             <span class="badge bg-<?= $m['portal_ativo'] ? 'success' : 'secondary' ?>"><?= $m['portal_ativo'] ? 'Portal ativo' : 'Sem acesso' ?></span>
+                            <?php if (!Auth::escopoRestrito()): ?>
                             <div class="d-flex flex-wrap gap-1">
                                 <form method="post" class="d-inline">
                                     <?= csrf_field() ?>
@@ -3711,9 +3834,11 @@ require __DIR__ . '/templates/header.php';
                                     <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Desvincular</button>
                                 </form>
                             </div>
+                            <?php endif; ?>
                         </div>
                         <?php endforeach; ?>
 
+                        <?php if (!Auth::escopoRestrito()): ?>
                         <?php if ($candidatosRelacionar): ?>
                         <form method="post" class="row g-2 align-items-end mt-2 mb-3">
                             <?= csrf_field() ?>
@@ -3744,6 +3869,7 @@ require __DIR__ . '/templates/header.php';
                             <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
                             <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Excluir setor</button>
                         </form>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Calendário -->
@@ -4070,6 +4196,7 @@ require __DIR__ . '/templates/header.php';
         <?php endforeach; ?>
     </div>
 
+    <?php if (!Auth::escopoRestrito()): ?>
     <!-- USUÁRIOS -->
     <div class="tab-pane" id="usuarios">
         <p class="text-muted small mb-2"><i class="bi bi-people"></i> Todo mundo que representa <?= e($cliente['nome']) ?> no sistema -- o master vê tudo, cada usuário relacionado a um setor só vê/abre chamado do próprio setor.</p>
@@ -4211,14 +4338,15 @@ require __DIR__ . '/templates/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
-    <?php if ($podeAcessarDadosSensiveis): ?>
+    <?php if ($podeAcessarAcessosProprios): ?>
     <!-- ACESSOS (cofre de credenciais + VPN) -->
     <div class="tab-pane" id="acessos">
         <div class="alert alert-warning d-flex align-items-start gap-2">
             <i class="bi bi-exclamation-triangle-fill fs-5"></i>
             <div>
-                <strong>Área restrita.</strong> Credenciais e arquivos aqui são extremamente sensíveis (senha de servidor, acesso remoto, VPN) -- só admin/diretor e usuários com liberação especial enxergam essa aba. Todo acesso (ver senha, baixar arquivo) fica registrado.
+                <strong>Área restrita.</strong> Credenciais e arquivos aqui são extremamente sensíveis (senha de servidor, acesso remoto, VPN)<?= Auth::apenasProprios() ? ' -- você só vê o que você mesmo cadastrou' : '' ?>. Todo acesso (ver senha, baixar arquivo) fica registrado.
             </div>
         </div>
 
@@ -4939,7 +5067,7 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<?php if ($podeAcessarDadosSensiveis): ?>
+<?php if ($podeAcessarAcessosProprios): ?>
 <!-- Nova/editar credencial (aba Acessos) -- UM modal só, reaproveitado pros
      dois casos (o botão "Nova credencial" reseta os campos antes de abrir,
      "editar" preenche a partir dos data-* do botão da linha). -->
@@ -5003,7 +5131,9 @@ require __DIR__ . '/templates/header.php';
     </div>
   </div>
 </div>
+<?php endif; ?>
 
+<?php if ($podeAcessarDadosSensiveis): ?>
 <!-- Editar Fonte ADVPL (aba Setores > Fontes ADVPL) -- arquivo é opcional
      aqui: em branco mantém o já cadastrado, preenchido substitui. -->
 <div class="modal fade" id="modalEditarFonteAdvpl" tabindex="-1">
@@ -5047,7 +5177,9 @@ require __DIR__ . '/templates/header.php';
     </div>
   </div>
 </div>
+<?php endif; ?>
 
+<?php if ($podeAcessarAcessosProprios): ?>
 <!-- Ambiente T-Cloud (Produção/Teste) -- UM modal só, aberto via
      data-bs-toggle direto no card (Bootstrap dispara show.bs.modal com
      event.relatedTarget = o card clicado, ver script mais abaixo), sem

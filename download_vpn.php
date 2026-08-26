@@ -13,7 +13,7 @@ use AdminPrime\Auth;
 use AdminPrime\Database;
 use AdminPrime\Migrations;
 
-Auth::requireAcessoDadosSensiveis();
+Auth::requireAcessoAcessosProprios();
 
 $pdo = Database::connection();
 
@@ -25,6 +25,11 @@ $arquivo = $stmt->fetch();
 if (!$arquivo) {
     http_response_code(404);
     die('Arquivo não encontrado.');
+}
+
+if (Auth::apenasProprios() && (int) $arquivo['criado_por'] !== Auth::userId()) {
+    http_response_code(403);
+    die('Você só pode baixar arquivos cadastrados por você.');
 }
 
 Migrations::restaurarArquivoSeNecessario($pdo, 'cliente_vpn_arquivos', $arquivoId, 'arquivo_caminho', 'dados', UPLOADS_DIR);

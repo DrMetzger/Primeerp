@@ -44,36 +44,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'resetar
     exit;
 }
 
-$totalClientesAtivos = (int) $pdo->query("SELECT COUNT(*) FROM clientes WHERE status = 'ativo'")->fetchColumn();
+// Colaborador com acesso restrito (ver Auth::escopoRestrito) só pode ver
+// estatísticas dos clientes vinculados a ele -- sem isso, o dashboard
+// inteiro (KPIs, gráficos, "clientes que precisam de atenção") mostrava
+// dados de TODOS os clientes pra todo mundo, inclusive quem só devia
+// enxergar um cliente específico. Os ids já vêm garantidamente inteiros de
+// Auth::clienteIdsPermitidos() (nunca texto vindo de fora), então dá pra
+// montar o IN(...) direto sem risco de injection.
+$clienteIdsPermitidosDash = Auth::clienteIdsPermitidos();
+$restritoDash = $clienteIdsPermitidosDash !== null;
+$listaClienteIdsDash = $restritoDash ? implode(',', $clienteIdsPermitidosDash ?: [0]) : '';
+$filtroChamadoClienteDash = $restritoDash ? " AND cliente_id IN ($listaClienteIdsDash)" : '';
+$filtroClienteAliasDash = $restritoDash ? " AND c.id IN ($listaClienteIdsDash)" : '';
+$filtroClienteSemAliasDash = $restritoDash ? " AND id IN ($listaClienteIdsDash)" : '';
+
+$totalClientesAtivos = (int) $pdo->query("SELECT COUNT(*) FROM clientes WHERE status = 'ativo'{$filtroClienteSemAliasDash}")->fetchColumn();
 
 // Chamados que dependem de uma ação nossa agora: os que ainda não tiveram
 // nenhuma resposta da equipe ("aberto") + os que o cliente respondeu de
 // volta e está esperando a gente ("aguardando_equipe"). Antes o dashboard
 // só olhava pra tabela de demandas e nunca pra chamados -- por isso os
 // números apareciam sempre zerados mesmo com chamados reais em aberto.
-$totalChamadosAguardandoNos = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE status IN ('aberto','aguardando_equipe')")->fetchColumn();
+$totalChamadosAguardandoNos = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE status IN ('aberto','aguardando_equipe'){$filtroChamadoClienteDash}")->fetchColumn();
 // "Urgentes" aqui é sempre um SUBCONJUNTO de "aguardando nós" (pendência
 // nossa) -- antes contava qualquer chamado não fechado com prioridade
 // alta/urgente, incluindo os que já respondemos e a bola está com o cliente
 // (aguardando_cliente). Isso fazia esse número não bater com o "urgentes" da
 // tela de Clientes (que já segue essa mesma regra), que foi o que o Kleber
 // apontou como inconsistente num print.
-$totalChamadosUrgentes = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE status IN ('aberto','aguardando_equipe') AND prioridade IN ('alta','urgente')")->fetchColumn();
+$totalChamadosUrgentes = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE status IN ('aberto','aguardando_equipe') AND prioridade IN ('alta','urgente'){$filtroChamadoClienteDash}")->fetchColumn();
 
 // --- Segunda linha de KPIs: volume do mês + saúde do atendimento ---------
 
-$chamadosMesAtual = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE criado_em >= DATE_FORMAT(NOW(), '%Y-%m-01')")->fetchColumn();
+$chamadosMesAtual = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE criado_em >= DATE_FORMAT(NOW(), '%Y-%m-01'){$filtroChamadoClienteDash}")->fetchColumn();
 $chamadosMesPassado = (int) $pdo->query("
     SELECT COUNT(*) FROM chamados
     WHERE criado_em >= DATE_FORMAT(NOW() - INTERVAL 1 MONTH, '%Y-%m-01')
-      AND criado_em < DATE_FORMAT(NOW(), '%Y-%m-01')
+      AND criado_em < DATE_FORMAT(NOW(), '%Y-%m-01'){$filtroChamadoClienteDash}
 ")->fetchColumn();
 
-$fechadosMesAtual = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE fechado_em >= DATE_FORMAT(NOW(), '%Y-%m-01')")->fetchColumn();
+$fechadosMesAtual = (int) $pdo->query("SELECT COUNT(*) FROM chamados WHERE fechado_em >= DATE_FORMAT(NOW(), '%Y-%m-01'){$filtroChamadoClienteDash}")->fetchColumn();
 $fechadosMesPassado = (int) $pdo->query("
     SELECT COUNT(*) FROM chamados
     WHERE fechado_em >= DATE_FORMAT(NOW() - INTERVAL 1 MONTH, '%Y-%m-01')
-      AND fechado_em < DATE_FORMAT(NOW(), '%Y-%m-01')
+      AND fechado_em < DATE_FORMAT(NOW(), '%Y-%m-01'){$filtroChamadoClienteDash}
 ")->fetchColumn();
 
 // Tempo médio de atendimento (empresa toda) nos últimos 30 dias -- mesma
@@ -82,7 +96,7 @@ $fechadosMesPassado = (int) $pdo->query("
 $tempoMedioMinutos = $pdo->query("
     SELECT AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em))
     FROM chamados
-    WHERE fechado_em IS NOT NULL AND fechado_em >= NOW() - INTERVAL 30 DAY
+    WHERE fechado_em IS NOT NULL AND fechado_em >= NOW() - INTERVAL 30 DAY{$filtroChamadoClienteDash}
 ")->fetchColumn();
 $tempoMedioMinutos = $tempoMedioMinutos !== null ? (float) $tempoMedioMinutos : null;
 
@@ -92,7 +106,7 @@ $tempoMedioMinutos = $tempoMedioMinutos !== null ? (float) $tempoMedioMinutos : 
 $idadeMediaDias = $pdo->query("
     SELECT AVG(DATEDIFF(NOW(), criado_em))
     FROM chamados
-    WHERE status IN ('aberto','aguardando_equipe')
+    WHERE status IN ('aberto','aguardando_equipe'){$filtroChamadoClienteDash}
 ")->fetchColumn();
 $idadeMediaDias = $idadeMediaDias !== null ? (float) $idadeMediaDias : null;
 
@@ -115,7 +129,7 @@ $abertosPorMes = array_fill_keys($mesesChave, 0);
 $stmt = $pdo->query("
     SELECT DATE_FORMAT(criado_em, '%Y-%m') AS mes, COUNT(*) AS total
     FROM chamados
-    WHERE criado_em >= '" . reset($mesesChave) . "-01'
+    WHERE criado_em >= '" . reset($mesesChave) . "-01'{$filtroChamadoClienteDash}
     GROUP BY mes
 ");
 foreach ($stmt->fetchAll() as $linha) {
@@ -128,7 +142,7 @@ $fechadosPorMes = array_fill_keys($mesesChave, 0);
 $stmt = $pdo->query("
     SELECT DATE_FORMAT(fechado_em, '%Y-%m') AS mes, COUNT(*) AS total
     FROM chamados
-    WHERE fechado_em IS NOT NULL AND fechado_em >= '" . reset($mesesChave) . "-01'
+    WHERE fechado_em IS NOT NULL AND fechado_em >= '" . reset($mesesChave) . "-01'{$filtroChamadoClienteDash}
     GROUP BY mes
 ");
 foreach ($stmt->fetchAll() as $linha) {
@@ -145,7 +159,7 @@ $tempoMedioPorMes = array_fill_keys($mesesChave, null);
 $stmt = $pdo->query("
     SELECT DATE_FORMAT(fechado_em, '%Y-%m') AS mes, AVG(TIMESTAMPDIFF(MINUTE, criado_em, fechado_em)) AS media
     FROM chamados
-    WHERE fechado_em IS NOT NULL AND fechado_em >= '" . reset($mesesChave) . "-01'
+    WHERE fechado_em IS NOT NULL AND fechado_em >= '" . reset($mesesChave) . "-01'{$filtroChamadoClienteDash}
     GROUP BY mes
 ");
 foreach ($stmt->fetchAll() as $linha) {
@@ -171,7 +185,7 @@ $statusMapaCor = [
     'aguardando_cliente' => '#6d28d9',
 ];
 $statusPendentesPorTipo = array_fill_keys(array_keys($statusMapaLabel), 0);
-$stmt = $pdo->query("SELECT status, COUNT(*) AS total FROM chamados WHERE status != 'fechado' GROUP BY status");
+$stmt = $pdo->query("SELECT status, COUNT(*) AS total FROM chamados WHERE status != 'fechado'{$filtroChamadoClienteDash} GROUP BY status");
 foreach ($stmt->fetchAll() as $linha) {
     if (isset($statusPendentesPorTipo[$linha['status']])) {
         $statusPendentesPorTipo[$linha['status']] = (int) $linha['total'];
@@ -182,7 +196,7 @@ $prioridadeMapaLabel = ['baixa' => 'Baixa', 'media' => 'Média', 'alta' => 'Alta
 // Mesmas cores de badge_prioridade()/opcoes_prioridade_html() (helpers.php).
 $prioridadeMapaCor = ['baixa' => '#15803d', 'media' => '#b45309', 'alta' => '#be123c', 'urgente' => '#b91c1c'];
 $prioridadePendentesPorTipo = array_fill_keys(array_keys($prioridadeMapaLabel), 0);
-$stmt = $pdo->query("SELECT prioridade, COUNT(*) AS total FROM chamados WHERE status != 'fechado' GROUP BY prioridade");
+$stmt = $pdo->query("SELECT prioridade, COUNT(*) AS total FROM chamados WHERE status != 'fechado'{$filtroChamadoClienteDash} GROUP BY prioridade");
 foreach ($stmt->fetchAll() as $linha) {
     if (isset($prioridadePendentesPorTipo[$linha['prioridade']])) {
         $prioridadePendentesPorTipo[$linha['prioridade']] = (int) $linha['total'];
@@ -204,7 +218,7 @@ $clientesDetalhe = $pdo->query("
         (SELECT AVG(TIMESTAMPDIFF(MINUTE, ch.criado_em, ch.fechado_em)) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.fechado_em IS NOT NULL) AS tempo_medio_min,
         (SELECT AVG(DATEDIFF(NOW(), ch.criado_em)) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status != 'fechado') AS idade_media_pendentes_dias
     FROM clientes c
-    WHERE c.status = 'ativo'
+    WHERE c.status = 'ativo'{$filtroClienteAliasDash}
     ORDER BY chamados_mes DESC, chamados_total DESC
 ")->fetchAll();
 
@@ -222,7 +236,7 @@ $sqlAtencao = "
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe')) AS chamados_aguardando,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.cliente_id = c.id AND ch.status IN ('aberto','aguardando_equipe') AND ch.prioridade IN ('alta','urgente')) AS chamados_urgentes
     FROM clientes c
-    WHERE c.status = 'ativo'
+    WHERE c.status = 'ativo'{$filtroClienteAliasDash}
 ";
 $clientesAtencao = $pdo->query($sqlAtencao)->fetchAll();
 

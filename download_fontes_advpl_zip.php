@@ -47,6 +47,12 @@ $stmt = $pdo->prepare('SELECT * FROM setor_fontes_advpl WHERE setor_id = ? ORDER
 $stmt->execute([$setorId]);
 $fontes = $stmt->fetchAll();
 
+// Colaborador restrito só baixa em lote o que ele mesmo cadastrou -- mesma
+// regra de apenasProprios() aplicada em cliente.php/download_fonte_advpl.php.
+if (Auth::check() && Auth::apenasProprios()) {
+    $fontes = array_values(array_filter($fontes, fn ($f) => (int) $f['criado_por'] === Auth::userId()));
+}
+
 if (!$fontes) {
     http_response_code(404);
     die('Nenhuma fonte ADVPL cadastrada pra esse setor.');
