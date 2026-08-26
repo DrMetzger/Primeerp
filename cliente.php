@@ -442,7 +442,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // direto, mesmo sem ver o botão.
     $acoesDadosSensiveis = [
         'criar_credencial', 'atualizar_credencial', 'excluir_credencial',
-        'upload_vpn_arquivo', 'excluir_vpn_arquivo',
+        'upload_vpn_arquivo', 'atualizar_vpn_arquivo', 'excluir_vpn_arquivo',
         'upload_fonte_advpl', 'atualizar_fonte_advpl', 'excluir_fonte_advpl',
         'salvar_tcloud_ambiente',
         'criar_tcloud_vscode', 'atualizar_tcloud_vscode', 'excluir_tcloud_vscode',
@@ -544,6 +544,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 flash_set('sucesso', 'Arquivo de VPN cadastrado.');
             }
+        }
+    }
+
+    if ($acao === 'atualizar_vpn_arquivo') {
+        $arquivoIdVpnAlvo = (int) ($_POST['arquivo_id'] ?? 0);
+        $novoTituloVpn = trim($_POST['titulo'] ?? '');
+        if ($novoTituloVpn === '') {
+            flash_set('erro', 'Informe um título pra esse arquivo de VPN.');
+        } elseif (!empty($_FILES['arquivo']['name'])) {
+            // Trocando o arquivo também -- mesma validação de tamanho do
+            // cadastro novo, e só apaga o antigo depois que o novo já
+            // estiver salvo (se algo falhar no meio, não fica sem nada).
+            if ($_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
+                flash_set('erro', 'Falha no upload do arquivo.');
+            } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
+                flash_set('erro', 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).');
+            } else {
+                $stmtVpnAntigo = $pdo->prepare('SELECT arquivo_caminho FROM cliente_vpn_arquivos WHERE id = ? AND cliente_id = ?');
+                $stmtVpnAntigo->execute([$arquivoIdVpnAlvo, $clienteId]);
+                $caminhoVpnAntigo = $stmtVpnAntigo->fetchColumn();
+
+                $dirClienteVpn = UPLOADS_DIR . '/clientes/' . $clienteId;
+                if (!is_dir($dirClienteVpn)) {
+                    mkdir($dirClienteVpn, 0755, true);
+                }
+                $extensaoVpn = strtolower(pathinfo($_FILES['arquivo']['name'], PATHINFO_EXTENSION));
+                $nomeArmazenadoVpn = bin2hex(random_bytes(16)) . ($extensaoVpn ? '.' . $extensaoVpn : '');
+                $destinoVpn = $dirClienteVpn . '/' . $nomeArmazenadoVpn;
+
+                if (!move_uploaded_file($_FILES['arquivo']['tmp_name'], $destinoVpn)) {
+                    flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
+                } else {
+                    $pdo->prepare('UPDATE cliente_vpn_arquivos SET titulo = ?, arquivo_nome_original = ?, arquivo_caminho = ?, arquivo_tamanho = ?, dados = ? WHERE id = ? AND cliente_id = ?')
+                        ->execute([
+                            $novoTituloVpn,
+                            $_FILES['arquivo']['name'],
+                            'clientes/' . $clienteId . '/' . $nomeArmazenadoVpn,
+                            $_FILES['arquivo']['size'],
+                            file_get_contents($destinoVpn),
+                            $arquivoIdVpnAlvo,
+                            $clienteId,
+                        ]);
+                    if ($caminhoVpnAntigo) {
+                        @unlink(UPLOADS_DIR . '/' . $caminhoVpnAntigo);
+                    }
+                    flash_set('sucesso', 'Arquivo de VPN atualizado.');
+                }
+            }
+        } else {
+            $pdo->prepare('UPDATE cliente_vpn_arquivos SET titulo = ? WHERE id = ? AND cliente_id = ?')
+                ->execute([$novoTituloVpn, $arquivoIdVpnAlvo, $clienteId]);
+            flash_set('sucesso', 'Arquivo de VPN atualizado.');
         }
     }
 
@@ -3786,11 +3838,11 @@ require __DIR__ . '/templates/header.php';
                                     <label class="form-label small mb-1">Nome da rotina</label>
                                     <input type="text" name="nome_rotina" class="form-control form-control-sm" placeholder="Ex.: Como lançar uma Ordem de Produção" required>
                                 </div>
-                                <label class="video-aula-dropzone">
-                                    <input type="file" name="arquivo" class="video-aula-dropzone-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required>
-                                    <i class="bi bi-cloud-arrow-up video-aula-dropzone-icone"></i>
-                                    <span class="video-aula-dropzone-texto">Arraste o vídeo aqui ou <strong>clique para escolher</strong></span>
-                                    <span class="video-aula-dropzone-arquivo text-muted small"></span>
+                                <label class="dropzone-arquivo">
+                                    <input type="file" name="arquivo" class="dropzone-arquivo-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required>
+                                    <i class="bi bi-cloud-arrow-up dropzone-arquivo-icone"></i>
+                                    <span class="dropzone-arquivo-texto">Arraste o vídeo aqui ou <strong>clique para escolher</strong></span>
+                                    <span class="dropzone-arquivo-nome text-muted small"></span>
                                 </label>
                                 <p class="text-muted small mt-2 mb-2">Sem limite de tamanho -- vídeo grande só demora mais pra subir.</p>
                                 <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-upload"></i> Enviar</button>
@@ -4107,13 +4159,20 @@ require __DIR__ . '/templates/header.php';
             <h6 class="mb-0"><i class="bi bi-hdd-network"></i> Arquivos de VPN</h6>
             <p class="text-muted small mb-0">Repositório pra guardar e baixar arquivo de configuração de VPN (.ovpn etc.) desse cliente.</p>
         </div>
-        <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
+        <form method="post" enctype="multipart/form-data" class="card card-stat p-3 mb-3">
             <?= csrf_field() ?>
             <input type="hidden" name="acao" value="upload_vpn_arquivo">
             <input type="hidden" name="aba_retorno" value="acessos">
-            <div class="col-md-4"><input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (ex.: VPN Matriz)" required></div>
-            <div class="col-md-6"><input type="file" name="arquivo" class="form-control form-control-sm" required></div>
-            <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+            <div class="mb-2">
+                <input type="text" name="titulo" class="form-control form-control-sm" placeholder="Título (ex.: VPN Matriz)" required>
+            </div>
+            <label class="dropzone-arquivo">
+                <input type="file" name="arquivo" class="dropzone-arquivo-input" required>
+                <i class="bi bi-cloud-arrow-up dropzone-arquivo-icone"></i>
+                <span class="dropzone-arquivo-texto">Arraste o arquivo aqui ou <strong>clique para escolher</strong></span>
+                <span class="dropzone-arquivo-nome text-muted small"></span>
+            </label>
+            <button type="submit" class="btn btn-sm btn-dark mt-2"><i class="bi bi-upload"></i> Enviar</button>
         </form>
         <?php if ($vpnArquivosCliente): ?>
         <div class="table-responsive">
@@ -4128,6 +4187,7 @@ require __DIR__ . '/templates/header.php';
                     <td><?= formatar_data($v['criado_em']) ?></td>
                     <td class="text-end text-nowrap">
                         <a href="<?= url('download_vpn.php?id=' . $v['id']) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i></a>
+                        <button type="button" class="btn btn-sm btn-outline-dark botao-editar-vpn-arquivo" data-id="<?= $v['id'] ?>" data-titulo="<?= e($v['titulo']) ?>" title="Editar (título ou trocar o arquivo)"><i class="bi bi-pencil"></i></button>
                         <form method="post" class="d-inline" onsubmit="return confirm('Excluir o arquivo &quot;<?= e($v['titulo']) ?>&quot;?');">
                             <?= csrf_field() ?>
                             <input type="hidden" name="acao" value="excluir_vpn_arquivo">
@@ -4992,13 +5052,48 @@ require __DIR__ . '/templates/header.php';
             <input type="text" name="nome_rotina" id="editarVideoAulaNome" class="form-control mb-3" required>
 
             <label class="form-label">Trocar o vídeo (opcional)</label>
-            <label class="video-aula-dropzone">
-                <input type="file" name="arquivo" class="video-aula-dropzone-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>">
-                <i class="bi bi-cloud-arrow-up video-aula-dropzone-icone"></i>
-                <span class="video-aula-dropzone-texto">Arraste um novo vídeo aqui ou <strong>clique para escolher</strong></span>
-                <span class="video-aula-dropzone-arquivo text-muted small"></span>
+            <label class="dropzone-arquivo">
+                <input type="file" name="arquivo" class="dropzone-arquivo-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>">
+                <i class="bi bi-cloud-arrow-up dropzone-arquivo-icone"></i>
+                <span class="dropzone-arquivo-texto">Arraste um novo vídeo aqui ou <strong>clique para escolher</strong></span>
+                <span class="dropzone-arquivo-nome text-muted small"></span>
             </label>
             <p class="text-muted small mt-2 mb-0">Deixe em branco pra manter o vídeo atual e só trocar o nome.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-dark">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Editar um arquivo de VPN -- título sempre, e opcionalmente trocar o
+     arquivo em si (dropzone opcional, mesmo padrão do editar vídeo aula).
+     Sem arquivo grande pra fatiar aqui (configs de VPN são pequenas), então
+     segue como POST comum de verdade, sem upload em pedaços. -->
+<div class="modal fade" id="modalEditarVpnArquivo" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" enctype="multipart/form-data">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="atualizar_vpn_arquivo">
+        <input type="hidden" name="aba_retorno" value="acessos">
+        <input type="hidden" name="arquivo_id" id="editarVpnArquivoId">
+        <div class="modal-header"><h5 class="modal-title">Editar arquivo de VPN</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <label class="form-label">Título</label>
+            <input type="text" name="titulo" id="editarVpnArquivoTitulo" class="form-control mb-3" required>
+
+            <label class="form-label">Trocar o arquivo (opcional)</label>
+            <label class="dropzone-arquivo">
+                <input type="file" name="arquivo" class="dropzone-arquivo-input">
+                <i class="bi bi-cloud-arrow-up dropzone-arquivo-icone"></i>
+                <span class="dropzone-arquivo-texto">Arraste um novo arquivo aqui ou <strong>clique para escolher</strong></span>
+                <span class="dropzone-arquivo-nome text-muted small"></span>
+            </label>
+            <p class="text-muted small mt-2 mb-0">Deixe em branco pra manter o arquivo atual e só trocar o título.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -5083,11 +5178,27 @@ document.addEventListener('DOMContentLoaded', function () {
             // isso, um arquivo escolhido pra editar o vídeo A ficaria
             // "grudado" no formulário ao abrir pra editar o vídeo B.
             var formEditar = document.getElementById('modalEditarVideoAula').querySelector('form');
-            var inputArquivoEditar = formEditar.querySelector('.video-aula-dropzone-input');
-            var nomeArquivoEditar = formEditar.querySelector('.video-aula-dropzone-arquivo');
+            var inputArquivoEditar = formEditar.querySelector('.dropzone-arquivo-input');
+            var nomeArquivoEditar = formEditar.querySelector('.dropzone-arquivo-nome');
             inputArquivoEditar.value = '';
             nomeArquivoEditar.textContent = '';
             PrimeUI.openModal(document.getElementById('modalEditarVideoAula'));
+        });
+    });
+
+    document.querySelectorAll('.botao-editar-vpn-arquivo').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            document.getElementById('editarVpnArquivoId').value = botao.getAttribute('data-id');
+            document.getElementById('editarVpnArquivoTitulo').value = botao.getAttribute('data-titulo') || '';
+            // Mesmo cuidado do modal de vídeo aula -- modal único
+            // compartilhado, então limpa o arquivo escolhido da última vez
+            // que alguém abriu esse modal pra editar outro arquivo.
+            var formEditarVpn = document.getElementById('modalEditarVpnArquivo').querySelector('form');
+            var inputArquivoVpn = formEditarVpn.querySelector('.dropzone-arquivo-input');
+            var nomeArquivoVpn = formEditarVpn.querySelector('.dropzone-arquivo-nome');
+            inputArquivoVpn.value = '';
+            nomeArquivoVpn.textContent = '';
+            PrimeUI.openModal(document.getElementById('modalEditarVpnArquivo'));
         });
     });
 
@@ -5157,9 +5268,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // Arrastar-e-soltar do arquivo de vídeo -- o clique já funciona sozinho
     // (o <input> fica DENTRO do <label>), só falta o drag-and-drop em si e
     // mostrar o nome do arquivo escolhido (por clique OU arrastado).
-    document.querySelectorAll('.video-aula-dropzone').forEach(function (zona) {
-        var inputArquivoZona = zona.querySelector('.video-aula-dropzone-input');
-        var nomeArquivoEl = zona.querySelector('.video-aula-dropzone-arquivo');
+    document.querySelectorAll('.dropzone-arquivo').forEach(function (zona) {
+        var inputArquivoZona = zona.querySelector('.dropzone-arquivo-input');
+        var nomeArquivoEl = zona.querySelector('.dropzone-arquivo-nome');
 
         function mostrarArquivoEscolhido() {
             var arquivo = inputArquivoZona.files[0];
@@ -5170,18 +5281,18 @@ document.addEventListener('DOMContentLoaded', function () {
         ['dragenter', 'dragover'].forEach(function (evento) {
             zona.addEventListener(evento, function (e) {
                 e.preventDefault();
-                zona.classList.add('video-aula-dropzone-sobre');
+                zona.classList.add('dropzone-arquivo-sobre');
             });
         });
         ['dragleave', 'dragend'].forEach(function (evento) {
             zona.addEventListener(evento, function (e) {
                 e.preventDefault();
-                zona.classList.remove('video-aula-dropzone-sobre');
+                zona.classList.remove('dropzone-arquivo-sobre');
             });
         });
         zona.addEventListener('drop', function (e) {
             e.preventDefault();
-            zona.classList.remove('video-aula-dropzone-sobre');
+            zona.classList.remove('dropzone-arquivo-sobre');
             if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
                 inputArquivoZona.files = e.dataTransfer.files;
                 mostrarArquivoEscolhido();
