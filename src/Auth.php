@@ -27,8 +27,8 @@ class Auth
         // motivo, então nunca deixa exceção subir daqui.
         try {
             $pdo->prepare('UPDATE usuarios SET ultimo_login_em = NOW() WHERE id = ?')->execute([$usuario['id']]);
-            $pdo->prepare('INSERT INTO usuario_login_log (usuario_id, ip) VALUES (?, ?)')
-                ->execute([$usuario['id'], $_SERVER['REMOTE_ADDR'] ?? null]);
+            $pdo->prepare('INSERT INTO usuario_login_log (usuario_id, ip, user_agent) VALUES (?, ?, ?)')
+                ->execute([$usuario['id'], $_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_USER_AGENT'] ?? null]);
         } catch (\Throwable $e) {
             error_log('Falha ao registrar login: ' . $e->getMessage());
         }

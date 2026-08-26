@@ -1129,10 +1129,12 @@ class Migrations
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 usuario_id INT NOT NULL,
                 ip VARCHAR(45) NULL,
+                user_agent VARCHAR(255) NULL COMMENT 'Cabeçalho User-Agent do navegador no login -- só dá pra identificar SO/navegador aproximados, nunca nome da máquina/processador/memória (nenhum site tem acesso a isso, é bloqueado por design pelo navegador)',
                 criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 CONSTRAINT fk_ull_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        $pdo->exec("ALTER TABLE usuario_login_log ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL COMMENT 'Cabeçalho User-Agent do navegador no login -- só dá pra identificar SO/navegador aproximados, nunca nome da máquina/processador/memória (nenhum site tem acesso a isso, é bloqueado por design pelo navegador)' AFTER ip");
     }
 
     /**

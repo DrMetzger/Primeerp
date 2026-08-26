@@ -1834,3 +1834,51 @@ function opcoes_prioridade_html(string $selecionada = 'media'): string
     }
     return $html;
 }
+
+/**
+ * "Sistema operacional · Navegador" a partir do cabeçalho User-Agent (ver
+ * usuario_login_log/relatório de atividade do colaborador). É só um
+ * palpite por padrão de texto (o próprio navegador manda esse cabeçalho,
+ * então dá pra mentir/trocar) -- serve pra identificar de relance de onde
+ * alguém acessou, não é uma trava de segurança nem um dado 100% confiável.
+ *
+ * IMPORTANTE: nome da máquina, processador e memória RAM NÃO aparecem
+ * aqui de propósito -- nenhum site tem acesso a isso, em NENHUM
+ * navegador. É bloqueado por design (privacidade): o único jeito de um
+ * site saber o hardware de quem acessa seria a pessoa instalar um
+ * programa/extensão específica que reporte isso, não existe via web.
+ */
+function identificar_dispositivo(?string $userAgent): string
+{
+    if (!$userAgent) {
+        return '-';
+    }
+
+    $so = 'Sistema desconhecido';
+    if (stripos($userAgent, 'Windows') !== false) {
+        $so = 'Windows';
+    } elseif (stripos($userAgent, 'Mac OS X') !== false && stripos($userAgent, 'iPhone') === false && stripos($userAgent, 'iPad') === false) {
+        $so = 'macOS';
+    } elseif (stripos($userAgent, 'iPhone') !== false || stripos($userAgent, 'iPad') !== false) {
+        $so = 'iOS';
+    } elseif (stripos($userAgent, 'Android') !== false) {
+        $so = 'Android';
+    } elseif (stripos($userAgent, 'Linux') !== false) {
+        $so = 'Linux';
+    }
+
+    $navegador = 'navegador desconhecido';
+    if (stripos($userAgent, 'Edg/') !== false) {
+        $navegador = 'Edge';
+    } elseif (stripos($userAgent, 'OPR/') !== false || stripos($userAgent, 'Opera') !== false) {
+        $navegador = 'Opera';
+    } elseif (stripos($userAgent, 'Chrome/') !== false) {
+        $navegador = 'Chrome';
+    } elseif (stripos($userAgent, 'Firefox/') !== false) {
+        $navegador = 'Firefox';
+    } elseif (stripos($userAgent, 'Safari/') !== false) {
+        $navegador = 'Safari';
+    }
+
+    return $so . ' · ' . $navegador;
+}

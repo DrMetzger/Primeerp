@@ -507,20 +507,45 @@ function gerarRelatorio(string $tipo, array $filtros, PDO $pdo): array
         ));
         $tempoMedioChamados = $temposRespostaChamados ? array_sum($temposRespostaChamados) / count($temposRespostaChamados) : null;
 
+        // IP e "SO · Navegador" são identificadores REAIS, só que limitados
+        // por design de qualquer navegador -- nenhum site, em lugar nenhum,
+        // consegue ler nome da máquina, processador ou memória RAM de quem
+        // acessa (bloqueado por privacidade, não é uma limitação daqui).
+        // O IP pode vir em formato IPv6 (mais comprido, com ":") dependendo
+        // da operadora de internet de quem acessou -- é o endereço de
+        // verdade mesmo, só um formato menos familiar que o IPv4.
         $linhasLogins = [];
         foreach ($logins as $l) {
-            $linhasLogins[] = [formatar_data($l['criado_em']), $l['ip'] ?: '-'];
+            $linhasLogins[] = [formatar_data($l['criado_em']), $l['ip'] ?: '-', identificar_dispositivo($l['user_agent'])];
         }
 
-        $linhasChamadosColab = [];
+        // Chamados atendidos separados por status -- um bloco (tabela) por
+        // status, na mesma ordem usada no resto do sistema, em vez de uma
+        // lista só misturando tudo (pedido do Kleber: "separar por aberto,
+        // aguardando cliente e encerrados").
+        $chamadosPorStatus = ['aberto' => [], 'aguardando_equipe' => [], 'aguardando_cliente' => [], 'fechado' => []];
         foreach ($chamadosColab as $c) {
-            $linhasChamadosColab[] = [
+            $chamadosPorStatus[$c['status']][] = [
                 truncarTexto($c['titulo'], 45),
                 $c['cliente_nome'] ?? '-',
-                MAPA_STATUS_RELATORIO[$c['status']] ?? $c['status'],
                 formatar_data($c['criado_em']),
                 $c['fechado_em'] ? formatar_data($c['fechado_em']) : '-',
                 $c['fechado_em'] ? formatar_duracao_minutos((strtotime($c['fechado_em']) - strtotime($c['criado_em'])) / 60) : '-',
+            ];
+        }
+        $colunasChamados = [
+            'Título' => ['pdf' => 48, 'xlsx' => 35, 'align' => 'L'],
+            'Cliente' => ['pdf' => 35, 'xlsx' => 22, 'align' => 'L'],
+            'Aberto em' => ['pdf' => 27, 'xlsx' => 16, 'align' => 'L'],
+            'Fechado em' => ['pdf' => 27, 'xlsx' => 16, 'align' => 'L'],
+            'Tempo de atendimento' => ['pdf' => 37, 'xlsx' => 18, 'align' => 'L'],
+        ];
+        $blocosChamadosPorStatus = [];
+        foreach ($chamadosPorStatus as $statusChave => $linhasStatus) {
+            $blocosChamadosPorStatus[] = [
+                'titulo' => 'Chamados · ' . (MAPA_STATUS_RELATORIO[$statusChave] ?? $statusChave),
+                'colunas' => $colunasChamados,
+                'linhas' => $linhasStatus,
             ];
         }
 
@@ -529,36 +554,33 @@ function gerarRelatorio(string $tipo, array $filtros, PDO $pdo): array
             'descricaoFiltros' => $usuarioRelatorio['nome'] . ' (' . (PERFIS_USUARIO[$usuarioRelatorio['perfil']] ?? $usuarioRelatorio['perfil']) . ')'
                 . ($dataDe || $dataAte ? ' · Período: ' . ($dataDe ?: 'início') . ' a ' . ($dataAte ?: 'hoje') : ' · Todo o período'),
             'nomeArquivo' => 'atividade-' . $usuarioRelatorio['nome'],
-            'blocos' => [
+            'blocos' => array_merge(
                 [
-                    'titulo' => 'Resumo',
-                    'colunas' => ['Métrica' => ['pdf' => 90, 'xlsx' => 40, 'align' => 'L'], 'Valor' => ['pdf' => 90, 'xlsx' => 25, 'align' => 'L']],
-                    'linhas' => [
-                        ['Logins no período', count($logins)],
-                        ['Último login (histórico completo)', $usuarioRelatorio['ultimo_login_em'] ? formatar_data($usuarioRelatorio['ultimo_login_em']) : 'nunca acessou'],
-                        ['Chamados atendidos no período', $totalChamados],
-                        ['Chamados fechados no período', $fechadosChamados],
-                        ['Tempo médio de atendimento (fechados no período)', $tempoMedioChamados !== null ? formatar_duracao_minutos($tempoMedioChamados) : 'sem chamados fechados no período'],
+                    [
+                        'titulo' => 'Resumo',
+                        'colunas' => ['Métrica' => ['pdf' => 90, 'xlsx' => 40, 'align' => 'L'], 'Valor' => ['pdf' => 90, 'xlsx' => 25, 'align' => 'L']],
+                        'linhas' => [
+                            ['Logins no período', count($logins)],
+                            ['Último login (histórico completo)', $usuarioRelatorio['ultimo_login_em'] ? formatar_data($usuarioRelatorio['ultimo_login_em']) : 'nunca acessou'],
+                            ['Chamados atendidos no período', $totalChamados],
+                            ['Chamados fechados no período', $fechadosChamados],
+                            ['Tempo médio de atendimento (fechados no período)', $tempoMedioChamados !== null ? formatar_duracao_minutos($tempoMedioChamados) : 'sem chamados fechados no período'],
+                        ],
                     ],
                 ],
+                $blocosChamadosPorStatus,
                 [
-                    'titulo' => 'Chamados atendidos',
-                    'colunas' => [
-                        'Título' => ['pdf' => 42, 'xlsx' => 35, 'align' => 'L'],
-                        'Cliente' => ['pdf' => 30, 'xlsx' => 22, 'align' => 'L'],
-                        'Status' => ['pdf' => 22, 'xlsx' => 16, 'align' => 'L'],
-                        'Aberto em' => ['pdf' => 24, 'xlsx' => 16, 'align' => 'L'],
-                        'Fechado em' => ['pdf' => 24, 'xlsx' => 16, 'align' => 'L'],
-                        'Tempo de atendimento' => ['pdf' => 34, 'xlsx' => 18, 'align' => 'L'],
+                    [
+                        'titulo' => 'Logins no período',
+                        'colunas' => [
+                            'Data/hora' => ['pdf' => 55, 'xlsx' => 30, 'align' => 'L'],
+                            'IP (endereço real de internet)' => ['pdf' => 65, 'xlsx' => 30, 'align' => 'L'],
+                            'Sistema · Navegador' => ['pdf' => 60, 'xlsx' => 25, 'align' => 'L'],
+                        ],
+                        'linhas' => $linhasLogins,
                     ],
-                    'linhas' => $linhasChamadosColab,
-                ],
-                [
-                    'titulo' => 'Logins no período',
-                    'colunas' => ['Data/hora' => ['pdf' => 90, 'xlsx' => 30, 'align' => 'L'], 'IP' => ['pdf' => 90, 'xlsx' => 25, 'align' => 'L']],
-                    'linhas' => $linhasLogins,
-                ],
-            ],
+                ]
+            ),
         ];
     }
 
@@ -735,6 +757,11 @@ require __DIR__ . '/templates/header.php';
             </div>
             <?php endif; ?>
         <?php endforeach; ?>
+
+        <div class="d-flex gap-2 mb-4">
+            <a href="<?= url('relatorios.php?' . http_build_query(array_merge($_GET, ['formato' => 'pdf']))) ?>" class="btn btn-sm btn-outline-dark" target="_blank"><i class="bi bi-file-earmark-pdf"></i> Exportar PDF</a>
+            <a href="<?= url('relatorios.php?' . http_build_query(array_merge($_GET, ['formato' => 'xlsx']))) ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-file-earmark-excel"></i> Exportar Excel</a>
+        </div>
     <?php endif; ?>
 <?php endif; ?>
 
