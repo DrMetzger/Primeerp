@@ -3817,7 +3817,7 @@ require __DIR__ . '/templates/header.php';
                                         <div class="d-flex gap-2">
                                             <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
                                             <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> Baixar</a>
-                                            <button type="button" class="btn btn-sm btn-outline-dark botao-editar-video-aula" data-id="<?= $v['id'] ?>" data-nome="<?= e($v['titulo']) ?>" title="Editar nome"><i class="bi bi-pencil"></i></button>
+                                            <button type="button" class="btn btn-sm btn-outline-dark botao-editar-video-aula" data-id="<?= $v['id'] ?>" data-nome="<?= e($v['titulo']) ?>" title="Editar (nome ou trocar o vídeo)"><i class="bi bi-pencil"></i></button>
                                             <form method="post" class="ms-auto" onsubmit="return confirm('Excluir a vídeo aula &quot;<?= e($v['titulo']) ?>&quot;?');">
                                                 <?= csrf_field() ?>
                                                 <input type="hidden" name="acao" value="excluir_video_aula">
@@ -4972,13 +4972,16 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<!-- Editar nome de uma vídeo aula -- só o nome da rotina (pra corrigir um
-     erro de digitação sem precisar apagar e subir tudo de novo); trocar o
-     arquivo em si continua sendo excluir + cadastrar nova. -->
+<!-- Editar uma vídeo aula -- nome da rotina sempre, e opcionalmente trocar
+     o arquivo do vídeo em si (arrastando ou clicando, mesma dropzone do
+     cadastro novo) sem precisar excluir e subir tudo de novo. Se nenhum
+     arquivo for escolhido, segue como POST comum (só troca o nome); se um
+     arquivo for escolhido, o JS do upload em pedaços assume (ver
+     .form-video-aula-chunk) e troca o arquivo mantendo o mesmo registro. -->
 <div class="modal fade" id="modalEditarVideoAula" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <form method="post">
+      <form method="post" enctype="multipart/form-data" class="form-video-aula-chunk">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" value="editar_video_aula">
         <input type="hidden" name="aba_retorno" value="setores">
@@ -4986,7 +4989,16 @@ require __DIR__ . '/templates/header.php';
         <div class="modal-header"><h5 class="modal-title">Editar vídeo aula</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <label class="form-label">Nome da rotina</label>
-            <input type="text" name="nome_rotina" id="editarVideoAulaNome" class="form-control" required>
+            <input type="text" name="nome_rotina" id="editarVideoAulaNome" class="form-control mb-3" required>
+
+            <label class="form-label">Trocar o vídeo (opcional)</label>
+            <label class="video-aula-dropzone">
+                <input type="file" name="arquivo" class="video-aula-dropzone-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>">
+                <i class="bi bi-cloud-arrow-up video-aula-dropzone-icone"></i>
+                <span class="video-aula-dropzone-texto">Arraste um novo vídeo aqui ou <strong>clique para escolher</strong></span>
+                <span class="video-aula-dropzone-arquivo text-muted small"></span>
+            </label>
+            <p class="text-muted small mt-2 mb-0">Deixe em branco pra manter o vídeo atual e só trocar o nome.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -5067,6 +5079,14 @@ document.addEventListener('DOMContentLoaded', function () {
         botao.addEventListener('click', function () {
             document.getElementById('editarVideoAulaId').value = botao.getAttribute('data-id');
             document.getElementById('editarVideoAulaNome').value = botao.getAttribute('data-nome') || '';
+            // Modal é único (compartilhado por todas as vídeo aulas) -- sem
+            // isso, um arquivo escolhido pra editar o vídeo A ficaria
+            // "grudado" no formulário ao abrir pra editar o vídeo B.
+            var formEditar = document.getElementById('modalEditarVideoAula').querySelector('form');
+            var inputArquivoEditar = formEditar.querySelector('.video-aula-dropzone-input');
+            var nomeArquivoEditar = formEditar.querySelector('.video-aula-dropzone-arquivo');
+            inputArquivoEditar.value = '';
+            nomeArquivoEditar.textContent = '';
             PrimeUI.openModal(document.getElementById('modalEditarVideoAula'));
         });
     });
@@ -5206,11 +5226,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.querySelectorAll('.form-video-aula-chunk').forEach(function (form) {
         form.addEventListener('submit', function (e) {
-            e.preventDefault();
-
             var inputArquivo = form.querySelector('input[type="file"]');
-            var arquivo = inputArquivo.files[0];
-            if (!arquivo) return;
+            var arquivo = inputArquivo ? inputArquivo.files[0] : null;
+            var campoDocumentoId = form.querySelector('input[name="documento_id"]');
+
+            // Formulário de EDITAR sem trocar o vídeo (campo de arquivo é
+            // opcional só nesse form) -- não tem pedaço pra fatiar, então
+            // segue como POST comum de verdade, direto pro handler
+            // editar_video_aula que só troca o nome.
+            if (!arquivo) {
+                if (!campoDocumentoId) e.preventDefault(); // form de cadastro novo sempre exige arquivo
+                return;
+            }
+
+            e.preventDefault();
 
             var campoNomeRotina = form.querySelector('input[name="nome_rotina"]');
             var nomeRotina = campoNomeRotina.value.trim();
@@ -5254,6 +5283,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     dados.set('csrf_token', csrfToken);
                     dados.set('cliente_id', '<?= (int) $clienteId ?>');
                     if (campoSetorId) dados.set('setor_id', campoSetorId.value);
+                    if (campoDocumentoId) dados.set('documento_id', campoDocumentoId.value);
                     dados.set('nome_rotina', nomeRotina);
                     dados.set('nome_arquivo', arquivo.name);
                     dados.set('upload_id', uploadId);

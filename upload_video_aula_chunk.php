@@ -62,6 +62,10 @@ $nomeArquivoOriginal = basename($_POST['nome_arquivo'] ?? 'video.mp4');
 $uploadId = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['upload_id'] ?? ''));
 $indice = (int) ($_POST['indice'] ?? -1);
 $totalPartes = (int) ($_POST['total_partes'] ?? 0);
+// documento_id só vem preenchido quando é uma EDIÇÃO trocando o arquivo de
+// uma vídeo aula já existente (ver botão de lápis em cliente.php) -- nesse
+// caso, no último pedaço, atualiza o registro em vez de criar um novo.
+$documentoIdEditar = (int) ($_POST['documento_id'] ?? 0) ?: null;
 
 $stmtCliente = $pdo->prepare('SELECT 1 FROM clientes WHERE id = ?');
 $stmtCliente->execute([$clienteId]);
@@ -80,6 +84,14 @@ if ($valido && $setorId) {
     $stmtSetor = $pdo->prepare('SELECT 1 FROM setores WHERE id = ? AND cliente_id = ?');
     $stmtSetor->execute([$setorId, $clienteId]);
     $valido = (bool) $stmtSetor->fetchColumn();
+}
+
+// Mesmo cuidado, agora pra edição: confirma que o documento é mesmo desse
+// cliente antes de deixar substituir o arquivo dele.
+if ($valido && $documentoIdEditar) {
+    $stmtDocEditar = $pdo->prepare("SELECT 1 FROM documentos WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'");
+    $stmtDocEditar->execute([$documentoIdEditar, $clienteId]);
+    $valido = (bool) $stmtDocEditar->fetchColumn();
 }
 
 if (!$valido) {
@@ -171,6 +183,31 @@ if (!isset(VIDEO_AULA_TIPOS_PERMITIDOS[mime_content_type($destino)])) {
     @unlink($destino);
     http_response_code(422);
     echo json_encode(['sucesso' => false, 'mensagem' => 'Envie um arquivo de vídeo no formato MP4.']);
+    exit;
+}
+
+if ($documentoIdEditar) {
+    $stmtCaminhoAntigo = $pdo->prepare('SELECT arquivo_caminho FROM documentos WHERE id = ?');
+    $stmtCaminhoAntigo->execute([$documentoIdEditar]);
+    $caminhoAntigo = $stmtCaminhoAntigo->fetchColumn();
+
+    $pdo->prepare('UPDATE documentos SET titulo = ?, arquivo_nome_original = ?, arquivo_caminho = ?, arquivo_tamanho = ? WHERE id = ?')
+        ->execute([
+            $nomeRotina,
+            $nomeArquivoOriginal,
+            'clientes/' . $clienteId . '/' . $nomeArmazenado,
+            $tamanhoTotal,
+            $documentoIdEditar,
+        ]);
+
+    // Só apaga o arquivo ANTIGO depois que o novo já está gravado no banco
+    // -- se algo falhasse no meio, ficaria sem vídeo nenhum.
+    if ($caminhoAntigo) {
+        @unlink(UPLOADS_DIR . '/' . $caminhoAntigo);
+    }
+
+    flash_set('sucesso', 'Vídeo aula "' . $nomeRotina . '" atualizada.');
+    echo json_encode(['sucesso' => true, 'finalizado' => true, 'documento_id' => $documentoIdEditar]);
     exit;
 }
 
