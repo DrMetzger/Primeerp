@@ -1922,6 +1922,41 @@ a.card-cliente, a.card-cliente:hover {
 }
 .video-aula-thumb:hover .video-aula-play-overlay { background: rgba(15, 23, 42, .35); transform: scale(1.08); }
 
+/* Área de arrastar-e-soltar do upload de vídeo aula -- pedido do Kleber
+   pra não precisar procurar o arquivo numa janela de pastas toda vez.
+   É um <label> em volta do <input type=file> (escondido) -- clicar em
+   qualquer lugar da área já abre o seletor de arquivo, sem precisar de JS
+   pra isso; JS só cuida do estado de arrastar-por-cima e do drop em si. */
+.video-aula-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .35rem;
+    text-align: center;
+    padding: 1.75rem 1rem;
+    border: 2px dashed var(--ph-border);
+    border-radius: var(--ph-radius-sm);
+    background-color: var(--ph-bg);
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease;
+}
+.video-aula-dropzone:hover { border-color: var(--ph-primary); }
+.video-aula-dropzone.video-aula-dropzone-sobre {
+    border-color: var(--ph-primary);
+    background-color: var(--ph-primary-light);
+}
+.video-aula-dropzone-input {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.video-aula-dropzone-icone { font-size: 1.8rem; color: var(--ph-primary); }
+.video-aula-dropzone-texto { color: var(--ph-text-muted); font-size: .88rem; }
+.video-aula-dropzone-arquivo { font-weight: 600; }
+
 /* ------------------------------------------- Overlay de progresso de upload
    Mostrado enquanto um arquivo está subindo (barra com % de verdade, não só
    um spinner) -- pedido do Kleber depois de levantar o limite de anexo pra

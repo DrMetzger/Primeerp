@@ -410,6 +410,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($acao === 'editar_video_aula') {
+        $novoTituloVideo = trim($_POST['nome_rotina'] ?? '');
+        if ($novoTituloVideo === '') {
+            flash_set('erro', 'Informe o nome da rotina da vídeo aula.');
+        } else {
+            $pdo->prepare("UPDATE documentos SET titulo = ? WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'")
+                ->execute([$novoTituloVideo, (int) $_POST['documento_id'], $clienteId]);
+            flash_set('sucesso', 'Vídeo aula atualizada.');
+        }
+    }
+
     if ($acao === 'excluir_video_aula') {
         $stmtVideoExcluir = $pdo->prepare("SELECT arquivo_caminho FROM documentos WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'");
         $stmtVideoExcluir->execute([(int) $_POST['documento_id'], $clienteId]);
@@ -3766,16 +3777,23 @@ require __DIR__ . '/templates/header.php';
                         </div>
 
                         <div class="collapse mb-3" id="formNovaVideoAula<?= $idSetorAtual ?>">
-                            <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end card card-stat p-3 form-video-aula-chunk">
+                            <form method="post" enctype="multipart/form-data" class="card card-stat p-3 form-video-aula-chunk">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="acao" value="upload_video_aula">
                                 <input type="hidden" name="aba_retorno" value="setores">
                                 <input type="hidden" name="setor_id" value="<?= $idSetorAtual ?>">
-                                <div class="col-md-5"><label class="form-label small mb-1">Nome da rotina</label><input type="text" name="nome_rotina" class="form-control form-control-sm" placeholder="Ex.: Como lançar uma Ordem de Produção" required></div>
-                                <div class="col-md-5"><label class="form-label small mb-1">Arquivo MP4</label><input type="file" name="arquivo" class="form-control form-control-sm" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required>
-                                    <span class="text-muted small">Sem limite de tamanho -- vídeo grande só demora mais pra subir.</span>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1">Nome da rotina</label>
+                                    <input type="text" name="nome_rotina" class="form-control form-control-sm" placeholder="Ex.: Como lançar uma Ordem de Produção" required>
                                 </div>
-                                <div class="col-md-2"><button type="submit" class="btn btn-sm btn-dark w-100"><i class="bi bi-upload"></i> Enviar</button></div>
+                                <label class="video-aula-dropzone">
+                                    <input type="file" name="arquivo" class="video-aula-dropzone-input" accept="<?= e(VIDEO_AULA_ACCEPT_HTML) ?>" required>
+                                    <i class="bi bi-cloud-arrow-up video-aula-dropzone-icone"></i>
+                                    <span class="video-aula-dropzone-texto">Arraste o vídeo aqui ou <strong>clique para escolher</strong></span>
+                                    <span class="video-aula-dropzone-arquivo text-muted small"></span>
+                                </label>
+                                <p class="text-muted small mt-2 mb-2">Sem limite de tamanho -- vídeo grande só demora mais pra subir.</p>
+                                <button type="submit" class="btn btn-sm btn-dark"><i class="bi bi-upload"></i> Enviar</button>
                             </form>
                         </div>
 
@@ -3799,6 +3817,7 @@ require __DIR__ . '/templates/header.php';
                                         <div class="d-flex gap-2">
                                             <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalAssistirVideoAula" data-video-id="<?= $v['id'] ?>" data-video-nome="<?= e($v['titulo']) ?>"><i class="bi bi-play-fill"></i> Assistir</button>
                                             <a href="<?= url('video_aula.php?id=' . $v['id'] . '&baixar=1') ?>" class="btn btn-sm btn-outline-dark"><i class="bi bi-download"></i> Baixar</a>
+                                            <button type="button" class="btn btn-sm btn-outline-dark botao-editar-video-aula" data-id="<?= $v['id'] ?>" data-nome="<?= e($v['titulo']) ?>" title="Editar nome"><i class="bi bi-pencil"></i></button>
                                             <form method="post" class="ms-auto" onsubmit="return confirm('Excluir a vídeo aula &quot;<?= e($v['titulo']) ?>&quot;?');">
                                                 <?= csrf_field() ?>
                                                 <input type="hidden" name="acao" value="excluir_video_aula">
@@ -4953,6 +4972,31 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
+<!-- Editar nome de uma vídeo aula -- só o nome da rotina (pra corrigir um
+     erro de digitação sem precisar apagar e subir tudo de novo); trocar o
+     arquivo em si continua sendo excluir + cadastrar nova. -->
+<div class="modal fade" id="modalEditarVideoAula" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="editar_video_aula">
+        <input type="hidden" name="aba_retorno" value="setores">
+        <input type="hidden" name="documento_id" id="editarVideoAulaId">
+        <div class="modal-header"><h5 class="modal-title">Editar vídeo aula</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <label class="form-label">Nome da rotina</label>
+            <input type="text" name="nome_rotina" id="editarVideoAulaNome" class="form-control" required>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-dark">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script src="<?= asset_url('assets/js/calendario_visual.js') ?>"></script>
 <script>
 // Ativa a aba certa com base no hash da URL (ex: #chamados) ou abre "Visão geral" por padrão.
@@ -5019,6 +5063,14 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    document.querySelectorAll('.botao-editar-video-aula').forEach(function (botao) {
+        botao.addEventListener('click', function () {
+            document.getElementById('editarVideoAulaId').value = botao.getAttribute('data-id');
+            document.getElementById('editarVideoAulaNome').value = botao.getAttribute('data-nome') || '';
+            PrimeUI.openModal(document.getElementById('modalEditarVideoAula'));
+        });
+    });
+
     // Filtro por nome da rotina na grade de vídeo aulas -- cada setor tem a
     // própria grade/campo (podem acumular muita vídeo aula com o tempo).
     document.querySelectorAll('.filtro-video-aula').forEach(function (campo) {
@@ -5081,6 +5133,41 @@ document.addEventListener('DOMContentLoaded', function () {
         var base = Date.now().toString(16) + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
         return (base + '00000000000000000000000000000000').slice(0, 32);
     }
+
+    // Arrastar-e-soltar do arquivo de vídeo -- o clique já funciona sozinho
+    // (o <input> fica DENTRO do <label>), só falta o drag-and-drop em si e
+    // mostrar o nome do arquivo escolhido (por clique OU arrastado).
+    document.querySelectorAll('.video-aula-dropzone').forEach(function (zona) {
+        var inputArquivoZona = zona.querySelector('.video-aula-dropzone-input');
+        var nomeArquivoEl = zona.querySelector('.video-aula-dropzone-arquivo');
+
+        function mostrarArquivoEscolhido() {
+            var arquivo = inputArquivoZona.files[0];
+            nomeArquivoEl.textContent = arquivo ? (arquivo.name + ' (' + (arquivo.size / 1024 / 1024).toFixed(1) + ' MB)') : '';
+        }
+        inputArquivoZona.addEventListener('change', mostrarArquivoEscolhido);
+
+        ['dragenter', 'dragover'].forEach(function (evento) {
+            zona.addEventListener(evento, function (e) {
+                e.preventDefault();
+                zona.classList.add('video-aula-dropzone-sobre');
+            });
+        });
+        ['dragleave', 'dragend'].forEach(function (evento) {
+            zona.addEventListener(evento, function (e) {
+                e.preventDefault();
+                zona.classList.remove('video-aula-dropzone-sobre');
+            });
+        });
+        zona.addEventListener('drop', function (e) {
+            e.preventDefault();
+            zona.classList.remove('video-aula-dropzone-sobre');
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                inputArquivoZona.files = e.dataTransfer.files;
+                mostrarArquivoEscolhido();
+            }
+        });
+    });
 
     // Manda 1 pedaço, com até 3 tentativas (rede instável no meio de um
     // upload longo -- de VÁRIOS pedaços -- não deveria jogar tudo fora,
@@ -5182,13 +5269,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
                     if (json.finalizado) {
                         window.removeEventListener('beforeunload', avisarAntesDeSair);
-                        titulo.textContent = 'Vídeo aula salva com sucesso!';
-                        detalhe.textContent = '';
-                        setTimeout(function () {
-                            var abaRetorno = campoAbaRetorno ? campoAbaRetorno.value : '';
-                            var urlFinal = window.location.href.split('#')[0];
-                            window.location.href = abaRetorno ? (urlFinal + '#' + abaRetorno) : urlFinal;
-                        }, 1200);
+                        overlay.classList.remove('show');
+                        overlay.remove();
+                        // O aviso de sucesso é o banner verde padrão do site
+                        // (flash_set() já rodou no servidor, ver
+                        // upload_video_aula_chunk.php) -- não fica preso
+                        // dentro do modal (bug real reportado pelo Kleber: o
+                        // modal nunca sumia porque location.href pra uma URL
+                        // com o MESMO #fragmento que já está na barra de
+                        // endereço não recarrega nada, é um no-op do
+                        // navegador). Sempre é a MESMA página (só muda,
+                        // talvez, o #fragmento) -- então sempre basta
+                        // garantir o #fragmento certo e forçar reload().
+                        var abaRetorno = campoAbaRetorno ? campoAbaRetorno.value : '';
+                        if (abaRetorno && window.location.hash !== '#' + abaRetorno) {
+                            window.location.hash = abaRetorno;
+                        }
+                        window.location.reload();
                         return;
                     }
                     enviarProximoPedaco();

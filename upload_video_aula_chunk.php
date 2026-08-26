@@ -186,4 +186,10 @@ $stmt->execute([
     Auth::userId(),
 ]);
 
+// flash_set() aqui vira o banner verde padrão do site (mesmo lugar de
+// qualquer outra ação) na hora que a página recarregar -- não uma
+// mensagem de sucesso presa dentro do próprio modal de upload (bug
+// reportado pelo Kleber: o modal "salvo com sucesso" nunca sumia).
+flash_set('sucesso', 'Vídeo aula "' . $nomeRotina . '" cadastrada.');
+
 echo json_encode(['sucesso' => true, 'finalizado' => true, 'documento_id' => (int) $pdo->lastInsertId()]);
