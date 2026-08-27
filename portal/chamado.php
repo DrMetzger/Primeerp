@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
         // cliente respondendo é sinal suficiente de que precisa reabrir).
         recalcular_status_chamado($pdo, $chamadoId);
 
-        flash_set('sucesso', $errosAnexo ? implode(' ', $errosAnexo) : 'Resposta enviada.');
+        flash_set($errosAnexo ? 'erro' : 'sucesso', $errosAnexo ? 'Resposta enviada, mas: ' . implode(' ', $errosAnexo) : 'Resposta enviada.');
     }
 
     header('Location: ' . url('portal/chamado.php?id=' . $chamadoId));

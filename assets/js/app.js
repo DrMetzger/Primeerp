@@ -360,19 +360,20 @@
             var combinados = arquivosNaLista.concat(novosArquivos);
             if (combinados.length > maxArquivos) {
                 mostrarErro('Envie no máximo ' + maxArquivos + ' arquivos por vez.');
-                return;
+                return false;
             }
 
             var grandeDemais = combinados.find(function (f) { return f.size > maxTamanho; });
             if (grandeDemais) {
                 mostrarErro('"' + grandeDemais.name + '" passa do limite de ' + Math.round(maxTamanho / 1024 / 1024) + 'MB por arquivo.');
-                return;
+                return false;
             }
 
             limparErro();
             arquivosNaLista = combinados;
             renderizarLista();
             sincronizarInput();
+            return true;
         }
 
         widget.addEventListener('click', function (e) {
@@ -487,6 +488,27 @@
 
                 var arquivos = Array.from((e.dataTransfer || {}).files || []);
                 if (arquivos.length) tentarAdicionar(arquivos);
+            });
+
+            // Rede de segurança: quem escolhe o(s) arquivo(s) mas esquece de
+            // clicar em "Enviar anexos" antes de "Enviar resposta" perdia o
+            // anexo SEM NENHUM AVISO -- input.files é limpo assim que o
+            // arquivo é escolhido (ver comentário no listener de "change"
+            // acima), então o form ia embora só com o texto, "sucesso" na
+            // flash, e o anexo nunca subia. Caso real: cliente jurava que
+            // tinha anexado, chamado ficava sem nada. Aqui, ao enviar o
+            // form, qualquer arquivo ainda só "selecionado" (pendente, não
+            // confirmado na lista) entra pra lista automaticamente -- só
+            // bloqueia o envio se a adição falhar (limite de quantidade/
+            // tamanho), pra não perder o anexo em silêncio nesse caso também.
+            formDoWidget.addEventListener('submit', function (e) {
+                if (!pendentes.length) return;
+                var adicionou = tentarAdicionar(pendentes);
+                if (!adicionou) {
+                    e.preventDefault();
+                    return;
+                }
+                limparPendentes();
             });
         }
     }

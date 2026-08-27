@@ -179,6 +179,14 @@ define('ANEXO_CHAMADO_TIPOS_PERMITIDOS', [
     // Compactado -- também é o formato real de .docx/.xlsx/.pptx quando o PHP
     // não consegue distinguir o tipo específico (todos são .zip por dentro).
     'application/zip' => 'zip',
+    // RAR: cada versão/config de libmagic detecta um mime diferente pro
+    // MESMO arquivo -- "x-rar-compressed" e "vnd.rar" são os nomes IANA
+    // "oficiais", mas testado neste servidor (linux, file/libmagic atual)
+    // um .rar de verdade (RAR4 e RAR5) vem como "application/x-rar" (SEM o
+    // "-compressed"), que não estava nessa lista -- todo upload de .rar
+    // real caía aqui como "tipo não permitido" sem avisar direito (bug
+    // real: cliente jurava ter subido o arquivo, chamado ficava sem nada).
+    'application/x-rar' => 'rar',
     'application/x-rar-compressed' => 'rar',
     'application/vnd.rar' => 'rar',
     'application/x-7z-compressed' => '7z',

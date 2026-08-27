@@ -2101,7 +2101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rotuloStatus = ['aguardando_cliente' => 'aguardando cliente', 'aguardando_equipe' => 'aguardando nós', 'fechado' => 'fechado'][$statusAposResposta];
         $mensagemSucesso = ($temMensagemOuAnexo ? 'Resposta registrada, chamado ' : 'Chamado ') . $rotuloStatus . '.'
             . ($temMensagemOuAnexo && !$notificarCliente ? ' Cliente NÃO foi notificado.' : '');
-        flash_set('sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
+        flash_set($errosAnexo ? 'erro' : 'sucesso', $errosAnexo ? $mensagemSucesso . ' Mas: ' . implode(' ', $errosAnexo) : $mensagemSucesso);
         }
     }
 
