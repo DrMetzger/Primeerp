@@ -1198,6 +1198,15 @@ class Migrations
         $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS hora_inicio TIME NULL AFTER data");
         $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS duracao_minutos INT NOT NULL DEFAULT 60 AFTER hora_inicio");
 
+        // Tarefa sem horário definido podia ficar só "solta" (sem dia certo
+        // de terminar) -- pedido do Kleber: "não consigo colocar a mesma
+        // tarefa pra mais de um dia, alongar ela" (ex.: um projeto que toma a
+        // semana inteira). data_fim = último dia da tarefa; NULL/igual a
+        // "data" = tarefa de um dia só (a maioria). Só faz sentido pra tarefa
+        // SEM horário -- uma tarefa com hora_inicio marcado continua sempre
+        // de 1 dia só (a duração em minutos já cobre isso).
+        $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS data_fim DATE NULL AFTER data");
+
         // Cada gestor define o próprio expediente/almoço (o Kleber e o
         // Petronilho podem trabalhar em horários diferentes) -- usado pra
         // desenhar a régua de horas do Gantt e pra IA não sugerir tarefa fora

@@ -63,6 +63,26 @@ Auth::requireAdmin();
 
 $pdo = Database::connection();
 
+/**
+ * Último dia de uma tarefa de vários dias (ver data_fim) -- só faz sentido
+ * pra tarefa SEM horário marcado (uma tarefa com hora_inicio sempre dura só
+ * o próprio dia, a duração em minutos já cobre isso). NULL quando é de 1
+ * dia só (comportamento de sempre) ou quando a data final vier inválida/
+ * antes da data de início.
+ */
+function agenda_data_fim_do_post(string $data, ?string $horaInicio): ?string
+{
+    if ($horaInicio !== null) {
+        return null;
+    }
+    $dataFim = $_POST['data_fim'] ?? '';
+    if (!$dataFim || !strtotime($dataFim) || $dataFim <= $data) {
+        return null;
+    }
+
+    return $dataFim;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
     $acao = $_POST['acao'] ?? '';
@@ -85,12 +105,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($titulo === '' || !$data || !strtotime($data)) {
             flash_set('erro', 'Informe um título e uma data válida.');
         } else {
+            $dataFim = agenda_data_fim_do_post($data, $horaInicio);
             $stmtOrdemMax = $pdo->prepare('SELECT COALESCE(MAX(ordem), -1) FROM agenda_tarefas WHERE data = ?');
             $stmtOrdemMax->execute([$data]);
             $ordemMax = (int) $stmtOrdemMax->fetchColumn();
 
-            $pdo->prepare('INSERT INTO agenda_tarefas (data, hora_inicio, duracao_minutos, ordem, titulo, cliente_id, chamado_id, responsavel_id, notas, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$data, $horaInicio, $duracaoMinutos, $ordemMax + 1, $titulo, $clienteId, $chamadoId, $responsavelId, $notas, Auth::userId()]);
+            $pdo->prepare('INSERT INTO agenda_tarefas (data, data_fim, hora_inicio, duracao_minutos, ordem, titulo, cliente_id, chamado_id, responsavel_id, notas, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$data, $dataFim, $horaInicio, $duracaoMinutos, $ordemMax + 1, $titulo, $clienteId, $chamadoId, $responsavelId, $notas, Auth::userId()]);
             flash_set('sucesso', 'Tarefa adicionada na agenda.');
         }
     }
@@ -114,8 +135,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($titulo === '' || !$data || !strtotime($data)) {
             flash_set('erro', 'Informe um título e uma data válida.');
         } else {
-            $pdo->prepare('UPDATE agenda_tarefas SET titulo=?, data=?, hora_inicio=?, duracao_minutos=?, cliente_id=?, chamado_id=?, responsavel_id=?, notas=?, status=? WHERE id=?')
-                ->execute([$titulo, $data, $horaInicio, $duracaoMinutos, $clienteId, $chamadoId, $responsavelId, $notas, $status, $tarefaId]);
+            $dataFim = agenda_data_fim_do_post($data, $horaInicio);
+            $pdo->prepare('UPDATE agenda_tarefas SET titulo=?, data=?, data_fim=?, hora_inicio=?, duracao_minutos=?, cliente_id=?, chamado_id=?, responsavel_id=?, notas=?, status=? WHERE id=?')
+                ->execute([$titulo, $data, $dataFim, $horaInicio, $duracaoMinutos, $clienteId, $chamadoId, $responsavelId, $notas, $status, $tarefaId]);
             flash_set('sucesso', 'Tarefa atualizada.');
         }
     }
@@ -175,11 +197,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!isset(AGENDA_DURACOES_OPCOES[$duracaoMinutos])) {
             $duracaoMinutos = AGENDA_DURACAO_PADRAO_MINUTOS;
         }
+        // Arrasto/redimensionamento de tarefa SEM horário (linha "dia
+        // inteiro" do FullCalendar) -- pode virar/continuar sendo de vários
+        // dias (ver data_fim). Tarefa COM horário nunca manda data_fim
+        // (sempre dura só o próprio dia).
+        $dataFim = agenda_data_fim_do_post($data, $horaInicio);
 
         header('Content-Type: application/json');
-        if ($tarefaId && $data && strtotime($data) && $horaInicio) {
-            $pdo->prepare('UPDATE agenda_tarefas SET data = ?, hora_inicio = ?, duracao_minutos = ? WHERE id = ?')
-                ->execute([$data, $horaInicio, $duracaoMinutos, $tarefaId]);
+        if ($tarefaId && $data && strtotime($data)) {
+            $pdo->prepare('UPDATE agenda_tarefas SET data = ?, data_fim = ?, hora_inicio = ?, duracao_minutos = ? WHERE id = ?')
+                ->execute([$data, $dataFim, $horaInicio, $duracaoMinutos, $tarefaId]);
             echo json_encode(['sucesso' => true]);
         } else {
             echo json_encode(['sucesso' => false, 'mensagem' => 'Dados inválidos.']);
@@ -671,19 +698,37 @@ function agenda_eventos_fullcalendar(array $todasTarefas): array
 {
     $eventos = [];
     foreach ($todasTarefas as $t) {
-        if ($t['status'] === 'concluida' || $t['hora_inicio'] === null) {
+        if ($t['status'] === 'concluida') {
             continue;
         }
         $duracaoMin = (int) $t['duracao_minutos'];
-        $inicioIso = $t['data'] . 'T' . substr($t['hora_inicio'], 0, 5) . ':00';
-        $fimIso = date('Y-m-d\TH:i:s', strtotime($inicioIso) + $duracaoMin * 60);
         $corCliente = $t['cliente_id'] ? cor_cliente((int) $t['cliente_id']) : '#8a94a6';
+        $temHorario = $t['hora_inicio'] !== null;
+
+        if ($temHorario) {
+            // Tarefa com horário -- sempre 1 dia só, evento com hora exata
+            // (visão Semana/Dia mostra na grade por horário).
+            $inicioIso = $t['data'] . 'T' . substr($t['hora_inicio'], 0, 5) . ':00';
+            $fimIso = date('Y-m-d\TH:i:s', strtotime($inicioIso) + $duracaoMin * 60);
+            $allDay = false;
+        } else {
+            // Tarefa sem horário -- linha "dia inteiro" do FullCalendar, que
+            // é o mesmo mecanismo que permite ela abranger vários dias (só
+            // arrastar a borda) -- pedido do Kleber: "não consigo colocar a
+            // mesma tarefa pra mais de um dia, alongar ela". "end" é
+            // EXCLUSIVO nesse modo (dia seguinte ao último dia de verdade).
+            $inicioIso = $t['data'];
+            $ultimoDia = $t['data_fim'] ?? $t['data'];
+            $fimIso = date('Y-m-d', strtotime($ultimoDia) + 86400);
+            $allDay = true;
+        }
 
         $eventos[] = [
             'id' => (string) $t['id'],
             'title' => $t['titulo'],
             'start' => $inicioIso,
             'end' => $fimIso,
+            'allDay' => $allDay,
             'backgroundColor' => $corCliente,
             'borderColor' => $corCliente,
             'textColor' => '#fff',
@@ -695,6 +740,10 @@ function agenda_eventos_fullcalendar(array $todasTarefas): array
                 'notas' => $t['notas'] ?? '',
                 'status' => $t['status'],
                 'cardHtml' => agenda_render_card($t, null, $duracaoMin <= 45),
+                // Visão Mês: célula bem mais estreita que uma coluna de
+                // Semana/Dia -- sempre compacto ali (esconde logo/notas),
+                // senão o card cheio fica espremido numa tarjinha de ~185px.
+                'cardHtmlMes' => agenda_render_card($t, null, true),
             ],
         ];
     }
@@ -963,21 +1012,6 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<!-- Tarefas sem horário definido -- ficam numa faixa acima do calendário,
-     arrastáveis pra dentro dele (dá um horário na hora em que solta). -->
-<div class="agenda-naoagendadas-faixa">
-  <div class="agenda-naoagendadas-titulo"><i class="bi bi-inbox"></i> Sem horário definido <span class="text-muted fw-normal">-- arraste pro calendário pra agendar</span></div>
-  <div class="agenda-naoagendadas-lista" id="agendaNaoAgendadasLista">
-    <?php
-    $tarefasNaoAgendadas = array_filter($todasTarefas, fn ($t) => $t['status'] !== 'concluida' && $t['hora_inicio'] === null);
-    if (!$tarefasNaoAgendadas): ?>
-    <p class="text-muted small mb-0" id="agendaNaoAgendadasVazio">Nenhuma -- toda tarefa já tem horário.</p>
-    <?php else: foreach ($tarefasNaoAgendadas as $t) {
-        echo agenda_render_card($t, null);
-    } endif; ?>
-  </div>
-</div>
-
 <div id="agendaCalendario"></div>
 
 <!-- Nova/editar tarefa -- UM modal só, reaproveitado pros dois casos. -->
@@ -999,21 +1033,26 @@ require __DIR__ . '/templates/header.php';
               <label class="form-label">Título *</label>
               <input type="text" name="titulo" id="tarefaAgendaTitulo" class="form-control" placeholder="Ex.: Ligar pra CIPLA sobre o chamado de faturamento" required>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Data *</label>
               <input type="date" name="data" id="tarefaAgendaData" class="form-control" required>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Horário</label>
               <input type="time" name="hora_inicio" id="tarefaAgendaHora" class="form-control">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Duração</label>
               <select name="duracao_minutos" id="tarefaAgendaDuracao" class="form-select">
                 <?php foreach (AGENDA_DURACOES_OPCOES as $minutosOpcao => $rotuloOpcao): ?>
                 <option value="<?= $minutosOpcao ?>" <?= $minutosOpcao === AGENDA_DURACAO_PADRAO_MINUTOS ? 'selected' : '' ?>><?= $rotuloOpcao ?></option>
                 <?php endforeach; ?>
               </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Data final</label>
+              <input type="date" name="data_fim" id="tarefaAgendaDataFim" class="form-control" title="Só pra tarefa sem horário marcado, que dura vários dias">
+              <div class="form-text small" id="tarefaAgendaDataFimAjuda">Só se não tiver horário -- tarefa de vários dias</div>
             </div>
             <div class="col-md-6" id="blocoStatusTarefaAgenda" style="display:none;">
               <label class="form-label">Status</label>
@@ -1162,6 +1201,18 @@ document.addEventListener('DOMContentLoaded', function () {
         filtrarChamadosPorCliente(this.value);
     });
 
+    // "Data final" (tarefa de vários dias) só faz sentido pra tarefa SEM
+    // horário marcado -- pedido do Kleber: "não consigo colocar a mesma
+    // tarefa pra mais de um dia, alongar ela". Com horário marcado, a
+    // tarefa sempre dura só o próprio dia (a duração já cobre isso).
+    function atualizarDisponibilidadeDataFim() {
+        var campoDataFim = document.getElementById('tarefaAgendaDataFim');
+        var temHorario = document.getElementById('tarefaAgendaHora').value !== '';
+        campoDataFim.disabled = temHorario;
+        if (temHorario) campoDataFim.value = '';
+    }
+    document.getElementById('tarefaAgendaHora').addEventListener('input', atualizarDisponibilidadeDataFim);
+
     // --- Modal: nova tarefa -------------------------------------------
     function abrirNovaTarefa(dataIso, horaIso) {
         document.getElementById('tarefaAgendaModalTitulo').textContent = 'Nova tarefa';
@@ -1170,6 +1221,8 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('tarefaAgendaTitulo').value = '';
         document.getElementById('tarefaAgendaData').value = dataIso || document.getElementById('seletorDataFoco').value;
         document.getElementById('tarefaAgendaHora').value = horaIso || '';
+        document.getElementById('tarefaAgendaDataFim').value = '';
+        atualizarDisponibilidadeDataFim();
         document.getElementById('tarefaAgendaDuracao').value = '60';
         // Quem cria a tarefa já entra como responsável por padrão -- ainda dá
         // pra trocar pra outra pessoa da gestão antes de salvar.
@@ -1194,6 +1247,8 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('tarefaAgendaTitulo').value = dados.titulo || '';
         document.getElementById('tarefaAgendaData').value = dados.data || document.getElementById('seletorDataFoco').value;
         document.getElementById('tarefaAgendaHora').value = dados.horaInicio || '';
+        document.getElementById('tarefaAgendaDataFim').value = (dados.dataFim && dados.dataFim !== dados.data) ? dados.dataFim : '';
+        atualizarDisponibilidadeDataFim();
         document.getElementById('tarefaAgendaDuracao').value = dados.duracaoMinutos || '60';
         document.getElementById('tarefaAgendaResponsavel').value = dados.responsavelId || '';
         document.getElementById('tarefaAgendaCliente').value = dados.clienteId || '';
@@ -1329,11 +1384,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 evento.setProp('display', (clienteOk && respOk) ? 'auto' : 'none');
             });
         }
-        document.querySelectorAll('#agendaNaoAgendadasLista .agenda-card').forEach(function (card) {
-            var clienteOk = clientesMarcados.indexOf(card.getAttribute('data-cliente-id') || '') !== -1;
-            var respOk = respMarcados.indexOf(card.getAttribute('data-responsavel-id') || '') !== -1;
-            card.style.display = (clienteOk && respOk) ? '' : 'none';
-        });
     }
     document.querySelectorAll('.filtro-gantt-cliente, .filtro-gantt-responsavel').forEach(function (chk) {
         chk.addEventListener('change', aplicarFiltrosGantt);
@@ -1502,7 +1552,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    function persistirMovimentoTarefa(tarefaId, dataIso, horaIso, duracaoMinutos, onErro) {
+    function persistirMovimentoTarefa(tarefaId, dataIso, horaIso, duracaoMinutos, dataFimIso, onErro) {
         var dados = new FormData();
         dados.set('acao', 'mover_tarefa');
         dados.set('ajax', '1');
@@ -1511,6 +1561,7 @@ document.addEventListener('DOMContentLoaded', function () {
         dados.set('data', dataIso);
         dados.set('hora_inicio', horaIso);
         dados.set('duracao_minutos', duracaoMinutos);
+        dados.set('data_fim', dataFimIso || '');
         fetch(window.location.href, { method: 'POST', body: dados })
             .then(function (r) { return r.json(); })
             .then(function (json) { if (!json.sucesso) onErro(); })
@@ -1541,42 +1592,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return novoStatus;
     }
 
-    // --- Faixa "sem horário": clique (remover/status/editar) --------------
-    document.getElementById('agendaNaoAgendadasLista').addEventListener('click', function (e) {
-        var botaoRemover = e.target.closest('.agenda-card-remover');
-        if (botaoRemover) {
-            e.stopPropagation();
-            if (!confirm('Excluir essa tarefa da agenda?')) return;
-            document.getElementById('excluirTarefaAgendaId').value = botaoRemover.getAttribute('data-id');
-            document.getElementById('excluirTarefaAgendaData').value = botaoRemover.getAttribute('data-data');
-            document.getElementById('formExcluirTarefaAgenda').submit();
-            return;
-        }
-
-        var botaoStatus = e.target.closest('.agenda-card-status');
-        if (botaoStatus) {
-            e.stopPropagation();
-            var novoStatus = tratarCliqueStatus(botaoStatus);
-            if (novoStatus === 'concluida') botaoStatus.closest('.agenda-card').style.display = 'none';
-            return;
-        }
-
-        var card = e.target.closest('.agenda-card');
-        if (!card) return;
-        var botaoRemoverInfo = card.querySelector('.agenda-card-remover');
-        abrirEditarTarefa({
-            id: card.getAttribute('data-id'),
-            titulo: card.getAttribute('data-titulo'),
-            data: botaoRemoverInfo ? botaoRemoverInfo.getAttribute('data-data') : '',
-            horaInicio: card.getAttribute('data-hora-inicio'),
-            duracaoMinutos: card.getAttribute('data-duracao-minutos'),
-            clienteId: card.getAttribute('data-cliente-id'),
-            chamadoId: card.getAttribute('data-chamado-id'),
-            responsavelId: card.getAttribute('data-responsavel-id'),
-            notas: card.getAttribute('data-notas'),
-            status: card.getAttribute('data-status'),
-        });
-    });
 
     // --- FullCalendar: mês/semana/dia, tudo num só calendário -- pedido do
     // Kleber: "o gantt precisa ter visibilidade por mês, semana e diário".
@@ -1601,10 +1616,15 @@ document.addEventListener('DOMContentLoaded', function () {
         slotMaxTime: HORARIO_TRABALHO.expediente_fim + ':00',
         slotDuration: '00:15:00',
         slotLabelInterval: '01:00:00',
-        allDaySlot: false,
+        // A linha "dia inteiro" é onde vive tarefa sem horário marcado --
+        // pedido do Kleber: "não consigo colocar a mesma tarefa pra mais de
+        // um dia, alongar ela". É essa linha (allDay) que permite arrastar a
+        // borda da tarefa e ela abranger vários dias, tanto na Semana/Dia
+        // quanto no Mês.
+        allDaySlot: true,
+        allDayText: 'Sem horário',
         nowIndicator: true,
         editable: true,
-        droppable: true,
         dayMaxEvents: true,
         businessHours: businessHoursAgenda,
         events: EVENTOS_AGENDA,
@@ -1614,13 +1634,15 @@ document.addEventListener('DOMContentLoaded', function () {
         // pra cada visão é ajustada via setOption() dentro de datesSet, mais
         // abaixo (roda de novo toda vez que troca de mês/semana/dia).
         height: ALTURA_GANTT_PX,
-        // Semana/dia: card completo (mesmo visual de sempre, com
-        // logo/avatar/status/remover). Mês: renderização padrão do
-        // FullCalendar (compacta, já colorida por cliente) -- um card
-        // "cheio" não cabe direito numa célula de mês.
+        // Mesmo card em qualquer visão (logo/avatar/status/remover) -- essa
+        // versão do FullCalendar NÃO cai no render padrão dele quando
+        // eventContent não retorna nada (fica com o evento vazio/invisível,
+        // achado testando o Mês com tarefa de verdade) -- por isso sempre
+        // devolve o HTML do card, mesmo no Mês (fica mais compacto ali por
+        // causa do dayMaxEvents, mas pelo menos aparece).
         eventContent: function (arg) {
-            if (arg.view.type === 'dayGridMonth') return;
-            return { html: arg.event.extendedProps.cardHtml };
+            var props = arg.event.extendedProps;
+            return { html: arg.view.type === 'dayGridMonth' ? props.cardHtmlMes : props.cardHtml };
         },
         eventDidMount: function (arg) {
             // O card reaproveita o HTML da faixa "sem horário" (que é
@@ -1647,11 +1669,20 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             var props = info.event.extendedProps;
+            // Última data de verdade da tarefa -- se for allDay, "end" do
+            // FullCalendar é EXCLUSIVO (dia seguinte ao último), por isso
+            // subtrai 1 dia; se tiver horário marcado, ela sempre dura só o
+            // próprio dia (dataFim = data).
+            var dataFim = info.event.startStr.slice(0, 10);
+            if (info.event.allDay && info.event.end) {
+                dataFim = new Date(info.event.end.getTime() - 86400000).toISOString().slice(0, 10);
+            }
             abrirEditarTarefa({
                 id: info.event.id,
                 titulo: info.event.title,
                 data: info.event.startStr.slice(0, 10),
-                horaInicio: info.event.startStr.slice(11, 16),
+                dataFim: dataFim,
+                horaInicio: info.event.allDay ? '' : info.event.startStr.slice(11, 16),
                 duracaoMinutos: props.duracaoMinutos,
                 clienteId: props.clienteId,
                 chamadoId: props.chamadoId,
@@ -1667,28 +1698,23 @@ document.addEventListener('DOMContentLoaded', function () {
         },
         eventDrop: function (info) {
             var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
-            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () { info.revert(); });
+            var dataFim = null;
+            if (info.event.allDay && info.event.end) {
+                dataFim = new Date(info.event.end.getTime() - 86400000).toISOString().slice(0, 10);
+            }
+            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.allDay ? '' : info.event.startStr.slice(11, 16), duracaoMin, dataFim, function () { info.revert(); });
         },
+        // Redimensionar: dentro de um dia (grade por horário) muda a
+        // duração; na linha "dia inteiro" (allDay), arrastar a borda direita
+        // estica a tarefa pra abranger mais dias -- é essa a "alongar a
+        // tarefa" que faltava.
         eventResize: function (info) {
             var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
-            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () { info.revert(); });
-        },
-        // Arrastou um card da faixa "sem horário" pra dentro do calendário --
-        // dá um horário na hora, persiste e some da faixa.
-        eventReceive: function (info) {
-            var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
-            var trayCard = document.querySelector('#agendaNaoAgendadasLista .agenda-card[data-id="' + info.event.id + '"]');
-            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () {
-                info.event.remove();
-                alert('Não foi possível agendar essa tarefa.');
-            });
-            if (trayCard) {
-                trayCard.remove();
-                var lista = document.getElementById('agendaNaoAgendadasLista');
-                if (!lista.querySelector('.agenda-card')) {
-                    lista.innerHTML = '<p class="text-muted small mb-0">Nenhuma -- toda tarefa já tem horário.</p>';
-                }
+            var dataFim = null;
+            if (info.event.allDay && info.event.end) {
+                dataFim = new Date(info.event.end.getTime() - 86400000).toISOString().slice(0, 10);
             }
+            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.allDay ? '' : info.event.startStr.slice(11, 16), duracaoMin, dataFim, function () { info.revert(); });
         },
         datesSet: function (info) {
             document.getElementById('agendaTituloPeriodo').textContent = info.view.title;
@@ -1709,33 +1735,6 @@ document.addEventListener('DOMContentLoaded', function () {
         },
     });
     window.agendaCalendar.render();
-
-    // Arrastar da faixa "sem horário" pra dentro do calendário.
-    new FullCalendar.Draggable(document.getElementById('agendaNaoAgendadasLista'), {
-        itemSelector: '.agenda-card',
-        eventData: function (el) {
-            var duracaoMin = parseInt(el.getAttribute('data-duracao-minutos'), 10) || 60;
-            var h = Math.floor(duracaoMin / 60), m = duracaoMin % 60;
-            var corCliente = el.style.borderLeftColor || '#8a94a6';
-            return {
-                id: el.getAttribute('data-id'),
-                title: el.getAttribute('data-titulo'),
-                duration: (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m,
-                backgroundColor: corCliente,
-                borderColor: corCliente,
-                textColor: '#fff',
-                extendedProps: {
-                    clienteId: el.getAttribute('data-cliente-id') || '',
-                    responsavelId: el.getAttribute('data-responsavel-id') || '',
-                    chamadoId: el.getAttribute('data-chamado-id') || '',
-                    duracaoMinutos: duracaoMin,
-                    notas: el.getAttribute('data-notas') || '',
-                    status: el.getAttribute('data-status') || 'pendente',
-                    cardHtml: el.outerHTML,
-                },
-            };
-        },
-    });
 
     document.getElementById('agendaBotaoHoje').addEventListener('click', function () { window.agendaCalendar.today(); });
     document.getElementById('agendaBotaoAnterior').addEventListener('click', function () { window.agendaCalendar.prev(); });

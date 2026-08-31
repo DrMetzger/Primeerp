@@ -2035,21 +2035,6 @@ a.card-cliente, a.card-cliente:hover {
    só re-vestem o visual padrão do FullCalendar pra combinar com o resto do
    sistema (cores/bordas/tipografia do design tokens --ph-*). */
 
-.agenda-naoagendadas-faixa {
-    background-color: var(--ph-surface);
-    border-radius: var(--ph-radius-sm);
-    box-shadow: var(--ph-elev-1);
-    padding: .6rem;
-    margin-bottom: .6rem;
-}
-.agenda-naoagendadas-titulo { font-weight: 700; font-size: .82rem; margin-bottom: .5rem; }
-.agenda-naoagendadas-lista {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .5rem;
-}
-.agenda-naoagendadas-lista .agenda-card { width: 230px; }
-
 /* Tema do FullCalendar combinando com o resto do sistema -- sem CSS próprio
    de calendário, ele usa uma paleta genérica azul que destoava do app. */
 #agendaCalendario { background-color: var(--ph-surface); border-radius: var(--ph-radius-sm); box-shadow: var(--ph-elev-1); padding: .5rem; }
