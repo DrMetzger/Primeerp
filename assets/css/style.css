@@ -2024,79 +2024,48 @@ a.card-cliente, a.card-cliente:hover {
 }
 
 /* ---------------------------------------------------------- Agenda (gestão)
-   Gráfico de Gantt por horário (ver agenda.php) -- depois da primeira versão
-   ("ainda está muito ruim" -- cards colados/cortados, título quebrando linha
-   e vazando pra fora do card, faixa "sem horário" baixa demais cortando o
-   card no meio), essa versão aumentou a escala (AGENDA_PX_POR_MINUTO = 1.5,
-   não 1px/min) e deixa um respiro entre cards vizinhos
-   (AGENDA_GAP_CARD_PX), então a altura de cada card já sai proporcional +
-   com folga direto do PHP -- não precisa reescalar em JS. Cabeçalho da
-   coluna e a faixa "sem horário" têm altura FIXA (mesmos valores que
-   agenda.php usa pra alinhar a régua de horas -- ver
-   $alturaCabecalhoColunaPx/$alturaZonaNaoAgendadaPx), senão a régua
-   compartilhada desalinha da grade de cada coluna. */
-.agenda-gantt-wrapper { display: flex; gap: .4rem; align-items: flex-start; }
+   Calendário/Gantt por horário (ver agenda.php), construído em cima do
+   FullCalendar (biblioteca open-source consolidada) -- dá visão real de
+   Mês/Semana/Dia (pedido do Kleber: "o gantt precisa ter visibilidade por
+   mês, semana e diário", antes só tinha semana). O card de cada tarefa
+   (visões Semana/Dia) continua sendo o mesmo .agenda-card de sempre --
+   reaproveitado tanto dentro do calendário quanto na faixa "sem horário"
+   acima dele -- só a "moldura" ao redor (grade de horas, colunas de dia)
+   agora é toda desenhada pelo FullCalendar, não mais à mão. As regras abaixo
+   só re-vestem o visual padrão do FullCalendar pra combinar com o resto do
+   sistema (cores/bordas/tipografia do design tokens --ph-*). */
 
-.agenda-regua-horas { position: relative; flex: 0 0 42px; width: 42px; }
-.agenda-regua-hora {
-    position: absolute;
-    right: 4px;
-    transform: translateY(-50%);
-    font-size: .7rem;
-    font-weight: 600;
-    color: var(--ph-text-muted);
-    white-space: nowrap;
-}
-
-.agenda-semana-kanban { display: flex; gap: .6rem; overflow-x: auto; padding-bottom: .5rem; flex: 1 1 auto; min-width: 0; }
-
-.agenda-coluna-dia {
-    flex: 0 0 250px;
-    display: flex;
-    flex-direction: column;
+.agenda-naoagendadas-faixa {
     background-color: var(--ph-surface);
     border-radius: var(--ph-radius-sm);
     box-shadow: var(--ph-elev-1);
+    padding: .6rem;
+    margin-bottom: .6rem;
 }
-.agenda-coluna-dia-hoje { outline: 2px solid var(--ph-primary); outline-offset: -2px; }
-.agenda-coluna-dia-alvo { background-color: var(--ph-primary-light); }
-
-.agenda-coluna-cabecalho {
+.agenda-naoagendadas-titulo { font-weight: 700; font-size: .82rem; margin-bottom: .5rem; }
+.agenda-naoagendadas-lista {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 .6rem;
-    border-bottom: 1px solid var(--ph-border);
-    box-sizing: border-box;
+    flex-wrap: wrap;
+    gap: .5rem;
 }
-.agenda-coluna-dianome { font-weight: 700; font-size: .8rem; }
-.agenda-coluna-diadata { font-size: .72rem; color: var(--ph-text-muted); }
+.agenda-naoagendadas-lista .agenda-card { width: 230px; }
 
-.agenda-coluna-naoagendadas {
-    display: flex;
-    flex-direction: column;
-    gap: .25rem;
-    padding: .25rem;
-    overflow-y: auto;
-    border-bottom: 1px dashed var(--ph-border);
-    box-sizing: border-box;
-}
+/* Tema do FullCalendar combinando com o resto do sistema -- sem CSS próprio
+   de calendário, ele usa uma paleta genérica azul que destoava do app. */
+#agendaCalendario { background-color: var(--ph-surface); border-radius: var(--ph-radius-sm); box-shadow: var(--ph-elev-1); padding: .5rem; }
+#agendaCalendario .fc { font-family: inherit; }
+#agendaCalendario .fc-theme-standard td, #agendaCalendario .fc-theme-standard th, #agendaCalendario .fc-theme-standard .fc-scrollgrid { border-color: var(--ph-border); }
+#agendaCalendario .fc-col-header-cell-cushion, #agendaCalendario .fc-daygrid-day-number { color: var(--ph-text); text-decoration: none; }
+#agendaCalendario .fc-day-today { background-color: var(--ph-primary-light) !important; }
+#agendaCalendario .fc-timegrid-slot-label-cushion, #agendaCalendario .fc-timegrid-axis-cushion { font-size: .7rem; color: var(--ph-text-muted); }
+#agendaCalendario .fc-timegrid-now-indicator-line { border-color: var(--ph-danger); }
+#agendaCalendario .fc-non-business { background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, .04), rgba(0, 0, 0, .04) 6px, rgba(0, 0, 0, .07) 6px, rgba(0, 0, 0, .07) 12px); }
+#agendaCalendario .fc-event { background: none; border: none; padding: 0; }
+#agendaCalendario .fc-timegrid-event .agenda-card, #agendaCalendario .fc-daygrid-event .agenda-card { height: 100%; margin: 0; }
+#agendaCalendario .fc-daygrid-event .agenda-card { padding: .2rem .6rem .2rem .4rem; }
 
-.agenda-coluna-grade {
-    position: relative;
-    box-sizing: border-box;
-    background-image: repeating-linear-gradient(to bottom, var(--ph-border) 0, var(--ph-border) 1px, transparent 1px, transparent 90px);
-}
-
-.agenda-almoco {
-    position: absolute;
-    left: 0;
-    right: 0;
-    background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, .05), rgba(0, 0, 0, .05) 6px, rgba(0, 0, 0, .09) 6px, rgba(0, 0, 0, .09) 12px);
-    border-top: 1px dashed var(--ph-text-muted);
-    border-bottom: 1px dashed var(--ph-text-muted);
-    pointer-events: none;
-}
+/* Grupo Mês/Semana/Dia + botões de navegação (Hoje/anterior/próximo). */
+#agendaGrupoVisao .btn.active { background-color: var(--ph-dark, #212529); color: #fff; }
 
 .agenda-card {
     position: relative;
@@ -2193,4 +2162,41 @@ a.card-cliente, a.card-cliente:hover {
     font-size: .72rem;
     color: var(--ph-text-muted);
     white-space: pre-wrap;
+}
+
+/* Tela de carregamento da Sugestão da IA -- pedido do Kleber: "preciso de
+   uma tela de carregamento com varinha de IA gerando". Cobre a tela toda
+   pra deixar claro que tem algo em andamento (a chamada de IA pode levar
+   alguns segundos), com uma varinha mágica "brilhando" e mensagens de
+   status trocando (ver JS) pra dar sensação de progresso. */
+.agenda-ia-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;
+    background-color: rgba(15, 18, 24, .72);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.agenda-ia-overlay-caixa { text-align: center; color: #fff; padding: 2rem; }
+.agenda-ia-varinha {
+    position: relative;
+    display: inline-block;
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    animation: agendaIaVarinhaBalanco 1.6s ease-in-out infinite;
+}
+.agenda-ia-estrela { position: absolute; font-size: 1rem; color: #ffd43b; animation: agendaIaEstrelaBrilho 1.4s ease-in-out infinite; }
+.agenda-ia-estrela-1 { top: -6px; right: -14px; animation-delay: .2s; }
+.agenda-ia-estrela-2 { bottom: 2px; left: -16px; font-size: .75rem; animation-delay: .7s; }
+.agenda-ia-overlay-titulo { font-size: 1.3rem; font-weight: 700; }
+.agenda-ia-overlay-status { margin-top: .4rem; font-size: .9rem; color: rgba(255, 255, 255, .8); }
+@keyframes agendaIaVarinhaBalanco {
+    0%, 100% { transform: rotate(-8deg); }
+    50% { transform: rotate(10deg); }
+}
+@keyframes agendaIaEstrelaBrilho {
+    0%, 100% { opacity: .25; transform: scale(.7); }
+    50% { opacity: 1; transform: scale(1.15); }
 }

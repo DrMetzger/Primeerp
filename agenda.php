@@ -3,18 +3,21 @@
 /**
  * Agenda de trabalho da gestão -- pedido do Kleber: ele tem todos os
  * chamados cadastrados mas fica perdido em qual cliente atender primeiro.
- * Gráfico de Gantt por horário: cada tarefa tem horário de início e
- * duração, organizada dentro do expediente (cada gestor define o próprio
- * horário de trabalho e almoço -- ver "Meu horário"), pode ter um
- * responsável da gestão atribuído (avatar no card) e, se estiver ligada a
- * um chamado, dá pra responder e encerrar o chamado direto por aqui. Ele (e
- * o Petronilho/Caio, mesmo quadro compartilhado -- não é agenda pessoal de
- * cada um) monta a semana arrastando os cards entre dias E entre horários.
- * Um calendário mensal (reaproveitando o componente já usado pros
- * treinamentos, ver assets/js/calendario_visual.js) dá a visão geral pra
- * navegar/criar/editar rápido; o Gantt da semana logo abaixo é onde
- * acontece a organização de verdade. Só admin/diretor/CEO usam isso por
- * enquanto ("colaborador não precisa").
+ * Calendário/Gantt por horário com visão Mês/Semana/Dia de verdade (pedido:
+ * "o gantt precisa ter visibilidade por mês, semana e diário"), construído
+ * em cima do FullCalendar (biblioteca open-source consolidada -- "procure
+ * plugins de autores renomados" -- em vez de reinventar mês/semana/dia na
+ * mão). Cada tarefa tem horário de início e duração, organizada dentro do
+ * expediente (cada gestor define o próprio horário de trabalho e almoço --
+ * ver "Meu horário", inclusive dentro do fluxo da sugestão da IA), pode ter
+ * um responsável da gestão atribuído (avatar no card, auto-atribuído a
+ * quem criou a tarefa) e, se estiver ligada a um chamado, dá pra responder
+ * com anexo e mudar o status (aguardando cliente/aguardando nós/encerrar)
+ * direto por aqui, igual à tela de chamados. Ele (e o Petronilho/Caio,
+ * mesmo quadro compartilhado -- não é agenda pessoal de cada um) monta a
+ * semana arrastando os cards entre dias E entre horários (dentro do
+ * calendário, ou da faixa "sem horário" pro calendário). Só admin/diretor/
+ * CEO usam isso por enquanto ("colaborador não precisa").
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -29,13 +32,13 @@ const MESES_PT_AGENDA = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 
 const DIAS_SEMANA_ABREV_PT_AGENDA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const AGENDA_DURACAO_PADRAO_MINUTOS = 60;
 const AGENDA_DURACOES_OPCOES = [30 => '0h30', 45 => '0h45', 60 => '1h', 90 => '1h30', 120 => '2h', 180 => '3h', 240 => '4h'];
-// 1 minuto de expediente = 1.5px de altura no Gantt -- dá espaço de sobra
-// pro título/logo/badge de cada card sem cortar (na primeira versão, 1px/min
-// deixava tudo cortado e colado -- "ainda está muito ruim", pedido do
-// Kleber). Um pequeno respiro (AGENDA_GAP_CARD_PX) entre cards vizinhos
-// evita a sensação de tudo grudado quando o dia está cheio.
+// Multiplicador usado só pra calcular a ALTURA TOTAL (em px) das visões
+// Semana/Dia do FullCalendar a partir da duração do expediente -- dá espaço
+// de sobra pro título/logo/badge de cada card sem cortar (versão anterior,
+// sem essa folga, deixava tudo cortado e colado -- "ainda está muito ruim",
+// pedido do Kleber). Quem decide o pixel/minuto de cada linha dentro dessa
+// altura é o próprio FullCalendar, não esse valor diretamente.
 const AGENDA_PX_POR_MINUTO = 1.5;
-const AGENDA_GAP_CARD_PX = 4;
 
 /**
  * Horário de trabalho/almoço do usuário logado (NULL = ainda não configurou,
@@ -158,21 +161,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if ($acao === 'reordenar_tarefas' && $ehAjax) {
-        $mudancas = json_decode($_POST['mudancas'] ?? '[]', true);
-        if (is_array($mudancas)) {
-            $stmtReordenar = $pdo->prepare('UPDATE agenda_tarefas SET data = ?, hora_inicio = ?, ordem = ? WHERE id = ?');
-            foreach ($mudancas as $m) {
-                if (!isset($m['id'], $m['data'], $m['ordem'])) {
-                    continue;
-                }
-                $horaMudanca = $m['hora_inicio'] ?? null;
-                $horaMudanca = (is_string($horaMudanca) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $horaMudanca)) ? $horaMudanca : null;
-                $stmtReordenar->execute([$m['data'], $horaMudanca, (int) $m['ordem'], (int) $m['id']]);
-            }
+    // Mover/redimensionar uma tarefa arrastando dentro do FullCalendar (ou
+    // arrastando da faixa "sem horário" pra dentro dele) -- substitui o
+    // antigo "reordenar_tarefas" (que reordenava a coluna inteira à mão);
+    // agora é o próprio FullCalendar quem decide onde cada card fica na
+    // tela, só precisamos persistir o novo horário/duração dessa tarefa.
+    if ($acao === 'mover_tarefa' && $ehAjax) {
+        $tarefaId = (int) ($_POST['tarefa_id'] ?? 0);
+        $data = $_POST['data'] ?? '';
+        $horaInicio = $_POST['hora_inicio'] ?? '';
+        $horaInicio = preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $horaInicio) ? $horaInicio : null;
+        $duracaoMinutos = (int) ($_POST['duracao_minutos'] ?? 0);
+        if (!isset(AGENDA_DURACOES_OPCOES[$duracaoMinutos])) {
+            $duracaoMinutos = AGENDA_DURACAO_PADRAO_MINUTOS;
         }
+
         header('Content-Type: application/json');
-        echo json_encode(['sucesso' => true]);
+        if ($tarefaId && $data && strtotime($data) && $horaInicio) {
+            $pdo->prepare('UPDATE agenda_tarefas SET data = ?, hora_inicio = ?, duracao_minutos = ? WHERE id = ?')
+                ->execute([$data, $horaInicio, $duracaoMinutos, $tarefaId]);
+            echo json_encode(['sucesso' => true]);
+        } else {
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Dados inválidos.']);
+        }
         exit;
     }
 
@@ -205,68 +216,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // Responder e encerrar o chamado ligado a uma tarefa, sem sair da
-    // Agenda -- pedido do Kleber: "ao interagir com o gráfico de Gantt devo
-    // responder ao chamado e finalizar ele, saindo da minha tela". Reaproveita
-    // exatamente a mesma lógica do "responder_chamado" com status=fechado de
-    // cliente.php (INSERT em chamado_respostas + UPDATE chamados direto pra
-    // fechado, sem passar por recalcular_status_chamado()), só que sem
-    // anexo (não faz sentido nesse atalho rápido). A tarefa vinculada vira
-    // 'concluida', que já some do Gantt ativo (ver filtro na seção de
-    // carregamento abaixo).
-    if ($acao === 'responder_encerrar_chamado_tarefa' && $ehAjax) {
+    // Responder o chamado ligado a uma tarefa, sem sair da Agenda -- pedido
+    // do Kleber: "ao interagir com o gráfico de Gantt devo responder ao
+    // chamado", "preciso poder anexar, clicar e arrastar", e "tem que ser o
+    // mesmo padrão da tela de chamados: encerrar, aguardar cliente, aguardar
+    // nós" (não só um botão fixo de "encerrar"). POST de verdade
+    // (multipart/form-data, não AJAX) -- mesmo padrão exato do
+    // "responder_chamado" de cliente.php: INSERT em chamado_respostas +
+    // processar_anexos_chamado() + UPDATE chamados direto (sem passar por
+    // recalcular_status_chamado(), que é só pro reabrir implícito). Só
+    // quando o status escolhido é 'fechado' a tarefa vinculada vira
+    // 'concluida' (some do Gantt ativo); nos outros dois status ela continua
+    // como estava.
+    if ($acao === 'responder_chamado_tarefa') {
         $tarefaId = (int) ($_POST['tarefa_id'] ?? 0);
         $mensagem = trim($_POST['mensagem'] ?? '');
+        $temAnexoResposta = !empty($_FILES['anexos']['name'][0] ?? '');
+        $statusAposResposta = in_array($_POST['status_apos_resposta'] ?? '', ['aguardando_cliente', 'aguardando_equipe', 'fechado'], true)
+            ? $_POST['status_apos_resposta'] : 'aguardando_cliente';
         $notificarCliente = ($_POST['notificar_cliente'] ?? '') === '1';
-
-        if ($mensagem === '') {
-            header('Content-Type: application/json');
-            echo json_encode(['sucesso' => false, 'mensagem' => 'Escreva uma mensagem de resposta.']);
-            exit;
-        }
+        $temMensagemOuAnexoResposta = $mensagem !== '' || $temAnexoResposta;
 
         $stmtTarefaChamado = $pdo->prepare('SELECT chamado_id FROM agenda_tarefas WHERE id = ?');
         $stmtTarefaChamado->execute([$tarefaId]);
         $chamadoIdTarefa = (int) $stmtTarefaChamado->fetchColumn();
 
         if (!$chamadoIdTarefa) {
-            header('Content-Type: application/json');
-            echo json_encode(['sucesso' => false, 'mensagem' => 'Essa tarefa não está ligada a um chamado.']);
-            exit;
-        }
+            flash_set('erro', 'Essa tarefa não está ligada a um chamado.');
+        } else {
+            $stmtChamadoAlvo = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+            $stmtChamadoAlvo->execute([$chamadoIdTarefa]);
+            $chamadoAlvo = $stmtChamadoAlvo->fetch();
 
-        $stmtChamadoAlvo = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
-        $stmtChamadoAlvo->execute([$chamadoIdTarefa]);
-        $chamadoAlvo = $stmtChamadoAlvo->fetch();
+            if (!$chamadoAlvo) {
+                flash_set('erro', 'Chamado não encontrado (pode ter sido excluído).');
+            } else {
+                $nomeResponsavel = Auth::userName();
+                $anexosResposta = [];
+                $errosAnexoResposta = [];
 
-        if (!$chamadoAlvo) {
-            header('Content-Type: application/json');
-            echo json_encode(['sucesso' => false, 'mensagem' => 'Chamado não encontrado (pode ter sido excluído).']);
-            exit;
-        }
+                if ($temMensagemOuAnexoResposta) {
+                    $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
+                        ->execute([$chamadoIdTarefa, $nomeResponsavel, Auth::userId(), $mensagem !== '' ? $mensagem : '(anexo enviado)']);
+                    $respostaId = (int) $pdo->lastInsertId();
+                    $errosAnexoResposta = processar_anexos_chamado($pdo, $chamadoIdTarefa, $respostaId, 'equipe');
 
-        $nomeResponsavel = Auth::userName();
-        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
-            ->execute([$chamadoIdTarefa, $nomeResponsavel, Auth::userId(), $mensagem]);
-        $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoIdTarefa]);
-        $pdo->prepare("UPDATE agenda_tarefas SET status = 'concluida' WHERE id = ?")->execute([$tarefaId]);
+                    $stmtAnexosResposta = $pdo->prepare('SELECT id, arquivo_nome_original FROM chamado_anexos WHERE resposta_id = ?');
+                    $stmtAnexosResposta->execute([$respostaId]);
+                    $anexosResposta = $stmtAnexosResposta->fetchAll();
+                }
 
-        if ($notificarCliente) {
-            $stmtClienteAlvo = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
-            $stmtClienteAlvo->execute([(int) $chamadoAlvo['cliente_id']]);
-            $clienteAlvo = $stmtClienteAlvo->fetch();
-            if ($clienteAlvo) {
-                $stmtChamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
-                $stmtChamadoAtualizado->execute([$chamadoIdTarefa]);
-                $chamadoAtualizado = $stmtChamadoAtualizado->fetch();
-                $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $clienteAlvo);
-                notificar_depois(fn () => Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, []));
+                if ($statusAposResposta === 'fechado') {
+                    $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoIdTarefa]);
+                    $pdo->prepare("UPDATE agenda_tarefas SET status = 'concluida' WHERE id = ?")->execute([$tarefaId]);
+                } else {
+                    $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusAposResposta, $chamadoIdTarefa]);
+                }
+
+                if ($temMensagemOuAnexoResposta && $notificarCliente) {
+                    $stmtClienteAlvo = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
+                    $stmtClienteAlvo->execute([(int) $chamadoAlvo['cliente_id']]);
+                    $clienteAlvo = $stmtClienteAlvo->fetch();
+                    if ($clienteAlvo) {
+                        $stmtChamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+                        $stmtChamadoAtualizado->execute([$chamadoIdTarefa]);
+                        $chamadoAtualizado = $stmtChamadoAtualizado->fetch();
+                        $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $clienteAlvo);
+                        notificar_depois(fn () => Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, $anexosResposta));
+                    }
+                }
+
+                flash_set($errosAnexoResposta ? 'erro' : 'sucesso', $errosAnexoResposta
+                    ? ('Chamado atualizado, mas alguns anexos não puderam ser enviados: ' . implode('; ', $errosAnexoResposta))
+                    : 'Chamado atualizado.');
             }
         }
-
-        header('Content-Type: application/json');
-        echo json_encode(['sucesso' => true]);
-        exit;
     }
 
     if ($acao === 'gerar_sugestao_ia' && $ehAjax) {
@@ -302,14 +326,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $dataInicioSugestao = $dataFimSugestao = $dataAncoraSugestao;
         }
 
-        // Só dias úteis (seg-sex) entram como data permitida pra IA distribuir
-        // tarefa -- fim de semana o Kleber não trabalha, não faz sentido
-        // sugerir tarefa nesses dias quando o período é semana/mês.
+        // Todos os dias do período entram como data permitida pra IA
+        // distribuir tarefa -- inclusive sábado/domingo (pedido do Kleber:
+        // às vezes precisa atender cliente no fim de semana também).
         $datasUteisSugestao = [];
         for ($ts = strtotime($dataInicioSugestao); $ts <= strtotime($dataFimSugestao); $ts += 86400) {
-            if ((int) date('N', $ts) <= 5) {
-                $datasUteisSugestao[] = date('Y-m-d', $ts);
-            }
+            $datasUteisSugestao[] = date('Y-m-d', $ts);
         }
         if (!$datasUteisSugestao) {
             $datasUteisSugestao[] = $dataAncoraSugestao;
@@ -340,8 +362,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $rotuloPeriodoSugestao = [
             'dia' => 'hoje (' . formatar_data($dataAncoraSugestao) . ')',
-            'semana' => 'essa semana (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ', dias úteis)',
-            'mes' => 'esse mês (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ', dias úteis)',
+            'semana' => 'essa semana (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ')',
+            'mes' => 'esse mês (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ')',
         ][$periodoSugestao];
         $rotuloClienteSugestao = $clienteIdsSugestao
             ? implode(', ', array_map(fn ($id) => $nomesClientesPorIdSugestao[$id] ?? "cliente #$id", $clienteIdsSugestao))
@@ -382,7 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $prompt = $blocoContexto
-            . "\nDatas permitidas pra colocar tarefa (dias úteis do período): " . implode(', ', $datasUteisSugestao) . "\n"
+            . "\nDatas permitidas pra colocar tarefa: " . implode(', ', $datasUteisSugestao) . "\n"
             . "Horário permitido em cada dia: {$horarioTrabalhoSugestao['expediente_inicio']} às {$horarioTrabalhoSugestao['expediente_fim']}, PULANDO o almoço ({$horarioTrabalhoSugestao['almoco_inicio']}-{$horarioTrabalhoSugestao['almoco_fim']}). "
             . "Duração de cada tarefa em minutos: use um destes valores -- 30, 45, 60, 90, 120, 180 ou 240 -- normalmente 60, salvo se o chamado precisar claramente de mais ou menos tempo.\n\n"
             . "Monte um plano de tarefas pra esse período, priorizando os chamados mais urgentes/antigos, distribuindo entre os dias úteis e horários de forma equilibrada e SEM SOBREPOR horários no mesmo dia "
@@ -486,7 +508,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    header('Location: ' . url('agenda.php' . (isset($_POST['data']) && $_POST['data'] ? '?data=' . urlencode($_POST['data']) : '')));
+    // Preserva a visão (mês/semana/dia) escolhida no redirect pós-ação, senão
+    // toda vez que ele salva/exclui/limpa uma tarefa a tela voltaria pra
+    // visão padrão.
+    $paramsRedirect = [];
+    if (!empty($_POST['data'])) {
+        $paramsRedirect['data'] = $_POST['data'];
+    }
+    if (!empty($_POST['visao'])) {
+        $paramsRedirect['visao'] = $_POST['visao'];
+    }
+    header('Location: ' . url('agenda.php' . ($paramsRedirect ? '?' . http_build_query($paramsRedirect) : '')));
     exit;
 }
 
@@ -496,19 +528,20 @@ $dataFocoParam = $_GET['data'] ?? date('Y-m-d');
 if (!strtotime($dataFocoParam)) {
     $dataFocoParam = date('Y-m-d');
 }
+$visaoInicialAgenda = in_array($_GET['visao'] ?? '', ['mes', 'semana', 'dia'], true) ? $_GET['visao'] : 'semana';
+$visaoFullCalendarPorNome = ['mes' => 'dayGridMonth', 'semana' => 'timeGridWeek', 'dia' => 'timeGridDay'];
 
 $horarioTrabalho = agenda_horario_trabalho($pdo, Auth::userId());
 $minExpedienteInicio = minutos_do_dia($horarioTrabalho['expediente_inicio']);
 $minExpedienteFim = minutos_do_dia($horarioTrabalho['expediente_fim']);
 $minAlmocoInicio = minutos_do_dia($horarioTrabalho['almoco_inicio']);
 $minAlmocoFim = minutos_do_dia($horarioTrabalho['almoco_fim']);
-$alturaGanttPx = (int) max(90, ($minExpedienteFim - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO);
-$alturaCabecalhoColunaPx = 44;
-// Faixa "sem horário" por dia: fixa (pra régua de horas bater em todas as
-// colunas), mas alta o bastante pra mostrar pelo menos 1 card inteiro sem
-// cortar -- na primeira versão era baixa demais (34px) e cortava o card no
-// meio, mostrando só um pedacinho com a barra de rolagem por cima.
-$alturaZonaNaoAgendadaPx = 64;
+// Altura (em px) das visões Semana/Dia do FullCalendar -- calculada a
+// partir da duração do expediente pra dar espaço de sobra por linha de
+// horário (mesmo espírito do AGENDA_PX_POR_MINUTO da versão anterior, sem
+// deixar tudo cramped/cortado -- "ainda está muito ruim" era exatamente
+// isso).
+$alturaGanttPx = (int) max(500, ($minExpedienteFim - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO + 60);
 
 // Semana (segunda a domingo) que contém $dataFocoParam -- o Gantt sempre
 // mostra a semana inteira (não só o dia), pra dar pra arrastar uma tarefa
@@ -520,17 +553,11 @@ $diasDaSemanaFoco = [];
 for ($i = 0; $i < 7; $i++) {
     $diasDaSemanaFoco[] = date('Y-m-d', strtotime("+{$i} days", strtotime($segundaSemanaFoco)));
 }
-$semanaAnteriorFoco = date('Y-m-d', strtotime('-7 days', strtotime($segundaSemanaFoco)));
-$semanaProximaFoco = date('Y-m-d', strtotime('+7 days', strtotime($segundaSemanaFoco)));
-
 $clientes = $pdo->query("SELECT id, nome, logo FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
-$nomesClientesPorId = array_column($clientes, 'nome', 'id');
-$logosClientesPorId = array_column($clientes, 'logo', 'id');
 
 // Quem pode ser "responsável" por uma tarefa -- só gestão (mesma audiência
 // que usa a Agenda), não colaborador.
 $responsaveisAgenda = $pdo->query("SELECT id, nome, foto_perfil FROM usuarios WHERE perfil IN ('admin','diretor','ceo') AND ativo = 1 ORDER BY nome ASC")->fetchAll();
-$nomesResponsaveisPorId = array_column($responsaveisAgenda, 'nome', 'id');
 
 $chamadosAbertos = $pdo->query("
     SELECT id, titulo, cliente_id, prioridade
@@ -550,36 +577,6 @@ $todasTarefas = $pdo->query("
     LEFT JOIN usuarios r ON r.id = t.responsavel_id
     ORDER BY t.data ASC, t.hora_inicio ASC, t.ordem ASC
 ")->fetchAll();
-
-$tarefasPorData = [];
-foreach ($todasTarefas as $t) {
-    $tarefasPorData[$t['data']][] = $t;
-}
-
-// Formato leve pro calendário visual reutilizado (mesmo componente dos
-// treinamentos) -- setor_id aqui é o cliente_id mesmo, só reaproveitando o
-// mesmo campo que o widget já sabe colorir (ver cor_cliente()/cor_setor()
-// serem a MESMA paleta/regra). hora_inicio real é passado pro widget saber
-// ordenar/mostrar o horário nos chips do mês também.
-$eventosCalendarioAgenda = array_map(fn ($t) => [
-    'id' => (int) $t['id'],
-    'titulo' => $t['titulo'],
-    'tipo' => null,
-    'descricao' => $t['notas'],
-    'data_inicio' => $t['data'],
-    'hora_inicio' => $t['hora_inicio'] ? substr($t['hora_inicio'], 0, 5) : null,
-    'data_fim' => null,
-    'hora_fim' => null,
-    'link_reuniao' => null,
-    'status' => $t['status'] === 'concluida' ? 'cancelado' : $t['status'],
-    'setor_id' => $t['cliente_id'] ? (int) $t['cliente_id'] : null,
-    'cliente_id' => $t['cliente_id'] ? (int) $t['cliente_id'] : null,
-    'chamado_id' => $t['chamado_id'] ? (int) $t['chamado_id'] : null,
-    'responsavel_id' => $t['responsavel_id'] ? (int) $t['responsavel_id'] : null,
-    'duracao_minutos' => (int) $t['duracao_minutos'],
-    'notas' => $t['notas'],
-    'status_real' => $t['status'],
-], $todasTarefas);
 
 function icone_status_tarefa(string $status): string
 {
@@ -613,12 +610,12 @@ function agenda_logo_cliente_html(?string $logo, string $nomeCliente, string $co
  * ['top'=>.., 'height'=>..]). Cards baixos (< 75px, ~45min) escondem
  * logo/notas pra não estourar -- ver .agenda-card-compacta.
  */
-function agenda_render_card(array $t, ?array $posicao): string
+function agenda_render_card(array $t, ?array $posicao, bool $forcarCompacta = false): string
 {
     $duracaoMin = (int) $t['duracao_minutos'];
     $horaTxt = $t['hora_inicio'] ? substr($t['hora_inicio'], 0, 5) : null;
     $horaFimTxt = $horaTxt ? date('H:i', strtotime($horaTxt) + $duracaoMin * 60) : null;
-    $compacta = $posicao && $posicao['height'] < 75;
+    $compacta = ($posicao && $posicao['height'] < 75) || $forcarCompacta;
     $corCliente = $t['cliente_id'] ? cor_cliente((int) $t['cliente_id']) : 'var(--ph-border)';
 
     $estilo = $posicao ? "position:absolute; top:{$posicao['top']}px; height:{$posicao['height']}px; left:2px; right:2px;" : '';
@@ -657,22 +654,73 @@ function agenda_render_card(array $t, ?array $posicao): string
     return ob_get_clean();
 }
 
+/**
+ * Monta os eventos pro FullCalendar -- carrega TODAS as tarefas com horário
+ * de uma vez (mesmo raciocínio que já existia pro resto da página: uso
+ * interno, volume baixo, não compensa complicar com busca por período via
+ * AJAX) e deixa o FullCalendar mostrar/esconder conforme a visão (mês/
+ * semana/dia) e a navegação, tudo no cliente, sem precisar recarregar a
+ * página pra trocar de semana/mês. O HTML de cada card reaproveita
+ * agenda_render_card() -- mesmo visual em qualquer visão, um lugar só pra
+ * manter. Tarefas curtas (<=45min) forçam o modo compacto mesmo sem saber
+ * a altura final em pixels (quem decide isso agora é o FullCalendar) --
+ * senão card com logo+notas podia estourar a caixinha de um evento curto
+ * de novo (era exatamente o motivo do "ainda está muito ruim" antes).
+ */
+function agenda_eventos_fullcalendar(array $todasTarefas): array
+{
+    $eventos = [];
+    foreach ($todasTarefas as $t) {
+        if ($t['status'] === 'concluida' || $t['hora_inicio'] === null) {
+            continue;
+        }
+        $duracaoMin = (int) $t['duracao_minutos'];
+        $inicioIso = $t['data'] . 'T' . substr($t['hora_inicio'], 0, 5) . ':00';
+        $fimIso = date('Y-m-d\TH:i:s', strtotime($inicioIso) + $duracaoMin * 60);
+        $corCliente = $t['cliente_id'] ? cor_cliente((int) $t['cliente_id']) : '#8a94a6';
+
+        $eventos[] = [
+            'id' => (string) $t['id'],
+            'title' => $t['titulo'],
+            'start' => $inicioIso,
+            'end' => $fimIso,
+            'backgroundColor' => $corCliente,
+            'borderColor' => $corCliente,
+            'textColor' => '#fff',
+            'extendedProps' => [
+                'clienteId' => $t['cliente_id'] ? (string) $t['cliente_id'] : '',
+                'responsavelId' => $t['responsavel_id'] ? (string) $t['responsavel_id'] : '',
+                'chamadoId' => $t['chamado_id'],
+                'duracaoMinutos' => $duracaoMin,
+                'notas' => $t['notas'] ?? '',
+                'status' => $t['status'],
+                'cardHtml' => agenda_render_card($t, null, $duracaoMin <= 45),
+            ],
+        ];
+    }
+
+    return $eventos;
+}
+
 $tituloPagina = 'Agenda';
 require __DIR__ . '/templates/header.php';
 ?>
 
 <h4 class="mb-1"><i class="bi bi-calendar3"></i> Agenda</h4>
-<p class="text-muted small mb-3">Organize o que precisa atender em cada dia e horário -- compartilhado entre a gestão. Arraste os cards entre dias e horários pra reorganizar, ou clique no <i class="bi bi-x-lg"></i> pra remover.</p>
-
-<div class="calendario-mensal mb-4" data-eventos='<?= e(json_encode($eventosCalendarioAgenda, JSON_UNESCAPED_UNICODE)) ?>' data-aba-retorno="agenda"></div>
+<p class="text-muted small mb-3">Organize o que precisa atender em cada dia e horário -- compartilhado entre a gestão. Arraste os cards pra reorganizar (inclusive da faixa "sem horário" pro calendário), ou clique no <i class="bi bi-x-lg"></i> pra remover.</p>
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
     <div class="d-flex align-items-center gap-2 flex-wrap">
-        <h5 class="mb-0">Prioridades da semana</h5>
-        <a href="<?= url('agenda.php') ?>?data=<?= e($semanaAnteriorFoco) ?>" class="btn btn-sm btn-outline-secondary" title="Semana anterior"><i class="bi bi-chevron-left"></i></a>
-        <span class="small text-muted"><?= date('d/m', strtotime($segundaSemanaFoco)) ?> a <?= date('d/m', strtotime($diasDaSemanaFoco[6])) ?></span>
-        <a href="<?= url('agenda.php') ?>?data=<?= e($semanaProximaFoco) ?>" class="btn btn-sm btn-outline-secondary" title="Próxima semana"><i class="bi bi-chevron-right"></i></a>
-        <input type="date" class="form-control form-control-sm" id="seletorDataFoco" value="<?= e($dataFocoParam) ?>" style="width:auto;" title="Ir pra semana desta data">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="agendaBotaoHoje">Hoje</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="agendaBotaoAnterior" title="Anterior"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="agendaBotaoProximo" title="Próximo"><i class="bi bi-chevron-right"></i></button>
+        <h5 class="mb-0" id="agendaTituloPeriodo">&nbsp;</h5>
+        <input type="date" class="form-control form-control-sm" id="seletorDataFoco" value="<?= e($dataFocoParam) ?>" style="width:auto;" title="Ir pra essa data">
+        <div class="btn-group btn-group-sm" role="group" id="agendaGrupoVisao">
+            <button type="button" class="btn btn-outline-dark" data-visao="dayGridMonth">Mês</button>
+            <button type="button" class="btn btn-outline-dark" data-visao="timeGridWeek">Semana</button>
+            <button type="button" class="btn btn-outline-dark" data-visao="timeGridDay">Dia</button>
+        </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="btn btn-sm btn-outline-secondary" id="botaoFiltrosAgenda" title="Filtrar por cliente/responsável">
@@ -817,13 +865,18 @@ require __DIR__ . '/templates/header.php';
   </div>
 </div>
 
-<!-- Antes de gerar, pergunta clientes/período/se é pra só sugerir em texto ou
-     já criar as tarefas na agenda -- pedido do Kleber pra não ter que ficar
-     copiando a sugestão manualmente dia a dia. Clientes é multi-seleção
-     (checkbox), não um único select -- às vezes ele quer olhar só um
-     conjunto de clientes de cada vez (ex.: emergência), não "todos ou 1". -->
+<!-- Antes de gerar, pergunta clientes/período/horário de trabalho/se é pra só
+     sugerir em texto ou já criar as tarefas na agenda -- pedido do Kleber:
+     "devo escolher o horário que vou trabalhar e quantas horas de almoço
+     antes da Gemini criar as tarefas, e quais clientes vou atender". Vem
+     pré-preenchido com o que já tava salvo em "Meu horário", mas editável
+     aqui mesmo, na hora -- ao clicar em Gerar, salva esse horário (fica
+     valendo pra próxima também) e só depois manda pra IA. Clientes é
+     multi-seleção (checkbox), não um único select -- às vezes ele quer
+     olhar só um conjunto de clientes de cada vez (ex.: emergência), não
+     "todos ou 1". -->
 <div class="modal fade" id="modalSugestaoIa" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title"><i class="bi bi-stars"></i> Sugestão da IA</h5>
@@ -832,7 +885,7 @@ require __DIR__ . '/templates/header.php';
       <div class="modal-body">
         <div class="mb-3">
           <div class="d-flex justify-content-between align-items-center mb-1">
-            <label class="form-label mb-0">Clientes</label>
+            <label class="form-label mb-0">Clientes que vou atender</label>
             <button type="button" class="btn btn-link btn-sm p-0" id="sugestaoIaClienteToggle">Marcar/desmarcar todos</button>
           </div>
           <div class="border rounded p-2" style="max-height:180px; overflow-y:auto;">
@@ -849,9 +902,31 @@ require __DIR__ . '/templates/header.php';
           <label class="form-label">Período</label>
           <select class="form-select" id="sugestaoIaPeriodo">
             <option value="dia">Hoje</option>
-            <option value="semana">Essa semana (dias úteis)</option>
-            <option value="mes">Esse mês (dias úteis)</option>
+            <option value="semana">Essa semana</option>
+            <option value="mes">Esse mês</option>
           </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label mb-1">Meu horário de trabalho e almoço</label>
+          <div class="row g-2">
+            <div class="col-6 col-md-3">
+              <label class="form-label small mb-1">Expediente começa</label>
+              <input type="time" class="form-control form-control-sm" id="sugestaoIaExpedienteInicio" value="<?= e($horarioTrabalho['expediente_inicio']) ?>">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small mb-1">Expediente termina</label>
+              <input type="time" class="form-control form-control-sm" id="sugestaoIaExpedienteFim" value="<?= e($horarioTrabalho['expediente_fim']) ?>">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small mb-1">Almoço começa</label>
+              <input type="time" class="form-control form-control-sm" id="sugestaoIaAlmocoInicio" value="<?= e($horarioTrabalho['almoco_inicio']) ?>">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label small mb-1">Almoço termina</label>
+              <input type="time" class="form-control form-control-sm" id="sugestaoIaAlmocoFim" value="<?= e($horarioTrabalho['almoco_fim']) ?>">
+            </div>
+          </div>
+          <div class="text-danger small mt-1 d-none" id="sugestaoIaHorarioErro"></div>
         </div>
         <div class="form-check">
           <input class="form-check-input" type="checkbox" id="sugestaoIaCriarTarefas">
@@ -876,63 +951,48 @@ require __DIR__ . '/templates/header.php';
     <div style="white-space: pre-wrap;" id="textoSugestaoIa" class="mt-2 small"></div>
 </div>
 
-<div class="agenda-gantt-wrapper">
-  <div class="agenda-regua-horas" style="margin-top: <?= $alturaCabecalhoColunaPx + $alturaZonaNaoAgendadaPx ?>px; height: <?= $alturaGanttPx ?>px;">
-    <?php for ($m = $minExpedienteInicio; $m < $minExpedienteFim; $m += 60): ?>
-    <div class="agenda-regua-hora" style="top: <?= ($m - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO ?>px;"><?= sprintf('%02d:00', intdiv($m, 60)) ?></div>
-    <?php endfor; ?>
-  </div>
-
-  <div class="agenda-semana-kanban" id="semanaKanban">
-    <?php foreach ($diasDaSemanaFoco as $indiceDia => $dataColuna):
-        $tarefasColunaTodas = array_filter($tarefasPorData[$dataColuna] ?? [], fn ($t) => $t['status'] !== 'concluida');
-        $tarefasAgendadasColuna = array_filter($tarefasColunaTodas, fn ($t) => $t['hora_inicio'] !== null);
-        $tarefasNaoAgendadasColuna = array_filter($tarefasColunaTodas, fn ($t) => $t['hora_inicio'] === null);
-        $ehHojeColuna = $dataColuna === date('Y-m-d');
-    ?>
-    <div class="agenda-coluna-dia<?= $ehHojeColuna ? ' agenda-coluna-dia-hoje' : '' ?>" data-date="<?= e($dataColuna) ?>">
-      <div class="agenda-coluna-cabecalho" style="height: <?= $alturaCabecalhoColunaPx ?>px;">
-        <div>
-          <div class="agenda-coluna-dianome"><?= DIAS_SEMANA_ABREV_PT_AGENDA[$indiceDia] ?></div>
-          <div class="agenda-coluna-diadata"><?= date('d/m', strtotime($dataColuna)) ?></div>
-        </div>
-        <button type="button" class="btn btn-sm btn-link p-0 agenda-coluna-add" data-date="<?= e($dataColuna) ?>" title="Nova tarefa nesse dia"><i class="bi bi-plus-lg"></i></button>
-      </div>
-
-      <div class="agenda-coluna-naoagendadas" data-date="<?= e($dataColuna) ?>" style="height: <?= $alturaZonaNaoAgendadaPx ?>px;" title="Tarefas sem horário definido -- arraste pra grade abaixo pra dar um horário">
-        <?php foreach ($tarefasNaoAgendadasColuna as $t) {
-            echo agenda_render_card($t, null);
-        } ?>
-      </div>
-
-      <div class="agenda-coluna-grade" data-date="<?= e($dataColuna) ?>" style="height: <?= $alturaGanttPx ?>px; background-size: 100% <?= 60 * AGENDA_PX_POR_MINUTO ?>px;">
-        <?php if ($minAlmocoFim > $minAlmocoInicio): ?>
-        <div class="agenda-almoco" style="top: <?= max(0, ($minAlmocoInicio - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO) ?>px; height: <?= ($minAlmocoFim - $minAlmocoInicio) * AGENDA_PX_POR_MINUTO ?>px;" title="Almoço"></div>
-        <?php endif; ?>
-        <?php foreach ($tarefasAgendadasColuna as $t):
-            $inicioMinCard = minutos_do_dia(substr($t['hora_inicio'], 0, 5));
-            $topPxCard = max(0, ($inicioMinCard - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO);
-            $alturaPxCard = max(30, (int) $t['duracao_minutos'] * AGENDA_PX_POR_MINUTO - AGENDA_GAP_CARD_PX);
-            echo agenda_render_card($t, ['top' => $topPxCard, 'height' => $alturaPxCard]);
-        endforeach; ?>
-      </div>
-    </div>
-    <?php endforeach; ?>
+<!-- Tela de carregamento animada enquanto a IA gera a sugestão/tarefas --
+     pedido do Kleber: "preciso de uma tela de carregamento com varinha de
+     IA gerando". Cobre a tela toda; a mensagem de status vai trocando pra
+     dar a sensação de progresso enquanto espera a resposta. -->
+<div class="agenda-ia-overlay d-none" id="agendaIaOverlay">
+  <div class="agenda-ia-overlay-caixa">
+    <div class="agenda-ia-varinha"><i class="bi bi-magic"></i><i class="bi bi-stars agenda-ia-estrela agenda-ia-estrela-1"></i><i class="bi bi-stars agenda-ia-estrela agenda-ia-estrela-2"></i></div>
+    <div class="agenda-ia-overlay-titulo">Gerando com IA...</div>
+    <div class="agenda-ia-overlay-status" id="agendaIaOverlayStatus">Analisando chamados abertos...</div>
   </div>
 </div>
 
+<!-- Tarefas sem horário definido -- ficam numa faixa acima do calendário,
+     arrastáveis pra dentro dele (dá um horário na hora em que solta). -->
+<div class="agenda-naoagendadas-faixa">
+  <div class="agenda-naoagendadas-titulo"><i class="bi bi-inbox"></i> Sem horário definido <span class="text-muted fw-normal">-- arraste pro calendário pra agendar</span></div>
+  <div class="agenda-naoagendadas-lista" id="agendaNaoAgendadasLista">
+    <?php
+    $tarefasNaoAgendadas = array_filter($todasTarefas, fn ($t) => $t['status'] !== 'concluida' && $t['hora_inicio'] === null);
+    if (!$tarefasNaoAgendadas): ?>
+    <p class="text-muted small mb-0" id="agendaNaoAgendadasVazio">Nenhuma -- toda tarefa já tem horário.</p>
+    <?php else: foreach ($tarefasNaoAgendadas as $t) {
+        echo agenda_render_card($t, null);
+    } endif; ?>
+  </div>
+</div>
+
+<div id="agendaCalendario"></div>
+
 <!-- Nova/editar tarefa -- UM modal só, reaproveitado pros dois casos. -->
 <div class="modal fade" id="modalTarefaAgenda" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="tarefaAgendaModalTitulo">Nova tarefa</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
       <form method="post" id="formTarefaAgenda">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" id="tarefaAgendaAcao" value="criar_tarefa">
         <input type="hidden" name="tarefa_id" id="tarefaAgendaId" value="">
-        <div class="modal-header">
-          <h5 class="modal-title" id="tarefaAgendaModalTitulo">Nova tarefa</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
+        <input type="hidden" name="visao" id="tarefaAgendaVisao" value="">
         <div class="modal-body">
           <div class="row g-3">
             <div class="col-12">
@@ -994,19 +1054,6 @@ require __DIR__ . '/templates/header.php';
               <label class="form-label">Anotações</label>
               <textarea name="notas" id="tarefaAgendaNotas" class="form-control" rows="4" placeholder="O que precisa levar em conta, próximos passos, o que já foi combinado..."></textarea>
             </div>
-            <div class="col-12 d-none" id="blocoResponderEncerrarTarefa">
-              <hr>
-              <label class="form-label">Responder e encerrar o chamado #<span id="tarefaAgendaChamadoIdTexto"></span></label>
-              <textarea id="tarefaAgendaRespostaChamado" class="form-control" rows="3" placeholder="Mensagem de resposta pro cliente -- o chamado será encerrado."></textarea>
-              <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" id="tarefaAgendaNotificarCliente" checked>
-                <label class="form-check-label" for="tarefaAgendaNotificarCliente">Notificar o cliente (e-mail/WhatsApp)</label>
-              </div>
-              <button type="button" class="btn btn-success btn-sm mt-2" id="botaoResponderEncerrarTarefa">
-                <i class="bi bi-check2-circle"></i> Responder e encerrar chamado
-              </button>
-              <div class="text-danger small mt-1 d-none" id="erroResponderEncerrarTarefa"></div>
-            </div>
           </div>
         </div>
         <div class="modal-footer justify-content-between">
@@ -1015,6 +1062,54 @@ require __DIR__ . '/templates/header.php';
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
             <button type="submit" class="btn btn-dark"><i class="bi bi-check2"></i> Salvar</button>
           </div>
+        </div>
+      </form>
+
+      <!-- Responder o chamado ligado a essa tarefa -- pedido do Kleber:
+           "ao interagir com o gráfico de Gantt devo responder ao chamado",
+           "preciso poder anexar clicar e arrastar", e "tem que ser o mesmo
+           padrão da tela de chamados: encerrar, aguardar cliente, aguardar
+           nós" (não só um botão fixo de "encerrar"). É um FORM SEPARADO
+           (não aninhado dentro do de cima) porque precisa de
+           enctype=multipart/form-data pros anexos -- é um POST de verdade
+           (não AJAX), igual ao "responder chamado" de cliente.php. -->
+      <form method="post" enctype="multipart/form-data" id="formResponderChamadoTarefa" class="d-none border-top">
+        <?= csrf_field() ?>
+        <input type="hidden" name="acao" value="responder_chamado_tarefa">
+        <input type="hidden" name="tarefa_id" id="responderChamadoTarefaId" value="">
+        <input type="hidden" name="data" id="responderChamadoTarefaData" value="">
+        <input type="hidden" name="visao" id="responderChamadoTarefaVisao" value="">
+        <div class="modal-body">
+          <label class="form-label">Responder o chamado #<span id="tarefaAgendaChamadoIdTexto"></span></label>
+          <textarea name="mensagem" id="responderChamadoMensagem" class="form-control mb-2" rows="3" placeholder="Mensagem de resposta pro cliente..."></textarea>
+          <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" name="notificar_cliente" value="1" id="responderChamadoNotificar" checked>
+              <label class="form-check-label" for="responderChamadoNotificar">Notificar o cliente</label>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <label class="small text-muted mb-0" for="responderChamadoStatus">Deixar como:</label>
+              <select name="status_apos_resposta" id="responderChamadoStatus" class="form-select form-select-sm w-auto">
+                <option value="aguardando_cliente" selected>Aguardando cliente</option>
+                <option value="aguardando_equipe">Aguardando nós</option>
+                <option value="fechado">Fechado (encerrar)</option>
+              </select>
+            </div>
+          </div>
+          <div class="anexos-stager" data-max-arquivos="<?= ANEXO_CHAMADO_MAX_QUANTIDADE ?>" data-max-tamanho-bytes="<?= ANEXO_CHAMADO_MAX_SIZE ?>">
+            <input type="file" name="anexos[]" class="anexos-stager-input" multiple accept="<?= e(ANEXO_CHAMADO_ACCEPT_HTML) ?>">
+            <div class="anexos-stager-controles">
+              <button type="button" class="btn btn-outline-dark btn-sm anexos-stager-escolher"><i class="bi bi-paperclip"></i> Escolher anexos</button>
+              <button type="button" class="btn btn-dark btn-sm anexos-stager-enviar" disabled><i class="bi bi-plus-lg"></i> Enviar anexos</button>
+              <span class="anexos-stager-pendente text-muted"></span>
+            </div>
+            <div class="anexos-stager-erro alert alert-danger d-none"></div>
+            <ul class="anexos-stager-lista list-unstyled"></ul>
+          </div>
+          <p class="anexos-upload-preview">Até <?= ANEXO_CHAMADO_MAX_QUANTIDADE ?> arquivos, <?= (int) (ANEXO_CHAMADO_MAX_SIZE / 1024 / 1024) ?>MB cada -- clique em "Escolher anexos" ou arraste o arquivo pra essa área.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-success"><i class="bi bi-send"></i> Responder</button>
         </div>
       </form>
     </div>
@@ -1026,15 +1121,27 @@ require __DIR__ . '/templates/header.php';
     <input type="hidden" name="acao" value="excluir_tarefa">
     <input type="hidden" name="tarefa_id" id="excluirTarefaAgendaId" value="">
     <input type="hidden" name="data" id="excluirTarefaAgendaData" value="">
+    <input type="hidden" name="visao" id="excluirTarefaAgendaVisao" value="">
 </form>
 
-<script src="<?= asset_url('assets/js/calendario_visual.js') ?>"></script>
+<!-- FullCalendar (MIT, biblioteca open-source consolidada de calendário/
+     agenda) -- pedido do Kleber: "procure plugins de autores renomados, faça
+     algo incrível". Bundle "global" já traz dayGrid/timeGrid/interaction
+     (drag-and-drop) juntos. Vendorizado localmente (mesmo padrão do FPDF
+     nesse projeto -- ver src/Pdf.php) em vez de CDN, pra não depender de
+     internet externa em produção. -->
+<script src="<?= asset_url('assets/js/vendor/fullcalendar/index.global.min.js') ?>"></script>
+<script src="<?= asset_url('assets/js/vendor/fullcalendar/locales-all.global.min.js') ?>"></script>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var CHAMADOS_POR_CLIENTE = <?= json_encode(array_map(fn ($ch) => ['id' => (int) $ch['id'], 'cliente_id' => (int) $ch['cliente_id']], $chamadosAbertos)) ?>;
-    var MIN_EXPEDIENTE_INICIO = <?= $minExpedienteInicio ?>;
-    var MIN_EXPEDIENTE_FIM = <?= $minExpedienteFim ?>;
-    var PX_POR_MINUTO = <?= AGENDA_PX_POR_MINUTO ?>;
+    var EVENTOS_AGENDA = <?= json_encode(agenda_eventos_fullcalendar($todasTarefas)) ?>;
+    var HORARIO_TRABALHO = <?= json_encode($horarioTrabalho) ?>;
+    var ALTURA_GANTT_PX = <?= $alturaGanttPx ?>;
+    var VISAO_INICIAL = '<?= e($visaoFullCalendarPorNome[$visaoInicialAgenda]) ?>';
+    var DATA_FOCO_INICIAL = '<?= e($dataFocoParam) ?>';
+    var ROTULOS_VISAO = { dayGridMonth: 'mes', timeGridWeek: 'semana', timeGridDay: 'dia' };
 
     function filtrarChamadosPorCliente(clienteId) {
         var selectChamado = document.getElementById('tarefaAgendaChamado');
@@ -1056,20 +1163,22 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // --- Modal: nova tarefa -------------------------------------------
-    function abrirNovaTarefa(dataIso) {
+    function abrirNovaTarefa(dataIso, horaIso) {
         document.getElementById('tarefaAgendaModalTitulo').textContent = 'Nova tarefa';
         document.getElementById('tarefaAgendaAcao').value = 'criar_tarefa';
         document.getElementById('tarefaAgendaId').value = '';
         document.getElementById('tarefaAgendaTitulo').value = '';
         document.getElementById('tarefaAgendaData').value = dataIso || document.getElementById('seletorDataFoco').value;
-        document.getElementById('tarefaAgendaHora').value = '';
+        document.getElementById('tarefaAgendaHora').value = horaIso || '';
         document.getElementById('tarefaAgendaDuracao').value = '60';
-        document.getElementById('tarefaAgendaResponsavel').value = '';
+        // Quem cria a tarefa já entra como responsável por padrão -- ainda dá
+        // pra trocar pra outra pessoa da gestão antes de salvar.
+        document.getElementById('tarefaAgendaResponsavel').value = '<?= (int) Auth::userId() ?>';
         document.getElementById('tarefaAgendaCliente').value = '';
         document.getElementById('tarefaAgendaChamado').value = '';
         document.getElementById('tarefaAgendaNotas').value = '';
         document.getElementById('blocoStatusTarefaAgenda').style.display = 'none';
-        document.getElementById('blocoResponderEncerrarTarefa').classList.add('d-none');
+        document.getElementById('formResponderChamadoTarefa').classList.add('d-none');
         document.getElementById('botaoExcluirTarefaAgenda').classList.add('d-none');
         filtrarChamadosPorCliente('');
         PrimeUI.openModal(document.getElementById('modalTarefaAgenda'));
@@ -1097,14 +1206,19 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('excluirTarefaAgendaId').value = dados.id;
         document.getElementById('excluirTarefaAgendaData').value = dados.data || '';
 
-        var blocoResponder = document.getElementById('blocoResponderEncerrarTarefa');
+        // Responder o chamado ligado a essa tarefa -- é um FORM SEPARADO
+        // (POST de verdade, com anexo) do formTarefaAgenda; só populamos os
+        // campos ocultos e mostramos/escondemos ele aqui.
+        var formResponder = document.getElementById('formResponderChamadoTarefa');
         if (dados.chamadoId) {
             document.getElementById('tarefaAgendaChamadoIdTexto').textContent = dados.chamadoId;
-            document.getElementById('tarefaAgendaRespostaChamado').value = '';
-            document.getElementById('erroResponderEncerrarTarefa').classList.add('d-none');
-            blocoResponder.classList.remove('d-none');
+            document.getElementById('responderChamadoTarefaId').value = dados.id;
+            document.getElementById('responderChamadoTarefaData').value = dados.data || '';
+            document.getElementById('responderChamadoMensagem').value = '';
+            document.getElementById('responderChamadoStatus').value = 'aguardando_cliente';
+            formResponder.classList.remove('d-none');
         } else {
-            blocoResponder.classList.add('d-none');
+            formResponder.classList.add('d-none');
         }
 
         PrimeUI.openModal(document.getElementById('modalTarefaAgenda'));
@@ -1115,72 +1229,35 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('formExcluirTarefaAgenda').submit();
     });
 
-    // --- Responder e encerrar o chamado ligado a uma tarefa, sem sair da
-    // Agenda -- pedido do Kleber. --------------------------------------
-    document.getElementById('botaoResponderEncerrarTarefa').addEventListener('click', function () {
-        var mensagem = document.getElementById('tarefaAgendaRespostaChamado').value.trim();
-        var erroEl = document.getElementById('erroResponderEncerrarTarefa');
-        if (!mensagem) {
-            erroEl.textContent = 'Escreva uma mensagem de resposta.';
-            erroEl.classList.remove('d-none');
-            return;
-        }
-        erroEl.classList.add('d-none');
-        var botao = this;
-        botao.disabled = true;
+    // --- Trocar a data-âncora pula o calendário pra essa data, sem
+    // recarregar a página (o FullCalendar já tem todos os eventos
+    // carregados) -- ligado depois de o calendário ser criado, mais abaixo.
+    document.getElementById('seletorDataFoco').addEventListener('change', function () {
+        if (window.agendaCalendar) window.agendaCalendar.gotoDate(this.value);
+    });
 
+    // --- Horário de trabalho/almoço: validação + salvamento compartilhados
+    // entre o modal "Meu horário" e o campo dentro de "Sugestão da IA"
+    // (pedido do Kleber: "devo escolher o horário que vou trabalhar e
+    // quantas horas de almoço antes da Gemini criar as tarefas"). -----------
+    function validarHorarioTrabalho(ini, fim, almocoIni, almocoFim) {
+        if (!ini || !fim || !almocoIni || !almocoFim) return 'Preencha todos os horários.';
+        if (ini >= fim) return 'O expediente precisa terminar depois de começar.';
+        if (almocoIni >= almocoFim) return 'O almoço precisa terminar depois de começar.';
+        return null;
+    }
+
+    function salvarHorarioTrabalho(ini, fim, almocoIni, almocoFim) {
         var dados = new FormData();
-        dados.set('acao', 'responder_encerrar_chamado_tarefa');
+        dados.set('acao', 'salvar_horario_trabalho');
         dados.set('ajax', '1');
         dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
-        dados.set('tarefa_id', document.getElementById('tarefaAgendaId').value);
-        dados.set('mensagem', mensagem);
-        dados.set('notificar_cliente', document.getElementById('tarefaAgendaNotificarCliente').checked ? '1' : '0');
-
-        fetch(window.location.href, { method: 'POST', body: dados })
-            .then(function (r) { return r.json(); })
-            .then(function (json) {
-                if (json.sucesso) {
-                    window.location.reload();
-                } else {
-                    erroEl.textContent = json.mensagem || 'Não foi possível encerrar o chamado.';
-                    erroEl.classList.remove('d-none');
-                    botao.disabled = false;
-                }
-            })
-            .catch(function () {
-                erroEl.textContent = 'Falha de conexão.';
-                erroEl.classList.remove('d-none');
-                botao.disabled = false;
-            });
-    });
-
-    // --- Calendário mensal reaproveitado (visão geral / criar+editar rápido) -
-    document.querySelectorAll('.calendario-mensal').forEach(function (container) {
-        inicializarCalendarioMensal(container, {
-            aoAbrirNovo: function (cont, dataIso) { abrirNovaTarefa(dataIso); },
-            aoAbrirEvento: function (evento) {
-                abrirEditarTarefa({
-                    id: evento.id,
-                    titulo: evento.titulo,
-                    data: evento.data_inicio,
-                    horaInicio: evento.hora_inicio,
-                    duracaoMinutos: evento.duracao_minutos,
-                    clienteId: evento.cliente_id,
-                    chamadoId: evento.chamado_id,
-                    responsavelId: evento.responsavel_id,
-                    notas: evento.notas,
-                    status: evento.status_real,
-                });
-            },
-        });
-    });
-
-    // --- "Prioridades da semana": trocar a data-âncora pula pra semana dessa
-    // data -----------------------------------------------------------------
-    document.getElementById('seletorDataFoco').addEventListener('change', function () {
-        window.location.href = '<?= url('agenda.php') ?>?data=' + encodeURIComponent(this.value);
-    });
+        dados.set('expediente_inicio', ini);
+        dados.set('expediente_fim', fim);
+        dados.set('almoco_inicio', almocoIni);
+        dados.set('almoco_fim', almocoFim);
+        return fetch(window.location.href, { method: 'POST', body: dados }).then(function (r) { return r.json(); });
+    }
 
     // --- Meu horário ---------------------------------------------------
     var modalHorarioTrabalho = document.getElementById('modalHorarioTrabalho');
@@ -1195,32 +1272,20 @@ document.addEventListener('DOMContentLoaded', function () {
         var almocoFim = document.getElementById('horarioAlmocoFim').value;
         var erroEl = document.getElementById('horarioTrabalhoErro');
 
-        function mostrarErro(msg) { erroEl.textContent = msg; erroEl.classList.remove('d-none'); }
-
-        if (!ini || !fim || !almocoIni || !almocoFim) { mostrarErro('Preencha todos os horários.'); return; }
-        if (ini >= fim) { mostrarErro('O expediente precisa terminar depois de começar.'); return; }
-        if (almocoIni >= almocoFim) { mostrarErro('O almoço precisa terminar depois de começar.'); return; }
+        var erroValidacao = validarHorarioTrabalho(ini, fim, almocoIni, almocoFim);
+        if (erroValidacao) { erroEl.textContent = erroValidacao; erroEl.classList.remove('d-none'); return; }
         erroEl.classList.add('d-none');
 
-        var dados = new FormData();
-        dados.set('acao', 'salvar_horario_trabalho');
-        dados.set('ajax', '1');
-        dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
-        dados.set('expediente_inicio', ini);
-        dados.set('expediente_fim', fim);
-        dados.set('almoco_inicio', almocoIni);
-        dados.set('almoco_fim', almocoFim);
-
-        fetch(window.location.href, { method: 'POST', body: dados })
-            .then(function (r) { return r.json(); })
+        salvarHorarioTrabalho(ini, fim, almocoIni, almocoFim)
             .then(function (json) {
                 if (json.sucesso) {
                     window.location.reload();
                 } else {
-                    mostrarErro(json.mensagem || 'Não foi possível salvar.');
+                    erroEl.textContent = json.mensagem || 'Não foi possível salvar.';
+                    erroEl.classList.remove('d-none');
                 }
             })
-            .catch(function () { mostrarErro('Falha de conexão.'); });
+            .catch(function () { erroEl.textContent = 'Falha de conexão.'; erroEl.classList.remove('d-none'); });
     });
 
     // --- Limpar agenda (dia/semana/mês) ---------------------------------
@@ -1246,6 +1311,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Filtros do Gantt (cliente/responsável) -- só esconde/mostra card,
     // não mexe no banco. Aplica na hora, sem precisar de botão "aplicar". --
+    // Cobre tanto os eventos já dentro do calendário (via display:'none' da
+    // API do FullCalendar) quanto a faixa "sem horário" (DOM comum).
     var modalFiltrosAgenda = document.getElementById('modalFiltrosAgenda');
     document.getElementById('botaoFiltrosAgenda').addEventListener('click', function () {
         PrimeUI.openModal(modalFiltrosAgenda);
@@ -1254,7 +1321,15 @@ document.addEventListener('DOMContentLoaded', function () {
     function aplicarFiltrosGantt() {
         var clientesMarcados = Array.from(document.querySelectorAll('.filtro-gantt-cliente:checked')).map(function (c) { return c.value; });
         var respMarcados = Array.from(document.querySelectorAll('.filtro-gantt-responsavel:checked')).map(function (c) { return c.value; });
-        document.querySelectorAll('.agenda-card').forEach(function (card) {
+
+        if (window.agendaCalendar) {
+            window.agendaCalendar.getEvents().forEach(function (evento) {
+                var clienteOk = clientesMarcados.indexOf(evento.extendedProps.clienteId || '') !== -1;
+                var respOk = respMarcados.indexOf(evento.extendedProps.responsavelId || '') !== -1;
+                evento.setProp('display', (clienteOk && respOk) ? 'auto' : 'none');
+            });
+        }
+        document.querySelectorAll('#agendaNaoAgendadasLista .agenda-card').forEach(function (card) {
             var clienteOk = clientesMarcados.indexOf(card.getAttribute('data-cliente-id') || '') !== -1;
             var respOk = respMarcados.indexOf(card.getAttribute('data-responsavel-id') || '') !== -1;
             card.style.display = (clienteOk && respOk) ? '' : 'none';
@@ -1295,6 +1370,36 @@ document.addEventListener('DOMContentLoaded', function () {
         PrimeUI.openModal(modalSugestaoIa);
     });
 
+    // --- Tela de carregamento com a "varinha de IA gerando" -- pedido do
+    // Kleber: "preciso de uma tela de carregamento com varinha de IA
+    // gerando, depois recarregar a tela com todas informações
+    // automaticamente". As mensagens de status vão trocando sozinhas pra dar
+    // sensação de progresso enquanto espera a IA responder (não dá pra saber
+    // o progresso real de uma chamada de IA, então é só feedback visual).
+    var agendaIaOverlay = document.getElementById('agendaIaOverlay');
+    var agendaIaOverlayStatus = document.getElementById('agendaIaOverlayStatus');
+    var MENSAGENS_IA_CARREGANDO = [
+        'Analisando chamados abertos...',
+        'Priorizando por urgência e idade...',
+        'Organizando os horários do expediente...',
+        'Distribuindo entre os dias...',
+        'Quase lá...',
+    ];
+    var timerMensagensIa = null;
+    function mostrarOverlayIa() {
+        var indice = 0;
+        agendaIaOverlayStatus.textContent = MENSAGENS_IA_CARREGANDO[0];
+        agendaIaOverlay.classList.remove('d-none');
+        timerMensagensIa = setInterval(function () {
+            indice = (indice + 1) % MENSAGENS_IA_CARREGANDO.length;
+            agendaIaOverlayStatus.textContent = MENSAGENS_IA_CARREGANDO[indice];
+        }, 1600);
+    }
+    function esconderOverlayIa() {
+        clearInterval(timerMensagensIa);
+        agendaIaOverlay.classList.add('d-none');
+    }
+
     botaoGerarSugestaoIa.addEventListener('click', function () {
         var checks = document.querySelectorAll('.sugestao-ia-cliente-check');
         var idsMarcados = Array.from(checks).filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
@@ -1304,60 +1409,140 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         var clienteIdsParam = idsMarcados.length === checks.length ? '' : idsMarcados.join(',');
 
-        var painel = document.getElementById('painelSugestaoIa');
-        var textoEl = document.getElementById('textoSugestaoIa');
+        var ini = document.getElementById('sugestaoIaExpedienteInicio').value;
+        var fim = document.getElementById('sugestaoIaExpedienteFim').value;
+        var almocoIni = document.getElementById('sugestaoIaAlmocoInicio').value;
+        var almocoFim = document.getElementById('sugestaoIaAlmocoFim').value;
+        var erroHorarioEl = document.getElementById('sugestaoIaHorarioErro');
+        var erroValidacao = validarHorarioTrabalho(ini, fim, almocoIni, almocoFim);
+        if (erroValidacao) { erroHorarioEl.textContent = erroValidacao; erroHorarioEl.classList.remove('d-none'); return; }
+        erroHorarioEl.classList.add('d-none');
+
         var criarTarefas = document.getElementById('sugestaoIaCriarTarefas').checked;
         var periodoEscolhido = document.getElementById('sugestaoIaPeriodo').value;
+        var dataReferencia = (window.agendaCalendar ? window.agendaCalendar.getDate() : new Date()).toISOString().slice(0, 10);
 
-        PrimeUI.closeModal(modalSugestaoIa);
-        painel.classList.remove('d-none');
-        textoEl.textContent = 'Gerando sugestão...';
         botaoGerarSugestaoIa.disabled = true;
 
-        var dados = new FormData();
-        dados.set('acao', 'gerar_sugestao_ia');
-        dados.set('ajax', '1');
-        dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
-        dados.set('data', document.getElementById('seletorDataFoco').value);
-        dados.set('cliente_ids', clienteIdsParam);
-        dados.set('periodo', periodoEscolhido);
-        dados.set('criar_tarefas', criarTarefas ? '1' : '0');
+        // Salva o horário (fica valendo pra próxima vez também) antes de
+        // mandar pra IA -- só depois disso o expediente/almoço usados no
+        // prompt e na validação do servidor batem com o que foi digitado
+        // aqui.
+        salvarHorarioTrabalho(ini, fim, almocoIni, almocoFim).then(function (jsonHorario) {
+            if (!jsonHorario.sucesso) {
+                erroHorarioEl.textContent = jsonHorario.mensagem || 'Não foi possível salvar o horário.';
+                erroHorarioEl.classList.remove('d-none');
+                botaoGerarSugestaoIa.disabled = false;
+                return;
+            }
 
-        fetch(window.location.href, { method: 'POST', body: dados })
-            .then(function (r) { return r.json(); })
-            .then(function (json) {
-                if (!json.sucesso) {
-                    textoEl.textContent = 'Não foi possível gerar: ' + json.mensagem;
-                    return;
-                }
-                if (json.tipo === 'tarefas') {
-                    var partes = [];
-                    if (json.resumo) partes.push(json.resumo);
-                    partes.push(json.totalCriadas + ' tarefa(s) criada(s) na agenda. Atualizando a página...');
-                    textoEl.textContent = partes.join('\n\n');
-                    setTimeout(function () {
-                        window.location.href = '<?= url('agenda.php') ?>?data=' + encodeURIComponent(json.dataFoco || document.getElementById('seletorDataFoco').value);
-                    }, 2200);
-                } else {
-                    textoEl.textContent = json.sugestao;
-                }
-            })
-            .catch(function () { textoEl.textContent = 'Falha de conexão ao gerar a sugestão.'; })
-            .finally(function () { botaoGerarSugestaoIa.disabled = false; });
+            PrimeUI.closeModal(modalSugestaoIa);
+            mostrarOverlayIa();
+
+            var dados = new FormData();
+            dados.set('acao', 'gerar_sugestao_ia');
+            dados.set('ajax', '1');
+            dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
+            dados.set('data', dataReferencia);
+            dados.set('cliente_ids', clienteIdsParam);
+            dados.set('periodo', periodoEscolhido);
+            dados.set('criar_tarefas', criarTarefas ? '1' : '0');
+
+            fetch(window.location.href, { method: 'POST', body: dados })
+                .then(function (r) { return r.json(); })
+                .then(function (json) {
+                    esconderOverlayIa();
+                    botaoGerarSugestaoIa.disabled = false;
+                    if (!json.sucesso) {
+                        alert('Não foi possível gerar: ' + json.mensagem);
+                        return;
+                    }
+                    if (json.tipo === 'tarefas') {
+                        // Já criou as tarefas de verdade -- recarrega a tela
+                        // com tudo atualizado automaticamente (pedido do
+                        // Kleber), mantendo a visão (mês/semana/dia) atual.
+                        var visaoAtual = window.agendaCalendar ? ROTULOS_VISAO[window.agendaCalendar.view.type] : 'semana';
+                        window.location.href = '<?= url('agenda.php') ?>?data=' + encodeURIComponent(json.dataFoco || dataReferencia) + '&visao=' + visaoAtual;
+                    } else {
+                        var painel = document.getElementById('painelSugestaoIa');
+                        document.getElementById('textoSugestaoIa').textContent = json.sugestao;
+                        painel.classList.remove('d-none');
+                    }
+                })
+                .catch(function () {
+                    esconderOverlayIa();
+                    botaoGerarSugestaoIa.disabled = false;
+                    alert('Falha de conexão ao gerar a sugestão.');
+                });
+        }).catch(function () {
+            erroHorarioEl.textContent = 'Falha de conexão ao salvar o horário.';
+            erroHorarioEl.classList.remove('d-none');
+            botaoGerarSugestaoIa.disabled = false;
+        });
     });
     document.getElementById('fecharSugestaoIa').addEventListener('click', function () {
         document.getElementById('painelSugestaoIa').classList.add('d-none');
     });
 
-    // --- Gantt semanal: clique (nova tarefa/remover/status/editar) --------
-    var semanaKanban = document.getElementById('semanaKanban');
+    // --- Calendário (FullCalendar): status/remover/editar/mover/redimensionar
+    // --------------------------------------------------------------------
     var PROXIMO_STATUS = { pendente: 'em_andamento', em_andamento: 'concluida', concluida: 'pendente' };
     var ICONE_STATUS = { pendente: 'bi-circle', em_andamento: 'bi-arrow-repeat', concluida: 'bi-check-circle-fill' };
 
-    semanaKanban.addEventListener('click', function (e) {
-        var botaoAdd = e.target.closest('.agenda-coluna-add');
-        if (botaoAdd) { abrirNovaTarefa(botaoAdd.getAttribute('data-date')); return; }
+    function visaoAtualRotulo() {
+        return window.agendaCalendar ? (ROTULOS_VISAO[window.agendaCalendar.view.type] || 'semana') : 'semana';
+    }
+    // Preserva a visão (mês/semana/dia) atual nos POSTs de verdade (que
+    // navegam/recarregam a página), senão salvar/excluir/responder chamado
+    // sempre voltaria pra visão padrão.
+    ['formTarefaAgenda', 'formResponderChamadoTarefa', 'formExcluirTarefaAgenda'].forEach(function (idForm) {
+        document.getElementById(idForm).addEventListener('submit', function () {
+            var campoVisao = this.querySelector('[name="visao"]');
+            if (campoVisao) campoVisao.value = visaoAtualRotulo();
+        });
+    });
 
+    function persistirMovimentoTarefa(tarefaId, dataIso, horaIso, duracaoMinutos, onErro) {
+        var dados = new FormData();
+        dados.set('acao', 'mover_tarefa');
+        dados.set('ajax', '1');
+        dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
+        dados.set('tarefa_id', tarefaId);
+        dados.set('data', dataIso);
+        dados.set('hora_inicio', horaIso);
+        dados.set('duracao_minutos', duracaoMinutos);
+        fetch(window.location.href, { method: 'POST', body: dados })
+            .then(function (r) { return r.json(); })
+            .then(function (json) { if (!json.sucesso) onErro(); })
+            .catch(onErro);
+    }
+
+    // Clique num card de status/remover troca o ícone/exclui na hora --
+    // funciona tanto pros cards dentro do calendário (via delegação no
+    // eventClick, mais abaixo) quanto pros da faixa "sem horário" (aqui).
+    function tratarCliqueStatus(botaoStatus) {
+        var novoStatus = PROXIMO_STATUS[botaoStatus.getAttribute('data-status')] || 'pendente';
+        var cardStatus = botaoStatus.closest('.agenda-card');
+        var tituloStatus = cardStatus.querySelector('.agenda-card-titulo');
+
+        botaoStatus.setAttribute('data-status', novoStatus);
+        cardStatus.setAttribute('data-status', novoStatus);
+        botaoStatus.querySelector('i').className = 'bi ' + ICONE_STATUS[novoStatus];
+        tituloStatus.classList.toggle('text-decoration-line-through', novoStatus === 'concluida');
+        tituloStatus.classList.toggle('text-muted', novoStatus === 'concluida');
+
+        var dadosStatus = new FormData();
+        dadosStatus.set('acao', 'mudar_status_tarefa');
+        dadosStatus.set('ajax', '1');
+        dadosStatus.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
+        dadosStatus.set('tarefa_id', botaoStatus.getAttribute('data-id'));
+        dadosStatus.set('status', novoStatus);
+        fetch(window.location.href, { method: 'POST', body: dadosStatus }).catch(function () {});
+        return novoStatus;
+    }
+
+    // --- Faixa "sem horário": clique (remover/status/editar) --------------
+    document.getElementById('agendaNaoAgendadasLista').addEventListener('click', function (e) {
         var botaoRemover = e.target.closest('.agenda-card-remover');
         if (botaoRemover) {
             e.stopPropagation();
@@ -1371,39 +1556,18 @@ document.addEventListener('DOMContentLoaded', function () {
         var botaoStatus = e.target.closest('.agenda-card-status');
         if (botaoStatus) {
             e.stopPropagation();
-            var novoStatus = PROXIMO_STATUS[botaoStatus.getAttribute('data-status')] || 'pendente';
-            var cardStatus = botaoStatus.closest('.agenda-card');
-            var tituloStatus = cardStatus.querySelector('.agenda-card-titulo');
-
-            botaoStatus.setAttribute('data-status', novoStatus);
-            cardStatus.setAttribute('data-status', novoStatus);
-            botaoStatus.querySelector('i').className = 'bi ' + ICONE_STATUS[novoStatus];
-            tituloStatus.classList.toggle('text-decoration-line-through', novoStatus === 'concluida');
-            tituloStatus.classList.toggle('text-muted', novoStatus === 'concluida');
-
-            var dadosStatus = new FormData();
-            dadosStatus.set('acao', 'mudar_status_tarefa');
-            dadosStatus.set('ajax', '1');
-            dadosStatus.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
-            dadosStatus.set('tarefa_id', botaoStatus.getAttribute('data-id'));
-            dadosStatus.set('status', novoStatus);
-            fetch(window.location.href, { method: 'POST', body: dadosStatus })
-                .then(function () {
-                    // Concluída some do Gantt ativo (mesma regra do servidor) --
-                    // fluido: reflete na hora, sem precisar recarregar a página.
-                    if (novoStatus === 'concluida') cardStatus.style.display = 'none';
-                })
-                .catch(function () {});
+            var novoStatus = tratarCliqueStatus(botaoStatus);
+            if (novoStatus === 'concluida') botaoStatus.closest('.agenda-card').style.display = 'none';
             return;
         }
 
         var card = e.target.closest('.agenda-card');
         if (!card) return;
-        var coluna = card.closest('.agenda-coluna-dia');
+        var botaoRemoverInfo = card.querySelector('.agenda-card-remover');
         abrirEditarTarefa({
             id: card.getAttribute('data-id'),
             titulo: card.getAttribute('data-titulo'),
-            data: coluna.getAttribute('data-date'),
+            data: botaoRemoverInfo ? botaoRemoverInfo.getAttribute('data-data') : '',
             horaInicio: card.getAttribute('data-hora-inicio'),
             duracaoMinutos: card.getAttribute('data-duracao-minutos'),
             clienteId: card.getAttribute('data-cliente-id'),
@@ -1414,95 +1578,170 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // --- Gantt semanal: arrastar-e-soltar entre dias E entre horários -----
-    // (mesmo padrão HTML5 nativo do dashboard.php, só que agora com
-    // múltiplas colunas E posição vertical = horário). Solta na "grade":
-    // calcula o horário a partir do Y do cursor (arredondado pro slot de
-    // 15min mais próximo). Solta na faixa "sem horário": limpa o horário.
-    // Fluido -- sem confirmação, sem reload -- só ao soltar persiste no
-    // banco.
-    function minutosParaHora(min) {
-        var h = Math.floor(min / 60), m = min % 60;
-        return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
-    }
+    // --- FullCalendar: mês/semana/dia, tudo num só calendário -- pedido do
+    // Kleber: "o gantt precisa ter visibilidade por mês, semana e diário".
+    // Horário exibido em semana/dia = expediente do usuário (Meu horário);
+    // almoço vira um "buraco" no meio do expediente via businessHours (duas
+    // faixas, uma antes e outra depois do almoço) -- sábado/domingo contam
+    // como dia normal (pedido: "deixe gerar tarefa em sábado e domingo
+    // também", o mesmo vale pra tarefa manual). ------------------------------
+    var businessHoursAgenda = [
+        { daysOfWeek: [0, 1, 2, 3, 4, 5, 6], startTime: HORARIO_TRABALHO.expediente_inicio + ':00', endTime: HORARIO_TRABALHO.almoco_inicio + ':00' },
+        { daysOfWeek: [0, 1, 2, 3, 4, 5, 6], startTime: HORARIO_TRABALHO.almoco_fim + ':00', endTime: HORARIO_TRABALHO.expediente_fim + ':00' },
+    ];
 
-    var arrastando = null;
-    var arrastandoDuracao = 60;
-
-    semanaKanban.addEventListener('dragstart', function (e) {
-        var card = e.target.closest('.agenda-card');
-        if (!card) return;
-        arrastando = card;
-        arrastandoDuracao = parseInt(card.getAttribute('data-duracao-minutos'), 10) || 60;
-        card.classList.add('agenda-card-arrastando');
-        e.dataTransfer.effectAllowed = 'move';
-    });
-
-    semanaKanban.addEventListener('dragover', function (e) {
-        if (!arrastando) return;
-        e.preventDefault();
-
-        var colunaAlvo = e.target.closest('.agenda-coluna-dia');
-        if (!colunaAlvo) return;
-        semanaKanban.querySelectorAll('.agenda-coluna-dia-alvo').forEach(function (c) { c.classList.remove('agenda-coluna-dia-alvo'); });
-        colunaAlvo.classList.add('agenda-coluna-dia-alvo');
-
-        var zonaGrade = e.target.closest('.agenda-coluna-grade');
-        if (zonaGrade) {
-            var retanguloGrade = zonaGrade.getBoundingClientRect();
-            var minutoAbsoluto = MIN_EXPEDIENTE_INICIO + (e.clientY - retanguloGrade.top) / PX_POR_MINUTO;
-            minutoAbsoluto = Math.round(minutoAbsoluto / 15) * 15;
-            minutoAbsoluto = Math.max(MIN_EXPEDIENTE_INICIO, Math.min(minutoAbsoluto, MIN_EXPEDIENTE_FIM - arrastandoDuracao));
-
-            if (arrastando.parentElement !== zonaGrade) zonaGrade.appendChild(arrastando);
-            arrastando.style.position = 'absolute';
-            arrastando.style.left = '2px';
-            arrastando.style.right = '2px';
-            arrastando.style.top = ((minutoAbsoluto - MIN_EXPEDIENTE_INICIO) * PX_POR_MINUTO) + 'px';
-            arrastando.style.height = Math.max(30, arrastandoDuracao * PX_POR_MINUTO - 4) + 'px';
-            arrastando.setAttribute('data-hora-inicio', minutosParaHora(minutoAbsoluto));
-            arrastando.classList.toggle('agenda-card-compacta', (arrastandoDuracao * PX_POR_MINUTO - 4) < 75);
-        } else {
-            var zonaNaoAgendada = e.target.closest('.agenda-coluna-naoagendadas');
-            if (zonaNaoAgendada && arrastando.parentElement !== zonaNaoAgendada) {
-                zonaNaoAgendada.appendChild(arrastando);
-                arrastando.style.position = '';
-                arrastando.style.left = '';
-                arrastando.style.right = '';
-                arrastando.style.top = '';
-                arrastando.style.height = '';
-                arrastando.setAttribute('data-hora-inicio', '');
-                arrastando.classList.remove('agenda-card-compacta');
+    var calendarEl = document.getElementById('agendaCalendario');
+    window.agendaCalendar = new FullCalendar.Calendar(calendarEl, {
+        locale: 'pt-br',
+        firstDay: 1,
+        headerToolbar: false,
+        initialView: VISAO_INICIAL,
+        initialDate: DATA_FOCO_INICIAL,
+        slotMinTime: HORARIO_TRABALHO.expediente_inicio + ':00',
+        slotMaxTime: HORARIO_TRABALHO.expediente_fim + ':00',
+        slotDuration: '00:15:00',
+        slotLabelInterval: '01:00:00',
+        allDaySlot: false,
+        nowIndicator: true,
+        editable: true,
+        droppable: true,
+        dayMaxEvents: true,
+        businessHours: businessHoursAgenda,
+        events: EVENTOS_AGENDA,
+        // A altura por visão (views: { timeGridWeek: {height:...} }) não
+        // "pega" nessa versão do FullCalendar -- só a opção height no nível
+        // raiz do calendário funciona de verdade. Por isso a altura certa
+        // pra cada visão é ajustada via setOption() dentro de datesSet, mais
+        // abaixo (roda de novo toda vez que troca de mês/semana/dia).
+        height: ALTURA_GANTT_PX,
+        // Semana/dia: card completo (mesmo visual de sempre, com
+        // logo/avatar/status/remover). Mês: renderização padrão do
+        // FullCalendar (compacta, já colorida por cliente) -- um card
+        // "cheio" não cabe direito numa célula de mês.
+        eventContent: function (arg) {
+            if (arg.view.type === 'dayGridMonth') return;
+            return { html: arg.event.extendedProps.cardHtml };
+        },
+        eventDidMount: function (arg) {
+            // O card reaproveita o HTML da faixa "sem horário" (que é
+            // draggable="true" nativo) -- dentro do calendário quem cuida do
+            // arrasto é o próprio FullCalendar, então tira o atributo pra não
+            // disparar um drag HTML5 nativo por cima.
+            arg.el.querySelectorAll('[draggable]').forEach(function (el) { el.removeAttribute('draggable'); });
+        },
+        eventClick: function (info) {
+            var alvoStatus = info.jsEvent.target.closest('.agenda-card-status');
+            if (alvoStatus) {
+                var novoStatus = tratarCliqueStatus(alvoStatus);
+                if (novoStatus === 'concluida') info.event.remove();
+                return;
             }
-        }
+
+            var alvoRemover = info.jsEvent.target.closest('.agenda-card-remover');
+            if (alvoRemover) {
+                if (!confirm('Excluir essa tarefa da agenda?')) return;
+                document.getElementById('excluirTarefaAgendaId').value = info.event.id;
+                document.getElementById('excluirTarefaAgendaData').value = info.event.startStr.slice(0, 10);
+                document.getElementById('formExcluirTarefaAgenda').submit();
+                return;
+            }
+
+            var props = info.event.extendedProps;
+            abrirEditarTarefa({
+                id: info.event.id,
+                titulo: info.event.title,
+                data: info.event.startStr.slice(0, 10),
+                horaInicio: info.event.startStr.slice(11, 16),
+                duracaoMinutos: props.duracaoMinutos,
+                clienteId: props.clienteId,
+                chamadoId: props.chamadoId,
+                responsavelId: props.responsavelId,
+                notas: props.notas,
+                status: props.status,
+            });
+        },
+        dateClick: function (info) {
+            var dataIso = info.dateStr.slice(0, 10);
+            var horaIso = info.allDay ? '' : info.dateStr.slice(11, 16);
+            abrirNovaTarefa(dataIso, horaIso);
+        },
+        eventDrop: function (info) {
+            var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
+            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () { info.revert(); });
+        },
+        eventResize: function (info) {
+            var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
+            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () { info.revert(); });
+        },
+        // Arrastou um card da faixa "sem horário" pra dentro do calendário --
+        // dá um horário na hora, persiste e some da faixa.
+        eventReceive: function (info) {
+            var duracaoMin = Math.round((info.event.end - info.event.start) / 60000);
+            var trayCard = document.querySelector('#agendaNaoAgendadasLista .agenda-card[data-id="' + info.event.id + '"]');
+            persistirMovimentoTarefa(info.event.id, info.event.startStr.slice(0, 10), info.event.startStr.slice(11, 16), duracaoMin, function () {
+                info.event.remove();
+                alert('Não foi possível agendar essa tarefa.');
+            });
+            if (trayCard) {
+                trayCard.remove();
+                var lista = document.getElementById('agendaNaoAgendadasLista');
+                if (!lista.querySelector('.agenda-card')) {
+                    lista.innerHTML = '<p class="text-muted small mb-0">Nenhuma -- toda tarefa já tem horário.</p>';
+                }
+            }
+        },
+        datesSet: function (info) {
+            document.getElementById('agendaTituloPeriodo').textContent = info.view.title;
+            document.querySelectorAll('#agendaGrupoVisao button').forEach(function (btn) {
+                btn.classList.toggle('active', btn.getAttribute('data-visao') === info.view.type);
+            });
+            var dataAtual = window.agendaCalendar.getDate().toISOString().slice(0, 10);
+            document.getElementById('seletorDataFoco').value = dataAtual;
+            var novaUrl = '<?= url('agenda.php') ?>?data=' + dataAtual + '&visao=' + (ROTULOS_VISAO[info.view.type] || 'semana');
+            window.history.replaceState(null, '', novaUrl);
+
+            // Altura por visão -- ver comentário acima de "height:" na
+            // criação do calendário.
+            var alturaAlvo = info.view.type === 'dayGridMonth' ? 700 : ALTURA_GANTT_PX;
+            if (window.agendaCalendar.getOption('height') !== alturaAlvo) {
+                window.agendaCalendar.setOption('height', alturaAlvo);
+            }
+        },
+    });
+    window.agendaCalendar.render();
+
+    // Arrastar da faixa "sem horário" pra dentro do calendário.
+    new FullCalendar.Draggable(document.getElementById('agendaNaoAgendadasLista'), {
+        itemSelector: '.agenda-card',
+        eventData: function (el) {
+            var duracaoMin = parseInt(el.getAttribute('data-duracao-minutos'), 10) || 60;
+            var h = Math.floor(duracaoMin / 60), m = duracaoMin % 60;
+            var corCliente = el.style.borderLeftColor || '#8a94a6';
+            return {
+                id: el.getAttribute('data-id'),
+                title: el.getAttribute('data-titulo'),
+                duration: (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m,
+                backgroundColor: corCliente,
+                borderColor: corCliente,
+                textColor: '#fff',
+                extendedProps: {
+                    clienteId: el.getAttribute('data-cliente-id') || '',
+                    responsavelId: el.getAttribute('data-responsavel-id') || '',
+                    chamadoId: el.getAttribute('data-chamado-id') || '',
+                    duracaoMinutos: duracaoMin,
+                    notas: el.getAttribute('data-notas') || '',
+                    status: el.getAttribute('data-status') || 'pendente',
+                    cardHtml: el.outerHTML,
+                },
+            };
+        },
     });
 
-    semanaKanban.addEventListener('dragend', function () {
-        if (!arrastando) return;
-        arrastando.classList.remove('agenda-card-arrastando');
-        semanaKanban.querySelectorAll('.agenda-coluna-dia-alvo').forEach(function (c) { c.classList.remove('agenda-coluna-dia-alvo'); });
-        arrastando = null;
-
-        var mudancas = [];
-        semanaKanban.querySelectorAll('.agenda-coluna-dia').forEach(function (coluna) {
-            var dataColuna = coluna.getAttribute('data-date');
-            var indice = 0;
-            coluna.querySelectorAll('.agenda-card').forEach(function (card) {
-                mudancas.push({
-                    id: parseInt(card.getAttribute('data-id'), 10),
-                    data: dataColuna,
-                    hora_inicio: card.getAttribute('data-hora-inicio') || null,
-                    ordem: indice++,
-                });
-            });
-        });
-
-        var dados = new FormData();
-        dados.set('acao', 'reordenar_tarefas');
-        dados.set('ajax', '1');
-        dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
-        dados.set('mudancas', JSON.stringify(mudancas));
-        fetch(window.location.href, { method: 'POST', body: dados }).catch(function () {});
+    document.getElementById('agendaBotaoHoje').addEventListener('click', function () { window.agendaCalendar.today(); });
+    document.getElementById('agendaBotaoAnterior').addEventListener('click', function () { window.agendaCalendar.prev(); });
+    document.getElementById('agendaBotaoProximo').addEventListener('click', function () { window.agendaCalendar.next(); });
+    document.querySelectorAll('#agendaGrupoVisao button').forEach(function (btn) {
+        btn.addEventListener('click', function () { window.agendaCalendar.changeView(btn.getAttribute('data-visao')); });
     });
 });
 </script>
