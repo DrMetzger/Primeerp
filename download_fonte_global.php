@@ -2,9 +2,9 @@
 
 /**
  * Download de um fonte/patch da biblioteca GERAL (fontes.php, tabela
- * fontes_globais) -- não é dado de cliente nenhum, então basta estar
- * logado na equipe (mesmo padrão de acesso da própria fontes.php), sem a
- * trava de Auth::podeAcessarDadosSensiveis() usada em download_fonte_advpl.php.
+ * fontes_globais) -- mesma trava de acesso da própria fontes.php:
+ * Auth::requireAdmin() (colaborador não tem acesso a essa biblioteca geral,
+ * só à aba "Fontes ADVPL" de dentro de cada cliente).
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -13,7 +13,7 @@ use AdminPrime\Auth;
 use AdminPrime\Database;
 use AdminPrime\Migrations;
 
-Auth::requireLogin();
+Auth::requireAdmin();
 
 $pdo = Database::connection();
 

@@ -1948,6 +1948,18 @@ a.card-cliente, a.card-cliente:hover {
     border-color: var(--ph-primary);
     background-color: var(--ph-primary-light);
 }
+/* Estado PERSISTENTE de "já tem arquivo escolhido" -- diferente do
+   -sobre acima (que é só o instante de arrastar por cima, some assim que
+   solta ou sai). Sem isso, depois de escolher/soltar o arquivo a caixa
+   voltava exatamente à cor de antes (só o nome pequeno embaixo mudava),
+   fácil de achar que não tinha funcionado (relato real: "não dá pra ver
+   que foi"). Fica ligado até enviar o formulário ou remover o arquivo. */
+.dropzone-arquivo.dropzone-arquivo-tem-arquivo {
+    border-style: solid;
+    border-color: var(--ph-success);
+    background-color: rgba(22, 163, 74, .08);
+}
+.dropzone-arquivo.dropzone-arquivo-tem-arquivo .dropzone-arquivo-icone { color: var(--ph-success); }
 .dropzone-arquivo-input {
     position: absolute;
     width: 1px; height: 1px;

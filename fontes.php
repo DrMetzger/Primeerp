@@ -5,9 +5,12 @@
  * organizada por categoria/departamento -- pedido do Kleber. Diferente da
  * aba "Fontes ADVPL" de cliente.php (que é o fonte DESSE cliente/setor
  * específico): aqui é fonte/patch de uso geral, não vinculado a nenhum
- * cliente, pra reaproveitar entre projetos. Aberto a qualquer um da equipe
- * logado (não é dado de cliente nenhum, então não passa pela mesma trava de
- * Auth::podeAcessarDadosSensiveis() do cofre de Acessos/Fontes ADVPL).
+ * cliente, pra reaproveitar entre projetos. Restrito a admin/diretor/CEO --
+ * pedido explícito do Kleber: "colaborador não pode ter acesso aos fontes,
+ * somente os fontes que são disponibilizados para os clientes" (ou seja,
+ * colaborador continua vendo só a aba "Fontes ADVPL" de dentro de cada
+ * cliente, que já é escopada por vínculo/apenasProprios() -- essa
+ * biblioteca GERAL fica de fora do alcance dele por completo).
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -15,7 +18,7 @@ require_once __DIR__ . '/bootstrap.php';
 use AdminPrime\Auth;
 use AdminPrime\Database;
 
-Auth::requireLogin();
+Auth::requireAdmin();
 
 $pdo = Database::connection();
 
@@ -25,47 +28,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'criar_fonte_global') {
         $categoria = $_POST['categoria'] ?? '';
-        $nome = trim($_POST['nome'] ?? '');
+        $nomeDigitado = trim($_POST['nome'] ?? '');
         $descricao = trim($_POST['descricao'] ?? '') ?: null;
 
         if (!array_key_exists($categoria, FONTES_GLOBAIS_CATEGORIAS)) {
             flash_set('erro', 'Categoria inválida.');
-        } elseif ($nome === '') {
-            flash_set('erro', 'Informe o nome do fonte/patch.');
-        } elseif (empty($_FILES['arquivo']['name'])) {
-            flash_set('erro', 'Escolha um arquivo.');
-        } elseif ($_FILES['arquivo']['error'] !== UPLOAD_ERR_OK) {
-            flash_set('erro', 'Falha no upload do arquivo.');
-        } elseif ($_FILES['arquivo']['size'] > UPLOADS_MAX_SIZE) {
-            flash_set('erro', 'Arquivo maior que o limite permitido (' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB).');
+        } elseif (empty($_FILES['arquivo']['name'][0] ?? '')) {
+            flash_set('erro', 'Escolha ao menos um arquivo.');
         } else {
-            $extensao = strtolower(pathinfo($_FILES['arquivo']['name'], PATHINFO_EXTENSION));
-            if (!in_array($extensao, FONTES_GLOBAIS_EXTENSOES_PERMITIDAS, true)) {
-                flash_set('erro', 'Só é permitido enviar arquivos .prw, .prx, .tlpp ou .ptm.');
-            } else {
-                $dirFontesGlobais = UPLOADS_DIR . '/fontes_globais';
-                if (!is_dir($dirFontesGlobais)) {
-                    mkdir($dirFontesGlobais, 0755, true);
+            // Aceita VÁRIOS arquivos de uma vez (pedido do Kleber: "precisa
+            // poder ir acumulando arquivos e depois enviar todos de uma vez
+            // só") -- cada arquivo vira um registro próprio. O nome digitado
+            // só faz sentido pra 1 arquivo (não dá pra usar o MESMO nome em
+            // vários fontes diferentes); em lote, ignora o campo e usa o
+            // nome de cada arquivo (sem extensão).
+            $arquivos = $_FILES['arquivo'];
+            $quantidade = count($arquivos['name']);
+            $erros = [];
+            $cadastrados = 0;
+
+            $dirFontesGlobais = UPLOADS_DIR . '/fontes_globais';
+            if (!is_dir($dirFontesGlobais)) {
+                mkdir($dirFontesGlobais, 0755, true);
+            }
+
+            for ($i = 0; $i < $quantidade; $i++) {
+                $nomeOriginal = $arquivos['name'][$i];
+                if ($arquivos['error'][$i] === UPLOAD_ERR_NO_FILE) {
+                    continue;
                 }
+                if ($arquivos['error'][$i] !== UPLOAD_ERR_OK) {
+                    $erros[] = 'Falha no upload de "' . $nomeOriginal . '".';
+                    continue;
+                }
+                if ($arquivos['size'][$i] > UPLOADS_MAX_SIZE) {
+                    $erros[] = '"' . $nomeOriginal . '" passa do limite de ' . (int) (UPLOADS_MAX_SIZE / 1024 / 1024) . 'MB.';
+                    continue;
+                }
+                $extensao = strtolower(pathinfo($nomeOriginal, PATHINFO_EXTENSION));
+                if (!in_array($extensao, FONTES_GLOBAIS_EXTENSOES_PERMITIDAS, true)) {
+                    $erros[] = '"' . $nomeOriginal . '" não é .prw, .prx, .tlpp ou .ptm.';
+                    continue;
+                }
+
                 $nomeArmazenado = bin2hex(random_bytes(16)) . '.' . $extensao;
                 $destino = $dirFontesGlobais . '/' . $nomeArmazenado;
 
-                if (!move_uploaded_file($_FILES['arquivo']['tmp_name'], $destino)) {
-                    flash_set('erro', 'Não foi possível salvar o arquivo no servidor.');
-                } else {
-                    $pdo->prepare('INSERT INTO fontes_globais (categoria, nome, descricao, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-                        ->execute([
-                            $categoria,
-                            $nome,
-                            $descricao,
-                            $_FILES['arquivo']['name'],
-                            'fontes_globais/' . $nomeArmazenado,
-                            $_FILES['arquivo']['size'],
-                            file_get_contents($destino),
-                            Auth::userId(),
-                        ]);
-                    flash_set('sucesso', 'Fonte/patch cadastrado.');
+                if (!move_uploaded_file($arquivos['tmp_name'][$i], $destino)) {
+                    $erros[] = 'Não foi possível salvar "' . $nomeOriginal . '" no servidor.';
+                    continue;
                 }
+
+                $nomeFonte = ($quantidade === 1 && $nomeDigitado !== '') ? $nomeDigitado : pathinfo($nomeOriginal, PATHINFO_FILENAME);
+
+                $pdo->prepare('INSERT INTO fontes_globais (categoria, nome, descricao, arquivo_nome_original, arquivo_caminho, arquivo_tamanho, dados, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([
+                        $categoria,
+                        $nomeFonte,
+                        $descricao,
+                        $nomeOriginal,
+                        'fontes_globais/' . $nomeArmazenado,
+                        $arquivos['size'][$i],
+                        file_get_contents($destino),
+                        Auth::userId(),
+                    ]);
+                $cadastrados++;
+            }
+
+            if ($cadastrados > 0) {
+                $mensagem = $cadastrados === 1 ? 'Fonte/patch cadastrado.' : $cadastrados . ' fontes/patches cadastrados.';
+                flash_set($erros ? 'erro' : 'sucesso', $erros ? $mensagem . ' Mas: ' . implode(' ', $erros) : $mensagem);
+            } else {
+                flash_set('erro', $erros ? implode(' ', $erros) : 'Nenhum arquivo válido enviado.');
             }
         }
     }
@@ -219,25 +253,26 @@ require __DIR__ . '/templates/header.php';
 <div class="mb-5 secao-categoria-fontes-globais" id="cat-<?= e($slugCat) ?>">
     <h5 class="text-uppercase text-muted small fw-bold mb-2"><i class="bi bi-folder2"></i> <?= e($labelCat) ?> <span class="badge bg-secondary"><?= count($fontesCat) ?></span></h5>
 
-    <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3 card card-stat p-3">
+    <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3 card card-stat p-3 form-criar-fonte-global">
         <?= csrf_field() ?>
         <input type="hidden" name="acao" value="criar_fonte_global">
         <input type="hidden" name="categoria" value="<?= e($slugCat) ?>">
         <div class="col-md-3">
             <label class="form-label small mb-1">Nome do fonte/patch</label>
-            <input type="text" name="nome" class="form-control form-control-sm" placeholder="Ex.: U_MEUFONTE01" required>
+            <input type="text" name="nome" class="form-control form-control-sm" placeholder="Ex.: U_MEUFONTE01">
+            <span class="text-muted d-block" style="font-size:.72rem;">Em branco = usa o nome de cada arquivo (obrigatório só se digitar um nome com vários arquivos escolhidos).</span>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label small mb-1">Descrição</label>
             <input type="text" name="descricao" class="form-control form-control-sm" placeholder="O que esse fonte/patch faz">
         </div>
-        <div class="col-md-4">
-            <label class="dropzone-arquivo dropzone-arquivo-sm mb-0">
-                <input type="file" name="arquivo" class="dropzone-arquivo-input" accept="<?= e(FONTES_GLOBAIS_ACCEPT_HTML) ?>" required>
+        <div class="col-md-5">
+            <label class="dropzone-arquivo dropzone-arquivo-sm dropzone-arquivo-multi mb-1">
+                <input type="file" name="arquivo[]" class="dropzone-arquivo-input" accept="<?= e(FONTES_GLOBAIS_ACCEPT_HTML) ?>" multiple>
                 <i class="bi bi-cloud-arrow-up dropzone-arquivo-icone"></i>
-                <span class="dropzone-arquivo-texto">Arraste o arquivo aqui ou <strong>clique para escolher</strong></span>
-                <span class="dropzone-arquivo-nome text-muted small"></span>
+                <span class="dropzone-arquivo-texto">Arraste os arquivos aqui ou <strong>clique para escolher</strong> -- pode escolher vários de uma vez, ou repetir pra ir acumulando</span>
             </label>
+            <ul class="lista-arquivos-fonte-pendentes list-unstyled small mb-0"></ul>
         </div>
         <div class="col-md-1">
             <button type="submit" class="btn btn-sm btn-dark w-100" title="Cadastrar"><i class="bi bi-plus-lg"></i></button>
@@ -340,19 +375,11 @@ require __DIR__ . '/templates/header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    // Arrastar-e-soltar do arquivo (mesmo padrão de cliente.php: o clique já
-    // funciona sozinho por o <input> ficar DENTRO do <label>, só falta o
-    // drag-and-drop em si e mostrar o nome do arquivo escolhido).
-    document.querySelectorAll('.dropzone-arquivo').forEach(function (zona) {
-        var inputArquivoZona = zona.querySelector('.dropzone-arquivo-input');
-        var nomeArquivoEl = zona.querySelector('.dropzone-arquivo-nome');
-
-        function mostrarArquivoEscolhido() {
-            var arquivo = inputArquivoZona.files[0];
-            nomeArquivoEl.textContent = arquivo ? (arquivo.name + ' (' + (arquivo.size / 1024 / 1024).toFixed(1) + ' MB)') : '';
-        }
-        inputArquivoZona.addEventListener('change', mostrarArquivoEscolhido);
-
+    // Arrastar-e-soltar genérico: alterna a classe de "arrastando por cima"
+    // em qualquer .dropzone-arquivo (funciona igual pro modal de editar --
+    // single -- e pro formulário de cadastro em lote -- multi, tratado à
+    // parte logo abaixo).
+    function ligarDragDropGenerico(zona, aoSoltar) {
         ['dragenter', 'dragover'].forEach(function (evento) {
             zona.addEventListener(evento, function (e) {
                 e.preventDefault();
@@ -368,10 +395,93 @@ document.addEventListener('DOMContentLoaded', function () {
         zona.addEventListener('drop', function (e) {
             e.preventDefault();
             zona.classList.remove('dropzone-arquivo-sobre');
-            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-                inputArquivoZona.files = e.dataTransfer.files;
-                mostrarArquivoEscolhido();
+            var arquivos = (e.dataTransfer || {}).files;
+            if (arquivos && arquivos.length) {
+                aoSoltar(arquivos);
             }
+        });
+    }
+
+    // Modal de editar (single) -- clique já funciona sozinho (o <input> fica
+    // DENTRO do <label>), só falta o drag-and-drop e mostrar o nome do
+    // arquivo escolhido. Além do texto, liga a classe "tem-arquivo" (cor
+    // persistente, ver style.css) -- só o texto pequeno embaixo mudar era
+    // fácil de não perceber que o arquivo realmente entrou (relato real:
+    // "não dá pra ver que foi").
+    document.querySelectorAll('.dropzone-arquivo:not(.dropzone-arquivo-multi)').forEach(function (zona) {
+        var inputArquivoZona = zona.querySelector('.dropzone-arquivo-input');
+        var nomeArquivoEl = zona.querySelector('.dropzone-arquivo-nome');
+
+        function mostrarArquivoEscolhido() {
+            var arquivo = inputArquivoZona.files[0];
+            nomeArquivoEl.textContent = arquivo ? (arquivo.name + ' (' + (arquivo.size / 1024 / 1024).toFixed(1) + ' MB)') : '';
+            zona.classList.toggle('dropzone-arquivo-tem-arquivo', !!arquivo);
+        }
+        inputArquivoZona.addEventListener('change', mostrarArquivoEscolhido);
+        ligarDragDropGenerico(zona, function (arquivos) {
+            inputArquivoZona.files = arquivos;
+            mostrarArquivoEscolhido();
+        });
+    });
+
+    // Formulário de cadastro em lote (multi) -- pedido do Kleber: "precisa
+    // poder ir acumulando arquivos e depois enviar todos de uma vez só,
+    // quando clico e arrasto só vai um e fica sobrescrevendo". Cada clique/
+    // solta ACRESCENTA à lista (em vez de substituir o que já tinha
+    // escolhido) -- a lista de verdade (arquivosNaLista) é sincronizada de
+    // volta no <input type="file" multiple> via DataTransfer, então o
+    // "Cadastrar" do formulário já manda tudo junto de uma vez, sem precisar
+    // de um botão "enviar" no meio do caminho.
+    document.querySelectorAll('.dropzone-arquivo-multi').forEach(function (zona) {
+        var inputArquivoZona = zona.querySelector('.dropzone-arquivo-input');
+        var lista = zona.parentElement.querySelector('.lista-arquivos-fonte-pendentes');
+        var arquivosNaLista = [];
+
+        function sincronizarInput() {
+            var dt = new DataTransfer();
+            arquivosNaLista.forEach(function (f) { dt.items.add(f); });
+            inputArquivoZona.files = dt.files;
+            zona.classList.toggle('dropzone-arquivo-tem-arquivo', arquivosNaLista.length > 0);
+        }
+
+        function renderizarLista() {
+            lista.innerHTML = '';
+            arquivosNaLista.forEach(function (arquivo, indice) {
+                var li = document.createElement('li');
+                li.className = 'd-flex align-items-center gap-1 text-muted';
+                li.innerHTML = '<i class="bi bi-file-earmark-code"></i> <span class="flex-grow-1 text-truncate">' + arquivo.name + '</span>'
+                    + '<button type="button" class="btn-close btn-close-sm" aria-label="Remover" data-indice="' + indice + '"></button>';
+                lista.appendChild(li);
+            });
+        }
+
+        function adicionarArquivos(novosArquivos) {
+            arquivosNaLista = arquivosNaLista.concat(Array.from(novosArquivos));
+            renderizarLista();
+            sincronizarInput();
+        }
+
+        inputArquivoZona.addEventListener('change', function () {
+            if (inputArquivoZona.files && inputArquivoZona.files.length) {
+                adicionarArquivos(inputArquivoZona.files);
+            }
+        });
+        ligarDragDropGenerico(zona, adicionarArquivos);
+
+        lista.addEventListener('click', function (e) {
+            var botaoRemover = e.target.closest('[data-indice]');
+            if (!botaoRemover) return;
+            arquivosNaLista.splice(parseInt(botaoRemover.dataset.indice, 10), 1);
+            renderizarLista();
+            sincronizarInput();
+        });
+
+        // Limpa a lista depois de enviar o formulário (senão, ao voltar pra
+        // essa mesma página via cache do navegador -- "voltar" no menu --
+        // a lista em memória ficava presa, mas o <input> real já tinha sido
+        // resetado pelo navegador, ficando os dois campos incoerentes).
+        zona.closest('form').addEventListener('submit', function () {
+            arquivosNaLista = [];
         });
     });
 
