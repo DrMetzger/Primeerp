@@ -2024,14 +2024,15 @@ a.card-cliente, a.card-cliente:hover {
 }
 
 /* ---------------------------------------------------------- Agenda (gestão)
-   Gráfico de Gantt por horário (ver agenda.php) -- pedido do Kleber depois de
-   ver a primeira versão (lista simples por dia): precisa organizar por HORA
-   dentro do expediente, arrastar entre dias E entre horários de forma
-   fluida, e enxergar o almoço bloqueado. 1px = 1 minuto (ver
-   AGENDA_PX_POR_MINUTO em agenda.php), então a altura de cada card já sai
-   proporcional à duração direto do PHP -- não precisa reescalar em JS.
-   Cabeçalho da coluna e a faixa "sem horário" têm altura FIXA (mesmos
-   valores que agenda.php usa pra alinhar a régua de horas -- ver
+   Gráfico de Gantt por horário (ver agenda.php) -- depois da primeira versão
+   ("ainda está muito ruim" -- cards colados/cortados, título quebrando linha
+   e vazando pra fora do card, faixa "sem horário" baixa demais cortando o
+   card no meio), essa versão aumentou a escala (AGENDA_PX_POR_MINUTO = 1.5,
+   não 1px/min) e deixa um respiro entre cards vizinhos
+   (AGENDA_GAP_CARD_PX), então a altura de cada card já sai proporcional +
+   com folga direto do PHP -- não precisa reescalar em JS. Cabeçalho da
+   coluna e a faixa "sem horário" têm altura FIXA (mesmos valores que
+   agenda.php usa pra alinhar a régua de horas -- ver
    $alturaCabecalhoColunaPx/$alturaZonaNaoAgendadaPx), senão a régua
    compartilhada desalinha da grade de cada coluna. */
 .agenda-gantt-wrapper { display: flex; gap: .4rem; align-items: flex-start; }
@@ -2050,7 +2051,7 @@ a.card-cliente, a.card-cliente:hover {
 .agenda-semana-kanban { display: flex; gap: .6rem; overflow-x: auto; padding-bottom: .5rem; flex: 1 1 auto; min-width: 0; }
 
 .agenda-coluna-dia {
-    flex: 0 0 210px;
+    flex: 0 0 250px;
     display: flex;
     flex-direction: column;
     background-color: var(--ph-surface);
@@ -2084,7 +2085,7 @@ a.card-cliente, a.card-cliente:hover {
 .agenda-coluna-grade {
     position: relative;
     box-sizing: border-box;
-    background-image: repeating-linear-gradient(to bottom, var(--ph-border) 0, var(--ph-border) 1px, transparent 1px, transparent 60px);
+    background-image: repeating-linear-gradient(to bottom, var(--ph-border) 0, var(--ph-border) 1px, transparent 1px, transparent 90px);
 }
 
 .agenda-almoco {
@@ -2103,7 +2104,7 @@ a.card-cliente, a.card-cliente:hover {
     border-radius: var(--ph-radius-sm);
     box-shadow: var(--ph-elev-1);
     border-left: 4px solid var(--ph-border);
-    padding: .3rem 1.2rem .3rem .45rem;
+    padding: .35rem 1.3rem .35rem .5rem;
     cursor: pointer;
     overflow: hidden;
     font-size: .78rem;
@@ -2112,11 +2113,21 @@ a.card-cliente, a.card-cliente:hover {
 .agenda-card:hover { box-shadow: var(--ph-elev-2); z-index: 5; }
 .agenda-card.agenda-card-arrastando { opacity: .4; }
 .agenda-card-compacta .agenda-card-notas,
-.agenda-card-compacta .badge { display: none; }
+.agenda-card-compacta .agenda-card-meta { display: none; }
 
 .agenda-card-horario { font-size: .68rem; font-weight: 700; color: var(--ph-text-muted); }
 .agenda-card-topo { display: flex; align-items: flex-start; gap: .35rem; }
-.agenda-card-titulo { font-weight: 600; overflow-wrap: anywhere; }
+
+.agenda-card-titulo {
+    font-weight: 600;
+    /* Uma linha só com "..." no fim em vez de quebrar e ser cortado no meio
+       pela altura do card (era o principal motivo do layout parecer
+       quebrado antes) -- o título completo sempre dá pra ver abrindo a
+       tarefa pra editar. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 .agenda-card-status {
     border: none;
@@ -2129,6 +2140,13 @@ a.card-cliente, a.card-cliente:hover {
     margin-top: .1rem;
 }
 .agenda-card-status:hover { color: var(--ph-primary); }
+
+/* Avatar de quem tá atendendo (responsável) -- "preciso poder atribuir no
+   Gantt quem está atendendo (Kleber/Petronilho/Caio), preciso ter essa
+   visualização" -- pedido do Kleber. Menor que o avatar padrão do sistema
+   (32px) pra caber no cabeçalho apertado do card. */
+.agenda-card-responsavel { flex-shrink: 0; margin-top: .05rem; }
+.agenda-card-responsavel .avatar-circle { width: 18px; height: 18px; font-size: .58rem; }
 
 .agenda-card-remover {
     position: absolute;
@@ -2143,6 +2161,30 @@ a.card-cliente, a.card-cliente:hover {
     opacity: .4;
 }
 .agenda-card-remover:hover { opacity: 1; color: var(--ph-danger); }
+
+/* Linha do cliente (logo + nome) e referência do chamado -- pedido do
+   Kleber: "o avatar do cliente no Gantt precisa ser maior, precisa ter o
+   logo do cliente" -- trocou o badge de texto colorido por um logo de
+   verdade (ou círculo com a inicial, se o cliente não tiver logo
+   cadastrado), bem maior e mais fácil de reconhecer de relance. */
+.agenda-card-meta { display: flex; align-items: center; gap: .35rem; margin-top: .3rem; min-width: 0; }
+.agenda-card-cliente-logo-wrap {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background-color: var(--ph-neutral-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: .75rem;
+    color: #fff;
+}
+.agenda-card-cliente-logo { max-width: 100%; max-height: 100%; object-fit: contain; }
+.agenda-card-cliente-nome { font-size: .74rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agenda-card-chamado-ref { font-size: .7rem; color: var(--ph-text-muted); flex-shrink: 0; white-space: nowrap; }
 
 .agenda-card-notas {
     margin: .3rem 0 0;

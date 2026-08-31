@@ -1207,6 +1207,17 @@ class Migrations
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_expediente_fim TIME NULL COMMENT 'Fim do expediente pra régua de horas da Agenda (NULL = usa padrão 18:00)'");
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_almoco_inicio TIME NULL COMMENT 'Início do almoço pra régua de horas da Agenda (NULL = usa padrão 12:00)'");
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_almoco_fim TIME NULL COMMENT 'Fim do almoço pra régua de horas da Agenda (NULL = usa padrão 13:00)'");
+
+        // Pedido do Kleber: "pode-se atribuir também no gantt quem está
+        // atendendo (Kleber/Petronilho/Caio)" -- cada tarefa agora pode ter
+        // um responsável (um dos usuários de gestão), mostrado como avatar
+        // no card. NULL só acontece pra tarefa antiga de antes dessa coluna
+        // existir, ou se o responsável foi excluído depois (ON DELETE SET
+        // NULL, não perde a tarefa).
+        $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS responsavel_id INT NULL AFTER chamado_id");
+        if (!$pdo->query("SHOW KEYS FROM agenda_tarefas WHERE Key_name = 'fk_agenda_tarefas_responsavel'")->fetch()) {
+            $pdo->exec('ALTER TABLE agenda_tarefas ADD CONSTRAINT fk_agenda_tarefas_responsavel FOREIGN KEY (responsavel_id) REFERENCES usuarios(id) ON DELETE SET NULL');
+        }
     }
 
     /**

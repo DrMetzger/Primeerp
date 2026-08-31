@@ -3,16 +3,18 @@
 /**
  * Agenda de trabalho da gestão -- pedido do Kleber: ele tem todos os
  * chamados cadastrados mas fica perdido em qual cliente atender primeiro.
- * Virou um gráfico de Gantt de verdade: cada tarefa tem horário de início e
+ * Gráfico de Gantt por horário: cada tarefa tem horário de início e
  * duração, organizada dentro do expediente (cada gestor define o próprio
- * horário de trabalho e almoço -- ver "Meu horário"). Ele (e o Petronilho,
- * mesmo quadro compartilhado -- não é agenda pessoal de cada um) monta a
- * semana arrastando os cards entre dias E entre horários. Um calendário
- * mensal (reaproveitando o componente já usado pros treinamentos, ver
- * assets/js/calendario_visual.js) dá a visão geral pra navegar/criar/editar
- * rápido; o Gantt da semana logo abaixo é onde acontece a organização de
- * verdade. Só admin/diretor/CEO usam isso por enquanto ("colaborador não
- * precisa").
+ * horário de trabalho e almoço -- ver "Meu horário"), pode ter um
+ * responsável da gestão atribuído (avatar no card) e, se estiver ligada a
+ * um chamado, dá pra responder e encerrar o chamado direto por aqui. Ele (e
+ * o Petronilho/Caio, mesmo quadro compartilhado -- não é agenda pessoal de
+ * cada um) monta a semana arrastando os cards entre dias E entre horários.
+ * Um calendário mensal (reaproveitando o componente já usado pros
+ * treinamentos, ver assets/js/calendario_visual.js) dá a visão geral pra
+ * navegar/criar/editar rápido; o Gantt da semana logo abaixo é onde
+ * acontece a organização de verdade. Só admin/diretor/CEO usam isso por
+ * enquanto ("colaborador não precisa").
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -20,11 +22,20 @@ require_once __DIR__ . '/bootstrap.php';
 use AdminPrime\Auth;
 use AdminPrime\AiSugestoes;
 use AdminPrime\Database;
+use AdminPrime\Notificacoes;
 
 const MESES_ABREV_PT_AGENDA = ['', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const MESES_PT_AGENDA = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const DIAS_SEMANA_ABREV_PT_AGENDA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const AGENDA_DURACAO_PADRAO_MINUTOS = 60;
 const AGENDA_DURACOES_OPCOES = [30 => '0h30', 45 => '0h45', 60 => '1h', 90 => '1h30', 120 => '2h', 180 => '3h', 240 => '4h'];
+// 1 minuto de expediente = 1.5px de altura no Gantt -- dá espaço de sobra
+// pro título/logo/badge de cada card sem cortar (na primeira versão, 1px/min
+// deixava tudo cortado e colado -- "ainda está muito ruim", pedido do
+// Kleber). Um pequeno respiro (AGENDA_GAP_CARD_PX) entre cards vizinhos
+// evita a sensação de tudo grudado quando o dia está cheio.
+const AGENDA_PX_POR_MINUTO = 1.5;
+const AGENDA_GAP_CARD_PX = 4;
 
 /**
  * Horário de trabalho/almoço do usuário logado (NULL = ainda não configurou,
@@ -65,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $clienteId = (int) ($_POST['cliente_id'] ?? 0) ?: null;
         $chamadoId = (int) ($_POST['chamado_id'] ?? 0) ?: null;
+        $responsavelId = (int) ($_POST['responsavel_id'] ?? 0) ?: null;
         $notas = trim($_POST['notas'] ?? '') ?: null;
 
         if ($titulo === '' || !$data || !strtotime($data)) {
@@ -74,8 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmtOrdemMax->execute([$data]);
             $ordemMax = (int) $stmtOrdemMax->fetchColumn();
 
-            $pdo->prepare('INSERT INTO agenda_tarefas (data, hora_inicio, duracao_minutos, ordem, titulo, cliente_id, chamado_id, notas, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                ->execute([$data, $horaInicio, $duracaoMinutos, $ordemMax + 1, $titulo, $clienteId, $chamadoId, $notas, Auth::userId()]);
+            $pdo->prepare('INSERT INTO agenda_tarefas (data, hora_inicio, duracao_minutos, ordem, titulo, cliente_id, chamado_id, responsavel_id, notas, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$data, $horaInicio, $duracaoMinutos, $ordemMax + 1, $titulo, $clienteId, $chamadoId, $responsavelId, $notas, Auth::userId()]);
             flash_set('sucesso', 'Tarefa adicionada na agenda.');
         }
     }
@@ -92,14 +104,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $clienteId = (int) ($_POST['cliente_id'] ?? 0) ?: null;
         $chamadoId = (int) ($_POST['chamado_id'] ?? 0) ?: null;
+        $responsavelId = (int) ($_POST['responsavel_id'] ?? 0) ?: null;
         $notas = trim($_POST['notas'] ?? '') ?: null;
         $status = in_array($_POST['status'] ?? '', ['pendente', 'em_andamento', 'concluida'], true) ? $_POST['status'] : 'pendente';
 
         if ($titulo === '' || !$data || !strtotime($data)) {
             flash_set('erro', 'Informe um título e uma data válida.');
         } else {
-            $pdo->prepare('UPDATE agenda_tarefas SET titulo=?, data=?, hora_inicio=?, duracao_minutos=?, cliente_id=?, chamado_id=?, notas=?, status=? WHERE id=?')
-                ->execute([$titulo, $data, $horaInicio, $duracaoMinutos, $clienteId, $chamadoId, $notas, $status, $tarefaId]);
+            $pdo->prepare('UPDATE agenda_tarefas SET titulo=?, data=?, hora_inicio=?, duracao_minutos=?, cliente_id=?, chamado_id=?, responsavel_id=?, notas=?, status=? WHERE id=?')
+                ->execute([$titulo, $data, $horaInicio, $duracaoMinutos, $clienteId, $chamadoId, $responsavelId, $notas, $status, $tarefaId]);
             flash_set('sucesso', 'Tarefa atualizada.');
         }
     }
@@ -107,6 +120,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'excluir_tarefa') {
         $pdo->prepare('DELETE FROM agenda_tarefas WHERE id = ?')->execute([(int) ($_POST['tarefa_id'] ?? 0)]);
         flash_set('sucesso', 'Tarefa removida.');
+    }
+
+    if ($acao === 'limpar_periodo') {
+        $escopoLimpar = in_array($_POST['escopo'] ?? '', ['dia', 'semana', 'mes'], true) ? $_POST['escopo'] : 'dia';
+        $dataAncoraLimpar = $_POST['data'] ?? date('Y-m-d');
+        if (!strtotime($dataAncoraLimpar)) {
+            $dataAncoraLimpar = date('Y-m-d');
+        }
+        $tsAncoraLimpar = strtotime($dataAncoraLimpar);
+
+        if ($escopoLimpar === 'semana') {
+            $diaSemanaLimpar = (int) date('N', $tsAncoraLimpar);
+            $dataInicioLimpar = date('Y-m-d', strtotime('-' . ($diaSemanaLimpar - 1) . ' days', $tsAncoraLimpar));
+            $dataFimLimpar = date('Y-m-d', strtotime('+' . (7 - $diaSemanaLimpar) . ' days', $tsAncoraLimpar));
+        } elseif ($escopoLimpar === 'mes') {
+            $dataInicioLimpar = date('Y-m-01', $tsAncoraLimpar);
+            $dataFimLimpar = date('Y-m-t', $tsAncoraLimpar);
+        } else {
+            $dataInicioLimpar = $dataFimLimpar = $dataAncoraLimpar;
+        }
+
+        $stmtLimpar = $pdo->prepare('DELETE FROM agenda_tarefas WHERE data BETWEEN ? AND ?');
+        $stmtLimpar->execute([$dataInicioLimpar, $dataFimLimpar]);
+        flash_set('sucesso', $stmtLimpar->rowCount() . ' tarefa(s) excluída(s) da agenda.');
     }
 
     // Só as ações abaixo são AJAX de verdade (chamadas via fetch, sem navegar
@@ -163,6 +200,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->prepare('UPDATE usuarios SET agenda_expediente_inicio=?, agenda_expediente_fim=?, agenda_almoco_inicio=?, agenda_almoco_fim=? WHERE id=?')
             ->execute([$camposHorario['expediente_inicio'], $camposHorario['expediente_fim'], $camposHorario['almoco_inicio'], $camposHorario['almoco_fim'], Auth::userId()]);
+        header('Content-Type: application/json');
+        echo json_encode(['sucesso' => true]);
+        exit;
+    }
+
+    // Responder e encerrar o chamado ligado a uma tarefa, sem sair da
+    // Agenda -- pedido do Kleber: "ao interagir com o gráfico de Gantt devo
+    // responder ao chamado e finalizar ele, saindo da minha tela". Reaproveita
+    // exatamente a mesma lógica do "responder_chamado" com status=fechado de
+    // cliente.php (INSERT em chamado_respostas + UPDATE chamados direto pra
+    // fechado, sem passar por recalcular_status_chamado()), só que sem
+    // anexo (não faz sentido nesse atalho rápido). A tarefa vinculada vira
+    // 'concluida', que já some do Gantt ativo (ver filtro na seção de
+    // carregamento abaixo).
+    if ($acao === 'responder_encerrar_chamado_tarefa' && $ehAjax) {
+        $tarefaId = (int) ($_POST['tarefa_id'] ?? 0);
+        $mensagem = trim($_POST['mensagem'] ?? '');
+        $notificarCliente = ($_POST['notificar_cliente'] ?? '') === '1';
+
+        if ($mensagem === '') {
+            header('Content-Type: application/json');
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Escreva uma mensagem de resposta.']);
+            exit;
+        }
+
+        $stmtTarefaChamado = $pdo->prepare('SELECT chamado_id FROM agenda_tarefas WHERE id = ?');
+        $stmtTarefaChamado->execute([$tarefaId]);
+        $chamadoIdTarefa = (int) $stmtTarefaChamado->fetchColumn();
+
+        if (!$chamadoIdTarefa) {
+            header('Content-Type: application/json');
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Essa tarefa não está ligada a um chamado.']);
+            exit;
+        }
+
+        $stmtChamadoAlvo = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+        $stmtChamadoAlvo->execute([$chamadoIdTarefa]);
+        $chamadoAlvo = $stmtChamadoAlvo->fetch();
+
+        if (!$chamadoAlvo) {
+            header('Content-Type: application/json');
+            echo json_encode(['sucesso' => false, 'mensagem' => 'Chamado não encontrado (pode ter sido excluído).']);
+            exit;
+        }
+
+        $nomeResponsavel = Auth::userName();
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
+            ->execute([$chamadoIdTarefa, $nomeResponsavel, Auth::userId(), $mensagem]);
+        $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamadoIdTarefa]);
+        $pdo->prepare("UPDATE agenda_tarefas SET status = 'concluida' WHERE id = ?")->execute([$tarefaId]);
+
+        if ($notificarCliente) {
+            $stmtClienteAlvo = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
+            $stmtClienteAlvo->execute([(int) $chamadoAlvo['cliente_id']]);
+            $clienteAlvo = $stmtClienteAlvo->fetch();
+            if ($clienteAlvo) {
+                $stmtChamadoAtualizado = $pdo->prepare('SELECT * FROM chamados WHERE id = ?');
+                $stmtChamadoAtualizado->execute([$chamadoIdTarefa]);
+                $chamadoAtualizado = $stmtChamadoAtualizado->fetch();
+                $pessoaChamado = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $clienteAlvo);
+                notificar_depois(fn () => Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoaChamado, $nomeResponsavel, $mensagem, []));
+            }
+        }
+
         header('Content-Type: application/json');
         echo json_encode(['sucesso' => true]);
         exit;
@@ -401,11 +502,13 @@ $minExpedienteInicio = minutos_do_dia($horarioTrabalho['expediente_inicio']);
 $minExpedienteFim = minutos_do_dia($horarioTrabalho['expediente_fim']);
 $minAlmocoInicio = minutos_do_dia($horarioTrabalho['almoco_inicio']);
 $minAlmocoFim = minutos_do_dia($horarioTrabalho['almoco_fim']);
-// 1px = 1 minuto -- altura de cada card/da grade já sai proporcional direto
-// do PHP, sem precisar reescalar nada em JS.
-$alturaGanttPx = max(60, $minExpedienteFim - $minExpedienteInicio);
+$alturaGanttPx = (int) max(90, ($minExpedienteFim - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO);
 $alturaCabecalhoColunaPx = 44;
-$alturaZonaNaoAgendadaPx = 34;
+// Faixa "sem horário" por dia: fixa (pra régua de horas bater em todas as
+// colunas), mas alta o bastante pra mostrar pelo menos 1 card inteiro sem
+// cortar -- na primeira versão era baixa demais (34px) e cortava o card no
+// meio, mostrando só um pedacinho com a barra de rolagem por cima.
+$alturaZonaNaoAgendadaPx = 64;
 
 // Semana (segunda a domingo) que contém $dataFocoParam -- o Gantt sempre
 // mostra a semana inteira (não só o dia), pra dar pra arrastar uma tarefa
@@ -420,8 +523,14 @@ for ($i = 0; $i < 7; $i++) {
 $semanaAnteriorFoco = date('Y-m-d', strtotime('-7 days', strtotime($segundaSemanaFoco)));
 $semanaProximaFoco = date('Y-m-d', strtotime('+7 days', strtotime($segundaSemanaFoco)));
 
-$clientes = $pdo->query("SELECT id, nome FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
+$clientes = $pdo->query("SELECT id, nome, logo FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
 $nomesClientesPorId = array_column($clientes, 'nome', 'id');
+$logosClientesPorId = array_column($clientes, 'logo', 'id');
+
+// Quem pode ser "responsável" por uma tarefa -- só gestão (mesma audiência
+// que usa a Agenda), não colaborador.
+$responsaveisAgenda = $pdo->query("SELECT id, nome, foto_perfil FROM usuarios WHERE perfil IN ('admin','diretor','ceo') AND ativo = 1 ORDER BY nome ASC")->fetchAll();
+$nomesResponsaveisPorId = array_column($responsaveisAgenda, 'nome', 'id');
 
 $chamadosAbertos = $pdo->query("
     SELECT id, titulo, cliente_id, prioridade
@@ -434,10 +543,11 @@ $chamadosAbertos = $pdo->query("
 // gestores criando algumas tarefas por dia), não precisa de filtro de
 // período pra não pesar a consulta.
 $todasTarefas = $pdo->query("
-    SELECT t.*, c.nome AS nome_cliente, ch.titulo AS titulo_chamado
+    SELECT t.*, c.nome AS nome_cliente, c.logo AS logo_cliente, ch.titulo AS titulo_chamado, r.nome AS nome_responsavel, r.foto_perfil AS foto_responsavel
     FROM agenda_tarefas t
     LEFT JOIN clientes c ON c.id = t.cliente_id
     LEFT JOIN chamados ch ON ch.id = t.chamado_id
+    LEFT JOIN usuarios r ON r.id = t.responsavel_id
     ORDER BY t.data ASC, t.hora_inicio ASC, t.ordem ASC
 ")->fetchAll();
 
@@ -465,6 +575,7 @@ $eventosCalendarioAgenda = array_map(fn ($t) => [
     'setor_id' => $t['cliente_id'] ? (int) $t['cliente_id'] : null,
     'cliente_id' => $t['cliente_id'] ? (int) $t['cliente_id'] : null,
     'chamado_id' => $t['chamado_id'] ? (int) $t['chamado_id'] : null,
+    'responsavel_id' => $t['responsavel_id'] ? (int) $t['responsavel_id'] : null,
     'duracao_minutos' => (int) $t['duracao_minutos'],
     'notas' => $t['notas'],
     'status_real' => $t['status'],
@@ -480,26 +591,44 @@ function icone_status_tarefa(string $status): string
 }
 
 /**
+ * <img> do logo do cliente se tiver, senão um círculo colorido com a
+ * inicial (mesmo espírito do avatar_html() de usuário) -- "o avatar do
+ * cliente precisa ser maior, precisa ter o logo" (pedido do Kleber). Maior
+ * e mais informativo que o badge de texto que tinha antes.
+ */
+function agenda_logo_cliente_html(?string $logo, string $nomeCliente, string $cor): string
+{
+    if (arquivo_publico_existe($logo)) {
+        return '<span class="agenda-card-cliente-logo-wrap"><img src="' . e(asset_url($logo)) . '" alt="' . e($nomeCliente) . '" class="agenda-card-cliente-logo"></span>';
+    }
+    $inicial = $nomeCliente !== '' ? mb_strtoupper(mb_substr($nomeCliente, 0, 1)) : '?';
+
+    return '<span class="agenda-card-cliente-logo-wrap agenda-card-cliente-logo-vazio" style="background-color:' . e($cor) . ';">' . e($inicial) . '</span>';
+}
+
+/**
  * Renderiza UM card de tarefa -- reaproveitado tanto pra faixa "sem
  * horário" (lista normal, $posicao null) quanto pra grade do Gantt (posição
  * absoluta calculada em pixels a partir do horário/duração, $posicao
- * ['top'=>.., 'height'=>..]). Cards baixos (< 60px, ou seja tarefa de menos
- * de 1h) escondem badge/notas pra não estourar -- ver .agenda-card-compacta.
+ * ['top'=>.., 'height'=>..]). Cards baixos (< 75px, ~45min) escondem
+ * logo/notas pra não estourar -- ver .agenda-card-compacta.
  */
 function agenda_render_card(array $t, ?array $posicao): string
 {
     $duracaoMin = (int) $t['duracao_minutos'];
     $horaTxt = $t['hora_inicio'] ? substr($t['hora_inicio'], 0, 5) : null;
     $horaFimTxt = $horaTxt ? date('H:i', strtotime($horaTxt) + $duracaoMin * 60) : null;
-    $compacta = $posicao && $posicao['height'] < 60;
+    $compacta = $posicao && $posicao['height'] < 75;
+    $corCliente = $t['cliente_id'] ? cor_cliente((int) $t['cliente_id']) : 'var(--ph-border)';
 
     $estilo = $posicao ? "position:absolute; top:{$posicao['top']}px; height:{$posicao['height']}px; left:2px; right:2px;" : '';
-    $estilo .= 'border-left-color: ' . ($t['cliente_id'] ? cor_cliente((int) $t['cliente_id']) : 'var(--ph-border)') . ';';
+    $estilo .= 'border-left-color: ' . $corCliente . ';';
 
     ob_start();
     ?>
     <div class="agenda-card<?= $compacta ? ' agenda-card-compacta' : '' ?>" draggable="true" data-id="<?= $t['id'] ?>"
         data-titulo="<?= e($t['titulo']) ?>" data-cliente-id="<?= $t['cliente_id'] ?: '' ?>" data-chamado-id="<?= $t['chamado_id'] ?: '' ?>"
+        data-responsavel-id="<?= $t['responsavel_id'] ?: '' ?>"
         data-notas="<?= e($t['notas'] ?? '') ?>" data-status="<?= e($t['status']) ?>"
         data-hora-inicio="<?= e($horaTxt ?? '') ?>" data-duracao-minutos="<?= $duracaoMin ?>"
         style="<?= $estilo ?>">
@@ -511,11 +640,18 @@ function agenda_render_card(array $t, ?array $posicao): string
             <div class="flex-grow-1" style="min-width:0;">
                 <?php if ($horaTxt): ?><div class="agenda-card-horario"><?= e($horaTxt) ?>&ndash;<?= e($horaFimTxt) ?></div><?php endif; ?>
                 <div class="agenda-card-titulo <?= $t['status'] === 'concluida' ? 'text-decoration-line-through text-muted' : '' ?>"><?= e($t['titulo']) ?></div>
-                <?php if ($t['nome_cliente']): ?><span class="badge" style="background-color: <?= e(cor_cliente((int) $t['cliente_id'])) ?>; color:#fff;"><?= e($t['nome_cliente']) ?></span><?php endif; ?>
-                <?php if ($t['titulo_chamado']): ?><span class="badge bg-secondary"><i class="bi bi-life-preserver"></i> #<?= $t['chamado_id'] ?></span><?php endif; ?>
             </div>
+            <?php if ($t['nome_responsavel']): ?>
+            <span class="agenda-card-responsavel" title="Responsável: <?= e($t['nome_responsavel']) ?>"><?= avatar_html($t['nome_responsavel'], $t['foto_responsavel'], 'equipe') ?></span>
+            <?php endif; ?>
         </div>
-        <?php if ($t['notas']): ?><p class="agenda-card-notas"><?= e($t['notas']) ?></p><?php endif; ?>
+        <?php if (!$compacta && ($t['nome_cliente'] || $t['titulo_chamado'])): ?>
+        <div class="agenda-card-meta">
+            <?php if ($t['nome_cliente']): ?><?= agenda_logo_cliente_html($t['logo_cliente'], $t['nome_cliente'], $corCliente) ?><span class="agenda-card-cliente-nome"><?= e($t['nome_cliente']) ?></span><?php endif; ?>
+            <?php if ($t['titulo_chamado']): ?><span class="agenda-card-chamado-ref"><i class="bi bi-life-preserver"></i> #<?= $t['chamado_id'] ?></span><?php endif; ?>
+        </div>
+        <?php endif; ?>
+        <?php if (!$compacta && $t['notas']): ?><p class="agenda-card-notas"><?= e($t['notas']) ?></p><?php endif; ?>
     </div>
     <?php
     return ob_get_clean();
@@ -539,6 +675,12 @@ require __DIR__ . '/templates/header.php';
         <input type="date" class="form-control form-control-sm" id="seletorDataFoco" value="<?= e($dataFocoParam) ?>" style="width:auto;" title="Ir pra semana desta data">
     </div>
     <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="botaoFiltrosAgenda" title="Filtrar por cliente/responsável">
+            <i class="bi bi-funnel"></i> Filtros
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="botaoLimparAgenda" title="Excluir tarefas de um período">
+            <i class="bi bi-trash"></i> Limpar
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="botaoMeuHorario" title="Definir horário de trabalho e almoço">
             <i class="bi bi-clock"></i> Meu horário
         </button>
@@ -547,6 +689,93 @@ require __DIR__ . '/templates/header.php';
         </button>
         <button type="button" class="btn btn-sm btn-dark" id="botaoNovaTarefa"><i class="bi bi-plus-lg"></i> Nova tarefa</button>
     </div>
+</div>
+
+<!-- Filtrar quais cards aparecem no Gantt, por cliente e/ou responsável --
+     "preciso poder escolher clientes ticando" + "preciso ter essa
+     visualização" (de quem tá atendendo cada coisa). Filtro é só visual
+     (esconde/mostra card na hora, via JS), não mexe no banco. -->
+<div class="modal fade" id="modalFiltrosAgenda" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-funnel"></i> Filtrar Gantt</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label mb-0">Clientes</label>
+            <button type="button" class="btn btn-link btn-sm p-0" id="filtroClienteToggle">Marcar/desmarcar todos</button>
+          </div>
+          <div class="border rounded p-2" style="max-height:180px; overflow-y:auto;">
+            <?php foreach ($clientes as $c): ?>
+            <div class="form-check">
+              <input class="form-check-input filtro-gantt-cliente" type="checkbox" value="<?= $c['id'] ?>" id="filtroCliente<?= $c['id'] ?>" checked>
+              <label class="form-check-label" for="filtroCliente<?= $c['id'] ?>"><?= e($c['nome']) ?></label>
+            </div>
+            <?php endforeach; ?>
+            <div class="form-check">
+              <input class="form-check-input filtro-gantt-cliente" type="checkbox" value="" id="filtroClienteLivre" checked>
+              <label class="form-check-label" for="filtroClienteLivre"><em>Tarefa livre (sem cliente)</em></label>
+            </div>
+          </div>
+        </div>
+        <div class="mb-1">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label mb-0">Responsável</label>
+            <button type="button" class="btn btn-link btn-sm p-0" id="filtroResponsavelToggle">Marcar/desmarcar todos</button>
+          </div>
+          <div class="border rounded p-2">
+            <?php foreach ($responsaveisAgenda as $r): ?>
+            <div class="form-check">
+              <input class="form-check-input filtro-gantt-responsavel" type="checkbox" value="<?= $r['id'] ?>" id="filtroResp<?= $r['id'] ?>" checked>
+              <label class="form-check-label" for="filtroResp<?= $r['id'] ?>"><?= e($r['nome']) ?></label>
+            </div>
+            <?php endforeach; ?>
+            <div class="form-check">
+              <input class="form-check-input filtro-gantt-responsavel" type="checkbox" value="" id="filtroRespNenhum" checked>
+              <label class="form-check-label" for="filtroRespNenhum"><em>Sem responsável definido</em></label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-dark" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Excluir tudo de um dia/semana/mês de uma vez -- pedido do Kleber. -->
+<div class="modal fade" id="modalLimparAgenda" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle"></i> Limpar agenda</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Isso exclui PERMANENTEMENTE todas as tarefas do período escolhido. Não pode ser desfeito.</p>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="limparEscopo" id="limparEscopoDia" value="dia" checked>
+          <label class="form-check-label" for="limparEscopoDia">Só o dia focado (<?= e(formatar_data($dataFocoParam)) ?>)</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="limparEscopo" id="limparEscopoSemana" value="semana">
+          <label class="form-check-label" for="limparEscopoSemana">Essa semana inteira (<?= date('d/m', strtotime($segundaSemanaFoco)) ?> a <?= date('d/m', strtotime($diasDaSemanaFoco[6])) ?>)</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="limparEscopo" id="limparEscopoMes" value="mes">
+          <label class="form-check-label" for="limparEscopoMes">Esse mês inteiro (<?= MESES_PT_AGENDA[(int) date('n', strtotime($dataFocoParam))] ?>/<?= date('Y', strtotime($dataFocoParam)) ?>)</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="botaoConfirmarLimparAgenda"><i class="bi bi-trash"></i> Limpar tudo</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Horário de trabalho/almoço do usuário logado -- usado pra desenhar a
@@ -650,13 +879,13 @@ require __DIR__ . '/templates/header.php';
 <div class="agenda-gantt-wrapper">
   <div class="agenda-regua-horas" style="margin-top: <?= $alturaCabecalhoColunaPx + $alturaZonaNaoAgendadaPx ?>px; height: <?= $alturaGanttPx ?>px;">
     <?php for ($m = $minExpedienteInicio; $m < $minExpedienteFim; $m += 60): ?>
-    <div class="agenda-regua-hora" style="top: <?= $m - $minExpedienteInicio ?>px;"><?= sprintf('%02d:00', intdiv($m, 60)) ?></div>
+    <div class="agenda-regua-hora" style="top: <?= ($m - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO ?>px;"><?= sprintf('%02d:00', intdiv($m, 60)) ?></div>
     <?php endfor; ?>
   </div>
 
   <div class="agenda-semana-kanban" id="semanaKanban">
     <?php foreach ($diasDaSemanaFoco as $indiceDia => $dataColuna):
-        $tarefasColunaTodas = $tarefasPorData[$dataColuna] ?? [];
+        $tarefasColunaTodas = array_filter($tarefasPorData[$dataColuna] ?? [], fn ($t) => $t['status'] !== 'concluida');
         $tarefasAgendadasColuna = array_filter($tarefasColunaTodas, fn ($t) => $t['hora_inicio'] !== null);
         $tarefasNaoAgendadasColuna = array_filter($tarefasColunaTodas, fn ($t) => $t['hora_inicio'] === null);
         $ehHojeColuna = $dataColuna === date('Y-m-d');
@@ -676,14 +905,14 @@ require __DIR__ . '/templates/header.php';
         } ?>
       </div>
 
-      <div class="agenda-coluna-grade" data-date="<?= e($dataColuna) ?>" style="height: <?= $alturaGanttPx ?>px;">
+      <div class="agenda-coluna-grade" data-date="<?= e($dataColuna) ?>" style="height: <?= $alturaGanttPx ?>px; background-size: 100% <?= 60 * AGENDA_PX_POR_MINUTO ?>px;">
         <?php if ($minAlmocoFim > $minAlmocoInicio): ?>
-        <div class="agenda-almoco" style="top: <?= max(0, $minAlmocoInicio - $minExpedienteInicio) ?>px; height: <?= $minAlmocoFim - $minAlmocoInicio ?>px;" title="Almoço"></div>
+        <div class="agenda-almoco" style="top: <?= max(0, ($minAlmocoInicio - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO) ?>px; height: <?= ($minAlmocoFim - $minAlmocoInicio) * AGENDA_PX_POR_MINUTO ?>px;" title="Almoço"></div>
         <?php endif; ?>
         <?php foreach ($tarefasAgendadasColuna as $t):
             $inicioMinCard = minutos_do_dia(substr($t['hora_inicio'], 0, 5));
-            $topPxCard = max(0, $inicioMinCard - $minExpedienteInicio);
-            $alturaPxCard = max(30, (int) $t['duracao_minutos']);
+            $topPxCard = max(0, ($inicioMinCard - $minExpedienteInicio) * AGENDA_PX_POR_MINUTO);
+            $alturaPxCard = max(30, (int) $t['duracao_minutos'] * AGENDA_PX_POR_MINUTO - AGENDA_GAP_CARD_PX);
             echo agenda_render_card($t, ['top' => $topPxCard, 'height' => $alturaPxCard]);
         endforeach; ?>
       </div>
@@ -735,6 +964,15 @@ require __DIR__ . '/templates/header.php';
               </select>
             </div>
             <div class="col-md-6">
+              <label class="form-label">Responsável</label>
+              <select name="responsavel_id" id="tarefaAgendaResponsavel" class="form-select">
+                <option value="">Ninguém definido</option>
+                <?php foreach ($responsaveisAgenda as $r): ?>
+                <option value="<?= $r['id'] ?>"><?= e($r['nome']) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-6">
               <label class="form-label">Cliente</label>
               <select name="cliente_id" id="tarefaAgendaCliente" class="form-select">
                 <option value="">Nenhum (tarefa livre)</option>
@@ -755,6 +993,19 @@ require __DIR__ . '/templates/header.php';
             <div class="col-12">
               <label class="form-label">Anotações</label>
               <textarea name="notas" id="tarefaAgendaNotas" class="form-control" rows="4" placeholder="O que precisa levar em conta, próximos passos, o que já foi combinado..."></textarea>
+            </div>
+            <div class="col-12 d-none" id="blocoResponderEncerrarTarefa">
+              <hr>
+              <label class="form-label">Responder e encerrar o chamado #<span id="tarefaAgendaChamadoIdTexto"></span></label>
+              <textarea id="tarefaAgendaRespostaChamado" class="form-control" rows="3" placeholder="Mensagem de resposta pro cliente -- o chamado será encerrado."></textarea>
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="tarefaAgendaNotificarCliente" checked>
+                <label class="form-check-label" for="tarefaAgendaNotificarCliente">Notificar o cliente (e-mail/WhatsApp)</label>
+              </div>
+              <button type="button" class="btn btn-success btn-sm mt-2" id="botaoResponderEncerrarTarefa">
+                <i class="bi bi-check2-circle"></i> Responder e encerrar chamado
+              </button>
+              <div class="text-danger small mt-1 d-none" id="erroResponderEncerrarTarefa"></div>
             </div>
           </div>
         </div>
@@ -783,6 +1034,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var CHAMADOS_POR_CLIENTE = <?= json_encode(array_map(fn ($ch) => ['id' => (int) $ch['id'], 'cliente_id' => (int) $ch['cliente_id']], $chamadosAbertos)) ?>;
     var MIN_EXPEDIENTE_INICIO = <?= $minExpedienteInicio ?>;
     var MIN_EXPEDIENTE_FIM = <?= $minExpedienteFim ?>;
+    var PX_POR_MINUTO = <?= AGENDA_PX_POR_MINUTO ?>;
 
     function filtrarChamadosPorCliente(clienteId) {
         var selectChamado = document.getElementById('tarefaAgendaChamado');
@@ -812,10 +1064,12 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('tarefaAgendaData').value = dataIso || document.getElementById('seletorDataFoco').value;
         document.getElementById('tarefaAgendaHora').value = '';
         document.getElementById('tarefaAgendaDuracao').value = '60';
+        document.getElementById('tarefaAgendaResponsavel').value = '';
         document.getElementById('tarefaAgendaCliente').value = '';
         document.getElementById('tarefaAgendaChamado').value = '';
         document.getElementById('tarefaAgendaNotas').value = '';
         document.getElementById('blocoStatusTarefaAgenda').style.display = 'none';
+        document.getElementById('blocoResponderEncerrarTarefa').classList.add('d-none');
         document.getElementById('botaoExcluirTarefaAgenda').classList.add('d-none');
         filtrarChamadosPorCliente('');
         PrimeUI.openModal(document.getElementById('modalTarefaAgenda'));
@@ -832,6 +1086,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('tarefaAgendaData').value = dados.data || document.getElementById('seletorDataFoco').value;
         document.getElementById('tarefaAgendaHora').value = dados.horaInicio || '';
         document.getElementById('tarefaAgendaDuracao').value = dados.duracaoMinutos || '60';
+        document.getElementById('tarefaAgendaResponsavel').value = dados.responsavelId || '';
         document.getElementById('tarefaAgendaCliente').value = dados.clienteId || '';
         filtrarChamadosPorCliente(dados.clienteId || '');
         document.getElementById('tarefaAgendaChamado').value = dados.chamadoId || '';
@@ -841,12 +1096,63 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('botaoExcluirTarefaAgenda').classList.remove('d-none');
         document.getElementById('excluirTarefaAgendaId').value = dados.id;
         document.getElementById('excluirTarefaAgendaData').value = dados.data || '';
+
+        var blocoResponder = document.getElementById('blocoResponderEncerrarTarefa');
+        if (dados.chamadoId) {
+            document.getElementById('tarefaAgendaChamadoIdTexto').textContent = dados.chamadoId;
+            document.getElementById('tarefaAgendaRespostaChamado').value = '';
+            document.getElementById('erroResponderEncerrarTarefa').classList.add('d-none');
+            blocoResponder.classList.remove('d-none');
+        } else {
+            blocoResponder.classList.add('d-none');
+        }
+
         PrimeUI.openModal(document.getElementById('modalTarefaAgenda'));
     }
 
     document.getElementById('botaoExcluirTarefaAgenda').addEventListener('click', function () {
         if (!confirm('Excluir essa tarefa da agenda?')) return;
         document.getElementById('formExcluirTarefaAgenda').submit();
+    });
+
+    // --- Responder e encerrar o chamado ligado a uma tarefa, sem sair da
+    // Agenda -- pedido do Kleber. --------------------------------------
+    document.getElementById('botaoResponderEncerrarTarefa').addEventListener('click', function () {
+        var mensagem = document.getElementById('tarefaAgendaRespostaChamado').value.trim();
+        var erroEl = document.getElementById('erroResponderEncerrarTarefa');
+        if (!mensagem) {
+            erroEl.textContent = 'Escreva uma mensagem de resposta.';
+            erroEl.classList.remove('d-none');
+            return;
+        }
+        erroEl.classList.add('d-none');
+        var botao = this;
+        botao.disabled = true;
+
+        var dados = new FormData();
+        dados.set('acao', 'responder_encerrar_chamado_tarefa');
+        dados.set('ajax', '1');
+        dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
+        dados.set('tarefa_id', document.getElementById('tarefaAgendaId').value);
+        dados.set('mensagem', mensagem);
+        dados.set('notificar_cliente', document.getElementById('tarefaAgendaNotificarCliente').checked ? '1' : '0');
+
+        fetch(window.location.href, { method: 'POST', body: dados })
+            .then(function (r) { return r.json(); })
+            .then(function (json) {
+                if (json.sucesso) {
+                    window.location.reload();
+                } else {
+                    erroEl.textContent = json.mensagem || 'Não foi possível encerrar o chamado.';
+                    erroEl.classList.remove('d-none');
+                    botao.disabled = false;
+                }
+            })
+            .catch(function () {
+                erroEl.textContent = 'Falha de conexão.';
+                erroEl.classList.remove('d-none');
+                botao.disabled = false;
+            });
     });
 
     // --- Calendário mensal reaproveitado (visão geral / criar+editar rápido) -
@@ -862,6 +1168,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     duracaoMinutos: evento.duracao_minutos,
                     clienteId: evento.cliente_id,
                     chamadoId: evento.chamado_id,
+                    responsavelId: evento.responsavel_id,
                     notas: evento.notas,
                     status: evento.status_real,
                 });
@@ -914,6 +1221,59 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             })
             .catch(function () { mostrarErro('Falha de conexão.'); });
+    });
+
+    // --- Limpar agenda (dia/semana/mês) ---------------------------------
+    var modalLimparAgenda = document.getElementById('modalLimparAgenda');
+    document.getElementById('botaoLimparAgenda').addEventListener('click', function () {
+        PrimeUI.openModal(modalLimparAgenda);
+    });
+    document.getElementById('botaoConfirmarLimparAgenda').addEventListener('click', function () {
+        var escopo = document.querySelector('input[name="limparEscopo"]:checked').value;
+        if (!confirm('Tem certeza? Isso vai excluir essas tarefas permanentemente.')) return;
+
+        var form = document.createElement('form');
+        form.method = 'post';
+        form.action = '<?= url('agenda.php') ?>';
+        form.innerHTML =
+            '<input type="hidden" name="csrf_token" value="' + document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value + '">' +
+            '<input type="hidden" name="acao" value="limpar_periodo">' +
+            '<input type="hidden" name="escopo" value="' + escopo + '">' +
+            '<input type="hidden" name="data" value="' + document.getElementById('seletorDataFoco').value + '">';
+        document.body.appendChild(form);
+        form.submit();
+    });
+
+    // --- Filtros do Gantt (cliente/responsável) -- só esconde/mostra card,
+    // não mexe no banco. Aplica na hora, sem precisar de botão "aplicar". --
+    var modalFiltrosAgenda = document.getElementById('modalFiltrosAgenda');
+    document.getElementById('botaoFiltrosAgenda').addEventListener('click', function () {
+        PrimeUI.openModal(modalFiltrosAgenda);
+    });
+
+    function aplicarFiltrosGantt() {
+        var clientesMarcados = Array.from(document.querySelectorAll('.filtro-gantt-cliente:checked')).map(function (c) { return c.value; });
+        var respMarcados = Array.from(document.querySelectorAll('.filtro-gantt-responsavel:checked')).map(function (c) { return c.value; });
+        document.querySelectorAll('.agenda-card').forEach(function (card) {
+            var clienteOk = clientesMarcados.indexOf(card.getAttribute('data-cliente-id') || '') !== -1;
+            var respOk = respMarcados.indexOf(card.getAttribute('data-responsavel-id') || '') !== -1;
+            card.style.display = (clienteOk && respOk) ? '' : 'none';
+        });
+    }
+    document.querySelectorAll('.filtro-gantt-cliente, .filtro-gantt-responsavel').forEach(function (chk) {
+        chk.addEventListener('change', aplicarFiltrosGantt);
+    });
+    document.getElementById('filtroClienteToggle').addEventListener('click', function () {
+        var checks = Array.from(document.querySelectorAll('.filtro-gantt-cliente'));
+        var todosMarcadosAntes = checks.every(function (c) { return c.checked; });
+        checks.forEach(function (c) { c.checked = !todosMarcadosAntes; });
+        aplicarFiltrosGantt();
+    });
+    document.getElementById('filtroResponsavelToggle').addEventListener('click', function () {
+        var checks = Array.from(document.querySelectorAll('.filtro-gantt-responsavel'));
+        var todosMarcadosAntes = checks.every(function (c) { return c.checked; });
+        checks.forEach(function (c) { c.checked = !todosMarcadosAntes; });
+        aplicarFiltrosGantt();
     });
 
     // --- Sugestão da IA: pergunta clientes (multi-seleção)/período/se cria
@@ -1027,7 +1387,13 @@ document.addEventListener('DOMContentLoaded', function () {
             dadosStatus.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
             dadosStatus.set('tarefa_id', botaoStatus.getAttribute('data-id'));
             dadosStatus.set('status', novoStatus);
-            fetch(window.location.href, { method: 'POST', body: dadosStatus }).catch(function () {});
+            fetch(window.location.href, { method: 'POST', body: dadosStatus })
+                .then(function () {
+                    // Concluída some do Gantt ativo (mesma regra do servidor) --
+                    // fluido: reflete na hora, sem precisar recarregar a página.
+                    if (novoStatus === 'concluida') cardStatus.style.display = 'none';
+                })
+                .catch(function () {});
             return;
         }
 
@@ -1042,6 +1408,7 @@ document.addEventListener('DOMContentLoaded', function () {
             duracaoMinutos: card.getAttribute('data-duracao-minutos'),
             clienteId: card.getAttribute('data-cliente-id'),
             chamadoId: card.getAttribute('data-chamado-id'),
+            responsavelId: card.getAttribute('data-responsavel-id'),
             notas: card.getAttribute('data-notas'),
             status: card.getAttribute('data-status'),
         });
@@ -1083,7 +1450,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var zonaGrade = e.target.closest('.agenda-coluna-grade');
         if (zonaGrade) {
             var retanguloGrade = zonaGrade.getBoundingClientRect();
-            var minutoAbsoluto = MIN_EXPEDIENTE_INICIO + (e.clientY - retanguloGrade.top);
+            var minutoAbsoluto = MIN_EXPEDIENTE_INICIO + (e.clientY - retanguloGrade.top) / PX_POR_MINUTO;
             minutoAbsoluto = Math.round(minutoAbsoluto / 15) * 15;
             minutoAbsoluto = Math.max(MIN_EXPEDIENTE_INICIO, Math.min(minutoAbsoluto, MIN_EXPEDIENTE_FIM - arrastandoDuracao));
 
@@ -1091,10 +1458,10 @@ document.addEventListener('DOMContentLoaded', function () {
             arrastando.style.position = 'absolute';
             arrastando.style.left = '2px';
             arrastando.style.right = '2px';
-            arrastando.style.top = (minutoAbsoluto - MIN_EXPEDIENTE_INICIO) + 'px';
-            arrastando.style.height = Math.max(30, arrastandoDuracao) + 'px';
+            arrastando.style.top = ((minutoAbsoluto - MIN_EXPEDIENTE_INICIO) * PX_POR_MINUTO) + 'px';
+            arrastando.style.height = Math.max(30, arrastandoDuracao * PX_POR_MINUTO - 4) + 'px';
             arrastando.setAttribute('data-hora-inicio', minutosParaHora(minutoAbsoluto));
-            arrastando.classList.toggle('agenda-card-compacta', arrastandoDuracao < 60);
+            arrastando.classList.toggle('agenda-card-compacta', (arrastandoDuracao * PX_POR_MINUTO - 4) < 75);
         } else {
             var zonaNaoAgendada = e.target.closest('.agenda-coluna-naoagendadas');
             if (zonaNaoAgendada && arrastando.parentElement !== zonaNaoAgendada) {
