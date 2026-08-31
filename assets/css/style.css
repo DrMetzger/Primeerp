@@ -2024,38 +2024,105 @@ a.card-cliente, a.card-cliente:hover {
 }
 
 /* ---------------------------------------------------------- Agenda (gestão)
-   Painel "Prioridades do dia" (ver agenda.php) -- lista vertical de cards
-   arrastáveis (reordenar = prioridade), cada um com uma cor própria por
-   cliente (borda esquerda, ver cor_cliente() em helpers.php) igualzinho ao
-   resto do sistema. O calendário mensal/semanal/diário ACIMA desse painel
-   reaproveita o componente genérico (.calendario-mensal, ver
-   calendario_visual.js) -- não precisa de CSS próprio aqui. */
+   Gráfico de Gantt por horário (ver agenda.php) -- pedido do Kleber depois de
+   ver a primeira versão (lista simples por dia): precisa organizar por HORA
+   dentro do expediente, arrastar entre dias E entre horários de forma
+   fluida, e enxergar o almoço bloqueado. 1px = 1 minuto (ver
+   AGENDA_PX_POR_MINUTO em agenda.php), então a altura de cada card já sai
+   proporcional à duração direto do PHP -- não precisa reescalar em JS.
+   Cabeçalho da coluna e a faixa "sem horário" têm altura FIXA (mesmos
+   valores que agenda.php usa pra alinhar a régua de horas -- ver
+   $alturaCabecalhoColunaPx/$alturaZonaNaoAgendadaPx), senão a régua
+   compartilhada desalinha da grade de cada coluna. */
+.agenda-gantt-wrapper { display: flex; gap: .4rem; align-items: flex-start; }
+
+.agenda-regua-horas { position: relative; flex: 0 0 42px; width: 42px; }
+.agenda-regua-hora {
+    position: absolute;
+    right: 4px;
+    transform: translateY(-50%);
+    font-size: .7rem;
+    font-weight: 600;
+    color: var(--ph-text-muted);
+    white-space: nowrap;
+}
+
+.agenda-semana-kanban { display: flex; gap: .6rem; overflow-x: auto; padding-bottom: .5rem; flex: 1 1 auto; min-width: 0; }
+
 .agenda-coluna-dia {
+    flex: 0 0 210px;
     display: flex;
     flex-direction: column;
-    gap: .6rem;
-    max-width: 640px;
+    background-color: var(--ph-surface);
+    border-radius: var(--ph-radius-sm);
+    box-shadow: var(--ph-elev-1);
+}
+.agenda-coluna-dia-hoje { outline: 2px solid var(--ph-primary); outline-offset: -2px; }
+.agenda-coluna-dia-alvo { background-color: var(--ph-primary-light); }
+
+.agenda-coluna-cabecalho {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 .6rem;
+    border-bottom: 1px solid var(--ph-border);
+    box-sizing: border-box;
+}
+.agenda-coluna-dianome { font-weight: 700; font-size: .8rem; }
+.agenda-coluna-diadata { font-size: .72rem; color: var(--ph-text-muted); }
+
+.agenda-coluna-naoagendadas {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    padding: .25rem;
+    overflow-y: auto;
+    border-bottom: 1px dashed var(--ph-border);
+    box-sizing: border-box;
+}
+
+.agenda-coluna-grade {
+    position: relative;
+    box-sizing: border-box;
+    background-image: repeating-linear-gradient(to bottom, var(--ph-border) 0, var(--ph-border) 1px, transparent 1px, transparent 60px);
+}
+
+.agenda-almoco {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, .05), rgba(0, 0, 0, .05) 6px, rgba(0, 0, 0, .09) 6px, rgba(0, 0, 0, .09) 12px);
+    border-top: 1px dashed var(--ph-text-muted);
+    border-bottom: 1px dashed var(--ph-text-muted);
+    pointer-events: none;
 }
 
 .agenda-card {
+    position: relative;
     background-color: var(--ph-surface);
     border-radius: var(--ph-radius-sm);
     box-shadow: var(--ph-elev-1);
     border-left: 4px solid var(--ph-border);
-    padding: .75rem .9rem;
+    padding: .3rem 1.2rem .3rem .45rem;
     cursor: pointer;
-    transition: box-shadow .15s ease, transform .15s ease;
+    overflow: hidden;
+    font-size: .78rem;
+    transition: box-shadow .15s ease;
 }
-.agenda-card:hover { box-shadow: var(--ph-elev-2); }
+.agenda-card:hover { box-shadow: var(--ph-elev-2); z-index: 5; }
 .agenda-card.agenda-card-arrastando { opacity: .4; }
+.agenda-card-compacta .agenda-card-notas,
+.agenda-card-compacta .badge { display: none; }
 
-.agenda-card-topo { display: flex; align-items: flex-start; gap: .6rem; }
+.agenda-card-horario { font-size: .68rem; font-weight: 700; color: var(--ph-text-muted); }
+.agenda-card-topo { display: flex; align-items: flex-start; gap: .35rem; }
+.agenda-card-titulo { font-weight: 600; overflow-wrap: anywhere; }
 
 .agenda-card-status {
     border: none;
     background: none;
     padding: 0;
-    font-size: 1.15rem;
+    font-size: 1rem;
     color: var(--ph-text-muted);
     line-height: 1;
     flex-shrink: 0;
@@ -2063,22 +2130,25 @@ a.card-cliente, a.card-cliente:hover {
 }
 .agenda-card-status:hover { color: var(--ph-primary); }
 
-.agenda-card-titulo { font-weight: 600; margin-bottom: .25rem; overflow-wrap: anywhere; }
-
-.agenda-card-alca {
+.agenda-card-remover {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    border: none;
+    background: none;
+    padding: 3px 4px;
+    font-size: .65rem;
+    line-height: 1;
     color: var(--ph-text-muted);
-    cursor: grab;
-    flex-shrink: 0;
-    align-self: center;
-    opacity: .5;
+    opacity: .4;
 }
-.agenda-card:hover .agenda-card-alca { opacity: 1; }
+.agenda-card-remover:hover { opacity: 1; color: var(--ph-danger); }
 
 .agenda-card-notas {
-    margin: .5rem 0 0;
-    padding-top: .5rem;
+    margin: .3rem 0 0;
+    padding-top: .3rem;
     border-top: 1px dashed var(--ph-border);
-    font-size: .85rem;
+    font-size: .72rem;
     color: var(--ph-text-muted);
     white-space: pre-wrap;
 }

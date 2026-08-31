@@ -1188,6 +1188,25 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_agenda_tarefas_data ON agenda_tarefas (data)");
+
+        // Depois de ver a primeira versão, o Kleber pediu que a Agenda vire um
+        // gráfico de Gantt DE VERDADE, organizado por horário (não só por
+        // dia) -- cada tarefa ganha um horário de início e uma duração
+        // estimada, e o board vira uma timeline por hora dentro do
+        // expediente. hora_inicio fica NULL pras tarefas antigas/sem horário
+        // definido (aparecem como "sem horário" até serem posicionadas).
+        $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS hora_inicio TIME NULL AFTER data");
+        $pdo->exec("ALTER TABLE agenda_tarefas ADD COLUMN IF NOT EXISTS duracao_minutos INT NOT NULL DEFAULT 60 AFTER hora_inicio");
+
+        // Cada gestor define o próprio expediente/almoço (o Kleber e o
+        // Petronilho podem trabalhar em horários diferentes) -- usado pra
+        // desenhar a régua de horas do Gantt e pra IA não sugerir tarefa fora
+        // do expediente ou em cima do almoço. NULL = ainda não configurou,
+        // aí a tela usa o padrão 08:00-18:00 / almoço 12:00-13:00.
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_expediente_inicio TIME NULL COMMENT 'Início do expediente pra régua de horas da Agenda (NULL = usa padrão 08:00)'");
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_expediente_fim TIME NULL COMMENT 'Fim do expediente pra régua de horas da Agenda (NULL = usa padrão 18:00)'");
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_almoco_inicio TIME NULL COMMENT 'Início do almoço pra régua de horas da Agenda (NULL = usa padrão 12:00)'");
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS agenda_almoco_fim TIME NULL COMMENT 'Fim do almoço pra régua de horas da Agenda (NULL = usa padrão 13:00)'");
     }
 
     /**

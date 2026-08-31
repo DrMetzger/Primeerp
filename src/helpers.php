@@ -227,6 +227,16 @@ function cor_cliente(int $clienteId): string
     return CORES_SETOR[$clienteId % count(CORES_SETOR)];
 }
 
+// "HH:MM" ou "HH:MM:SS" (como vem do banco pra coluna TIME) -> minutos desde
+// meia-noite. Usado pelo Gantt por horário da Agenda (ver agenda.php) tanto
+// pra desenhar a régua/posicionar os cards quanto pra validar horário
+// sugerido pela IA.
+function minutos_do_dia(string $horaHms): int
+{
+    $partes = explode(':', $horaHms);
+    return ((int) ($partes[0] ?? 0)) * 60 + ((int) ($partes[1] ?? 0));
+}
+
 function icone_circulo_html(string $icone, string $cor): string
 {
     return '<span class="icone-circulo" style="background-color:' . e($cor) . '1f;color:' . e($cor) . ';"><i class="bi ' . e($icone) . '"></i></span>';
