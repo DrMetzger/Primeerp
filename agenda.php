@@ -102,61 +102,187 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if ($acao === 'gerar_sugestao_dia' && $ehAjax) {
-        $dataSugestao = $_POST['data'] ?? date('Y-m-d');
-        if (!strtotime($dataSugestao)) {
-            $dataSugestao = date('Y-m-d');
+    if ($acao === 'gerar_sugestao_ia' && $ehAjax) {
+        // $clientes/$nomesClientesPorId só são montados lá embaixo, na seção
+        // de carregamento do GET -- esse handler sempre dá exit antes de
+        // chegar lá, então carrega a própria cópia aqui.
+        $clientesSugestao = $pdo->query("SELECT id, nome FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
+        $nomesClientesPorIdSugestao = array_column($clientesSugestao, 'nome', 'id');
+
+        $dataAncoraSugestao = $_POST['data'] ?? date('Y-m-d');
+        if (!strtotime($dataAncoraSugestao)) {
+            $dataAncoraSugestao = date('Y-m-d');
+        }
+        $periodoSugestao = in_array($_POST['periodo'] ?? '', ['dia', 'semana', 'mes'], true) ? $_POST['periodo'] : 'dia';
+        $clienteIdSugestao = (int) ($_POST['cliente_id'] ?? 0) ?: null;
+        $criarTarefasSugestao = ($_POST['criar_tarefas'] ?? '') === '1';
+
+        $tsAncoraSugestao = strtotime($dataAncoraSugestao);
+        if ($periodoSugestao === 'semana') {
+            $diaSemanaAncora = (int) date('N', $tsAncoraSugestao); // 1=segunda .. 7=domingo
+            $dataInicioSugestao = date('Y-m-d', strtotime('-' . ($diaSemanaAncora - 1) . ' days', $tsAncoraSugestao));
+            $dataFimSugestao = date('Y-m-d', strtotime('+' . (7 - $diaSemanaAncora) . ' days', $tsAncoraSugestao));
+        } elseif ($periodoSugestao === 'mes') {
+            $dataInicioSugestao = date('Y-m-01', $tsAncoraSugestao);
+            $dataFimSugestao = date('Y-m-t', $tsAncoraSugestao);
+        } else {
+            $dataInicioSugestao = $dataFimSugestao = $dataAncoraSugestao;
         }
 
-        $stmtTarefasDia = $pdo->prepare("
-            SELECT t.titulo, t.status, t.notas, c.nome AS nome_cliente
+        // Só dias úteis (seg-sex) entram como data permitida pra IA distribuir
+        // tarefa -- fim de semana o Kleber não trabalha, não faz sentido
+        // sugerir tarefa nesses dias quando o período é semana/mês.
+        $datasUteisSugestao = [];
+        for ($ts = strtotime($dataInicioSugestao); $ts <= strtotime($dataFimSugestao); $ts += 86400) {
+            if ((int) date('N', $ts) <= 5) {
+                $datasUteisSugestao[] = date('Y-m-d', $ts);
+            }
+        }
+        if (!$datasUteisSugestao) {
+            $datasUteisSugestao[] = $dataAncoraSugestao;
+        }
+
+        $stmtTarefasPeriodoSugestao = $pdo->prepare("
+            SELECT t.data, t.titulo, t.status, t.notas, c.nome AS nome_cliente
             FROM agenda_tarefas t
             LEFT JOIN clientes c ON c.id = t.cliente_id
-            WHERE t.data = ?
-            ORDER BY t.ordem ASC
+            WHERE t.data BETWEEN ? AND ?" . ($clienteIdSugestao ? ' AND t.cliente_id = ?' : '') . "
+            ORDER BY t.data ASC, t.ordem ASC
         ");
-        $stmtTarefasDia->execute([$dataSugestao]);
-        $tarefasDoDiaSugestao = $stmtTarefasDia->fetchAll();
+        $paramsTarefasSugestao = [$dataInicioSugestao, $dataFimSugestao];
+        if ($clienteIdSugestao) {
+            $paramsTarefasSugestao[] = $clienteIdSugestao;
+        }
+        $stmtTarefasPeriodoSugestao->execute($paramsTarefasSugestao);
+        $tarefasDoPeriodoSugestao = $stmtTarefasPeriodoSugestao->fetchAll();
 
         $stmtChamadosSugestao = $pdo->prepare("
-            SELECT ch.id, ch.titulo, ch.prioridade, ch.status, ch.criado_em, c.nome AS nome_cliente
+            SELECT ch.id, ch.titulo, ch.prioridade, ch.status, ch.criado_em, ch.cliente_id, c.nome AS nome_cliente
             FROM chamados ch
             INNER JOIN clientes c ON c.id = ch.cliente_id
-            WHERE ch.status != 'fechado'
+            WHERE ch.status != 'fechado'" . ($clienteIdSugestao ? ' AND ch.cliente_id = ?' : '') . "
             ORDER BY FIELD(ch.prioridade, 'urgente', 'alta', 'media', 'baixa'), ch.criado_em ASC
-            LIMIT 60
+            LIMIT 80
         ");
-        $stmtChamadosSugestao->execute();
+        $stmtChamadosSugestao->execute($clienteIdSugestao ? [$clienteIdSugestao] : []);
         $chamadosAbertosSugestao = $stmtChamadosSugestao->fetchAll();
 
-        $prompt = "Você é um assistente de organização pra um gestor de uma empresa de suporte/consultoria em ERP (Protheus). "
-            . 'Hoje é ' . formatar_data($dataSugestao) . ' (' . MESES_ABREV_PT_AGENDA[(int) date('n', strtotime($dataSugestao))] . '). '
-            . "Ele tem chamados de suporte abertos de vários clientes e precisa priorizar o que atacar primeiro. "
-            . "Analise a lista de chamados abertos abaixo (já ordenados por prioridade/urgência/idade) e as tarefas que ele já colocou na agenda de hoje, "
-            . "e sugira uma ordem de prioridade pro dia -- poucas linhas, direto ao ponto, focando nos clientes/chamados mais urgentes ou mais antigos sem resposta. "
-            . "Pode sugerir agrupar por cliente se fizer sentido. Responda em texto corrido, sem markdown, curto (no máximo uns 10-15 linhas).\n\n";
+        $rotuloPeriodoSugestao = [
+            'dia' => 'hoje (' . formatar_data($dataAncoraSugestao) . ')',
+            'semana' => 'essa semana (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ', dias úteis)',
+            'mes' => 'esse mês (' . formatar_data($dataInicioSugestao) . ' a ' . formatar_data($dataFimSugestao) . ', dias úteis)',
+        ][$periodoSugestao];
+        $rotuloClienteSugestao = $clienteIdSugestao ? ($nomesClientesPorIdSugestao[$clienteIdSugestao] ?? 'esse cliente') : 'todos os clientes';
 
-        $prompt .= "Tarefas já na agenda de hoje:\n";
-        if (!$tarefasDoDiaSugestao) {
-            $prompt .= "(nenhuma ainda)\n";
+        $blocoContexto = "Você é um assistente de organização pra um gestor de uma empresa de suporte/consultoria em ERP (Protheus). "
+            . "Ele tem chamados de suporte abertos de vários clientes e precisa priorizar o que atacar em {$rotuloPeriodoSugestao}, olhando só pro cliente/clientes: {$rotuloClienteSugestao}.\n\n"
+            . "Tarefas já planejadas no período:\n";
+        if (!$tarefasDoPeriodoSugestao) {
+            $blocoContexto .= "(nenhuma ainda)\n";
         }
-        foreach ($tarefasDoDiaSugestao as $t) {
-            $prompt .= '- ' . $t['titulo'] . ($t['nome_cliente'] ? ' (' . $t['nome_cliente'] . ')' : '') . ' [' . $t['status'] . "]\n";
+        foreach ($tarefasDoPeriodoSugestao as $t) {
+            $blocoContexto .= '- ' . formatar_data($t['data']) . ': ' . $t['titulo'] . ($t['nome_cliente'] ? ' (' . $t['nome_cliente'] . ')' : '') . ' [' . $t['status'] . "]\n";
         }
-
-        $prompt .= "\nChamados abertos (título / cliente / prioridade / status / aberto em):\n";
+        $blocoContexto .= "\nChamados abertos (id / título / cliente / cliente_id / prioridade / status / aberto em):\n";
         if (!$chamadosAbertosSugestao) {
-            $prompt .= "(nenhum chamado aberto no momento)\n";
+            $blocoContexto .= "(nenhum chamado aberto no momento)\n";
         }
         foreach ($chamadosAbertosSugestao as $c) {
-            $prompt .= "- {$c['titulo']} | {$c['nome_cliente']} | {$c['prioridade']} | {$c['status']} | " . formatar_data($c['criado_em']) . "\n";
+            $blocoContexto .= "- #{$c['id']} | {$c['titulo']} | {$c['nome_cliente']} | cliente_id={$c['cliente_id']} | {$c['prioridade']} | {$c['status']} | " . formatar_data($c['criado_em']) . "\n";
         }
 
+        if (!$criarTarefasSugestao) {
+            $prompt = $blocoContexto
+                . "\nAnalise a lista de chamados abertos acima (já ordenados por prioridade/urgência/idade) e as tarefas já planejadas, "
+                . "e sugira uma ordem de prioridade -- poucas linhas, direto ao ponto, focando nos clientes/chamados mais urgentes ou mais antigos sem resposta. "
+                . "Pode sugerir agrupar por cliente ou por dia se fizer sentido. Responda em texto corrido, sem markdown, curto (no máximo uns 10-15 linhas).";
+
+            $resultadoIa = AiSugestoes::gerar($prompt);
+            header('Content-Type: application/json');
+            echo json_encode($resultadoIa['ok']
+                ? ['sucesso' => true, 'tipo' => 'texto', 'sugestao' => $resultadoIa['texto']]
+                : ['sucesso' => false, 'mensagem' => $resultadoIa['erro']]);
+            exit;
+        }
+
+        $prompt = $blocoContexto
+            . "\nDatas permitidas pra colocar tarefa (dias úteis do período): " . implode(', ', $datasUteisSugestao) . "\n\n"
+            . "Monte um plano de tarefas pra esse período, priorizando os chamados mais urgentes/antigos, distribuindo entre os dias úteis de forma equilibrada "
+            . "(não empilhe tudo num dia só se o período for semana/mês). Pode juntar mais de um chamado do mesmo cliente numa tarefa só se fizer sentido, "
+            . "ou criar uma tarefa por chamado -- use seu critério. Não recrie tarefas que já existem no período (listadas acima).\n\n"
+            . "Responda APENAS com um objeto JSON válido (sem markdown, sem texto antes ou depois, sem blocos de código), exatamente neste formato:\n"
+            . '{"resumo": "3 a 5 frases em português explicando a lógica geral da priorização", '
+            . '"tarefas": [{"data": "AAAA-MM-DD (uma das datas permitidas acima)", "titulo": "ação curta e clara", '
+            . '"cliente_id": (um dos cliente_id listados acima, ou null se não for de um cliente específico), '
+            . '"chamado_id": (um dos id de chamado listados acima, ou null se a tarefa não for sobre um chamado específico), '
+            . '"notas": "detalhe opcional, string vazia se não tiver"}]}';
+
         $resultadoIa = AiSugestoes::gerar($prompt);
+        if (!$resultadoIa['ok']) {
+            header('Content-Type: application/json');
+            echo json_encode(['sucesso' => false, 'mensagem' => $resultadoIa['erro']]);
+            exit;
+        }
+
+        $textoJson = trim((string) $resultadoIa['texto']);
+        $textoJson = preg_replace('/^```(?:json)?\s*|\s*```$/', '', $textoJson);
+        $dadosPlano = json_decode($textoJson, true);
+
+        if (!is_array($dadosPlano) || !isset($dadosPlano['tarefas']) || !is_array($dadosPlano['tarefas'])) {
+            header('Content-Type: application/json');
+            echo json_encode(['sucesso' => false, 'mensagem' => 'A IA não retornou um plano em formato válido. Tente de novo.']);
+            exit;
+        }
+
+        $idsClientesValidos = array_map('intval', array_column($clientesSugestao, 'id'));
+        $idsChamadosValidos = array_map('intval', array_column($chamadosAbertosSugestao, 'id'));
+        $clientePorChamado = array_column($chamadosAbertosSugestao, 'cliente_id', 'id');
+        $datasPermitidasSet = array_flip($datasUteisSugestao);
+
+        $ordemMaxPorData = [];
+        $tarefasCriadasSugestao = [];
+        $stmtInserirSugestao = $pdo->prepare('INSERT INTO agenda_tarefas (data, ordem, titulo, cliente_id, chamado_id, notas, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)');
+
+        foreach ($dadosPlano['tarefas'] as $item) {
+            $dataItem = (string) ($item['data'] ?? '');
+            if (!isset($datasPermitidasSet[$dataItem])) {
+                continue;
+            }
+            $tituloItem = mb_substr(trim((string) ($item['titulo'] ?? '')), 0, 200);
+            if ($tituloItem === '') {
+                continue;
+            }
+            $clienteIdItem = isset($item['cliente_id']) ? (int) $item['cliente_id'] : 0;
+            if (!in_array($clienteIdItem, $idsClientesValidos, true)) {
+                $clienteIdItem = null;
+            }
+            $chamadoIdItem = isset($item['chamado_id']) ? (int) $item['chamado_id'] : 0;
+            if (!in_array($chamadoIdItem, $idsChamadosValidos, true)) {
+                $chamadoIdItem = null;
+            } elseif (!$clienteIdItem && isset($clientePorChamado[$chamadoIdItem])) {
+                $clienteIdItem = (int) $clientePorChamado[$chamadoIdItem];
+            }
+            $notasItem = trim((string) ($item['notas'] ?? '')) ?: null;
+
+            if (!isset($ordemMaxPorData[$dataItem])) {
+                $stmtOrdemMaxSugestao = $pdo->prepare('SELECT COALESCE(MAX(ordem), -1) FROM agenda_tarefas WHERE data = ?');
+                $stmtOrdemMaxSugestao->execute([$dataItem]);
+                $ordemMaxPorData[$dataItem] = (int) $stmtOrdemMaxSugestao->fetchColumn();
+            }
+            $ordemMaxPorData[$dataItem]++;
+
+            $stmtInserirSugestao->execute([$dataItem, $ordemMaxPorData[$dataItem], $tituloItem, $clienteIdItem, $chamadoIdItem, $notasItem, Auth::userId()]);
+            $tarefasCriadasSugestao[] = $dataItem;
+        }
+
         header('Content-Type: application/json');
-        echo json_encode($resultadoIa['ok']
-            ? ['sucesso' => true, 'sugestao' => $resultadoIa['texto']]
-            : ['sucesso' => false, 'mensagem' => $resultadoIa['erro']]);
+        echo json_encode([
+            'sucesso' => true,
+            'tipo' => 'tarefas',
+            'resumo' => $dadosPlano['resumo'] ?? '',
+            'totalCriadas' => count($tarefasCriadasSugestao),
+            'dataFoco' => $tarefasCriadasSugestao[0] ?? $dataAncoraSugestao,
+        ]);
         exit;
     }
 
@@ -245,10 +371,53 @@ require __DIR__ . '/templates/header.php';
     </div>
     <div class="d-flex gap-2">
         <button type="button" class="btn btn-sm btn-outline-dark" id="botaoSugestaoIa" <?= AiSugestoes::configurada() ? '' : 'disabled title="IA ainda não configurada (ver Configurações)"' ?>>
-            <i class="bi bi-stars"></i> Sugestão da IA pro dia
+            <i class="bi bi-stars"></i> Sugestão da IA
         </button>
         <button type="button" class="btn btn-sm btn-dark" id="botaoNovaTarefa"><i class="bi bi-plus-lg"></i> Nova tarefa</button>
     </div>
+</div>
+
+<!-- Antes de gerar, pergunta cliente/período/se é pra só sugerir em texto ou
+     já criar as tarefas na agenda -- pedido do Kleber pra não ter que ficar
+     copiando a sugestão manualmente dia a dia. -->
+<div class="modal fade" id="modalSugestaoIa" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-stars"></i> Sugestão da IA</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Cliente</label>
+          <select class="form-select" id="sugestaoIaCliente">
+            <option value="">Todos os clientes</option>
+            <?php foreach ($clientes as $c): ?>
+            <option value="<?= $c['id'] ?>"><?= e($c['nome']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Período</label>
+          <select class="form-select" id="sugestaoIaPeriodo">
+            <option value="dia">Hoje</option>
+            <option value="semana">Essa semana (dias úteis)</option>
+            <option value="mes">Esse mês (dias úteis)</option>
+          </select>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="sugestaoIaCriarTarefas">
+          <label class="form-check-label" for="sugestaoIaCriarTarefas">
+            Criar essas tarefas direto na agenda (em vez de só sugerir em texto)
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-dark" id="botaoGerarSugestaoIa"><i class="bi bi-stars"></i> Gerar</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="alert alert-light border d-none" id="painelSugestaoIa">
@@ -526,28 +695,58 @@ document.addEventListener('DOMContentLoaded', function () {
         fetch(window.location.href, { method: 'POST', body: dados }).catch(function () {});
     });
 
-    // --- Sugestão da IA pro dia ------------------------------------------
+    // --- Sugestão da IA: primeiro pergunta cliente/período/se cria tarefa
+    // de verdade, só depois gera -- pedido do Kleber pra não ficar copiando
+    // a sugestão manualmente todo dia.
     var botaoSugestaoIa = document.getElementById('botaoSugestaoIa');
+    var modalSugestaoIa = document.getElementById('modalSugestaoIa');
+    var botaoGerarSugestaoIa = document.getElementById('botaoGerarSugestaoIa');
+
     botaoSugestaoIa.addEventListener('click', function () {
+        PrimeUI.openModal(modalSugestaoIa);
+    });
+
+    botaoGerarSugestaoIa.addEventListener('click', function () {
         var painel = document.getElementById('painelSugestaoIa');
         var textoEl = document.getElementById('textoSugestaoIa');
+        var criarTarefas = document.getElementById('sugestaoIaCriarTarefas').checked;
+        var periodoEscolhido = document.getElementById('sugestaoIaPeriodo').value;
+
+        PrimeUI.closeModal(modalSugestaoIa);
         painel.classList.remove('d-none');
         textoEl.textContent = 'Gerando sugestão...';
-        botaoSugestaoIa.disabled = true;
+        botaoGerarSugestaoIa.disabled = true;
 
         var dados = new FormData();
-        dados.set('acao', 'gerar_sugestao_dia');
+        dados.set('acao', 'gerar_sugestao_ia');
         dados.set('ajax', '1');
         dados.set('csrf_token', document.querySelector('#formTarefaAgenda input[name="csrf_token"]').value);
         dados.set('data', document.getElementById('seletorDataFoco').value);
+        dados.set('cliente_id', document.getElementById('sugestaoIaCliente').value);
+        dados.set('periodo', periodoEscolhido);
+        dados.set('criar_tarefas', criarTarefas ? '1' : '0');
 
         fetch(window.location.href, { method: 'POST', body: dados })
             .then(function (r) { return r.json(); })
             .then(function (json) {
-                textoEl.textContent = json.sucesso ? json.sugestao : ('Não foi possível gerar: ' + json.mensagem);
+                if (!json.sucesso) {
+                    textoEl.textContent = 'Não foi possível gerar: ' + json.mensagem;
+                    return;
+                }
+                if (json.tipo === 'tarefas') {
+                    var partes = [];
+                    if (json.resumo) partes.push(json.resumo);
+                    partes.push(json.totalCriadas + ' tarefa(s) criada(s) na agenda. Atualizando a página...');
+                    textoEl.textContent = partes.join('\n\n');
+                    setTimeout(function () {
+                        window.location.href = '<?= url('agenda.php') ?>?data=' + encodeURIComponent(json.dataFoco || document.getElementById('seletorDataFoco').value);
+                    }, 2200);
+                } else {
+                    textoEl.textContent = json.sugestao;
+                }
             })
             .catch(function () { textoEl.textContent = 'Falha de conexão ao gerar a sugestão.'; })
-            .finally(function () { botaoSugestaoIa.disabled = false; });
+            .finally(function () { botaoGerarSugestaoIa.disabled = false; });
     });
     document.getElementById('fecharSugestaoIa').addEventListener('click', function () {
         document.getElementById('painelSugestaoIa').classList.add('d-none');
