@@ -94,15 +94,18 @@ class WhatsAppBot
             return;
         }
 
-        if ($conversa['etapa'] !== 'anexos') {
-            // Mídia chegando fora da hora certa (ex.: antes de identificar o
-            // cliente) -- avisa e não guarda, pra não ficar um anexo "solto"
-            // sem saber de qual chamado é.
-            WhatsAppApi::enviarTexto($telefone, '📌 Recebi o arquivo, mas ainda preciso de mais algumas informações antes. Vou te perguntar de novo o que falta.');
-            self::reenviarPerguntaAtual($conversa);
-            return;
-        }
-
+        // Mídia chegando fora da hora certa (ex.: antes de terminar de
+        // descrever o problema) -- ANTES, isso avisava "recebi o arquivo" e
+        // JOGAVA FORA sem guardar nada, pra não ficar um anexo "solto" sem
+        // saber de qual chamado é (bug real: mensagem dizia que tinha
+        // recebido, mas o cliente confirmava o chamado depois e o arquivo
+        // nunca aparecia em lugar nenhum). Agora guarda do mesmo jeito (em
+        // whatsapp_midias_temp, pelo conversa_id -- existe desde a primeira
+        // mensagem, mesmo antes de identificar o cliente) e só evita
+        // reordenar o fluxo -- continua pedindo o que falta, mas o arquivo
+        // já fica de verdade a caminho do chamado: criarChamado() puxa TODO
+        // whatsapp_midias_temp dessa conversa no final, não só o que chegou
+        // durante a etapa "anexos".
         $midia = WhatsAppApi::baixarMidia($mediaId);
         if (!$midia) {
             WhatsAppApi::enviarTexto($telefone, '😕 Não consegui baixar esse arquivo agora, pode tentar mandar de novo?');
@@ -119,6 +122,12 @@ class WhatsAppBot
 
         $pdo->prepare('INSERT INTO whatsapp_midias_temp (conversa_id, arquivo_nome_original, mime_type, dados) VALUES (?, ?, ?, ?)')
             ->execute([$conversa['id'], $nomeArquivo ?: ('anexo.' . $extensaoPermitida), $midia['mime'], $midia['bytes']]);
+
+        if ($conversa['etapa'] !== 'anexos') {
+            WhatsAppApi::enviarTexto($telefone, '📌 Arquivo recebido e guardado -- vou anexar ele no chamado automaticamente. Só preciso de mais algumas informações antes. Vou te perguntar de novo o que falta.');
+            self::reenviarPerguntaAtual($conversa);
+            return;
+        }
 
         WhatsAppApi::enviarBotoes($telefone, '✅ Recebido! Pode mandar mais algum print/arquivo, ou tocar no botão quando terminar.', [
             ['id' => 'nao', 'titulo' => '✅ Continuar'],
@@ -346,6 +355,23 @@ class WhatsAppBot
                 $conversa['setor_responsavel_id'],
                 $texto,
             ]);
+        $respostaId = (int) $pdo->lastInsertId();
+
+        // Anexa qualquer mídia que a pessoa tenha mandado enquanto ainda
+        // estava nessa etapa (ver processarMidia() -- guarda em
+        // whatsapp_midias_temp desde a primeira mensagem, não só durante a
+        // etapa "anexos" de um chamado NOVO). Diferente de criarChamado(),
+        // esse fluxo aqui é de CONTINUAR um chamado já existente -- sem esse
+        // consumo aqui, o arquivo ficava preso em whatsapp_midias_temp e
+        // sumia junto com a conversa (excluirConversa() no fim desta função
+        // apaga em cascata), mesmo a pessoa tendo recebido a mensagem
+        // dizendo que o arquivo seria anexado.
+        $midias = $pdo->prepare('SELECT * FROM whatsapp_midias_temp WHERE conversa_id = ?');
+        $midias->execute([$conversa['id']]);
+        foreach ($midias->fetchAll() as $m) {
+            salvar_bytes_como_anexo_chamado($pdo, $chamadoId, $respostaId, 'cliente', $m['arquivo_nome_original'] ?: 'anexo', $m['mime_type'] ?: 'application/octet-stream', $m['dados']);
+        }
+
         recalcular_status_chamado($pdo, $chamadoId);
 
         $stmtCliente = $pdo->prepare('SELECT nome FROM clientes WHERE id = ?');
