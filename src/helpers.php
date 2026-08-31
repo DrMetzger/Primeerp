@@ -218,6 +218,15 @@ function cor_setor(int $setorId): string
     return CORES_SETOR[$setorId % count(CORES_SETOR)];
 }
 
+// Mesma paleta/regra de cor_setor() acima, reaproveitada pra dar uma cor
+// própria e fixa a cada CLIENTE (ver agenda.php) -- é só um hash por id, não
+// tem nada de "setor" nele de verdade, mas não faz sentido duplicar a
+// paleta pra isso.
+function cor_cliente(int $clienteId): string
+{
+    return CORES_SETOR[$clienteId % count(CORES_SETOR)];
+}
+
 function icone_circulo_html(string $icone, string $cor): string
 {
     return '<span class="icone-circulo" style="background-color:' . e($cor) . '1f;color:' . e($cor) . ';"><i class="bi ' . e($icone) . '"></i></span>';

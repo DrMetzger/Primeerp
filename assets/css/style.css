@@ -2022,3 +2022,63 @@ a.card-cliente, a.card-cliente:hover {
     font-size: .8rem;
     color: var(--ph-text-muted);
 }
+
+/* ---------------------------------------------------------- Agenda (gestão)
+   Painel "Prioridades do dia" (ver agenda.php) -- lista vertical de cards
+   arrastáveis (reordenar = prioridade), cada um com uma cor própria por
+   cliente (borda esquerda, ver cor_cliente() em helpers.php) igualzinho ao
+   resto do sistema. O calendário mensal/semanal/diário ACIMA desse painel
+   reaproveita o componente genérico (.calendario-mensal, ver
+   calendario_visual.js) -- não precisa de CSS próprio aqui. */
+.agenda-coluna-dia {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    max-width: 640px;
+}
+
+.agenda-card {
+    background-color: var(--ph-surface);
+    border-radius: var(--ph-radius-sm);
+    box-shadow: var(--ph-elev-1);
+    border-left: 4px solid var(--ph-border);
+    padding: .75rem .9rem;
+    cursor: pointer;
+    transition: box-shadow .15s ease, transform .15s ease;
+}
+.agenda-card:hover { box-shadow: var(--ph-elev-2); }
+.agenda-card.agenda-card-arrastando { opacity: .4; }
+
+.agenda-card-topo { display: flex; align-items: flex-start; gap: .6rem; }
+
+.agenda-card-status {
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 1.15rem;
+    color: var(--ph-text-muted);
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: .1rem;
+}
+.agenda-card-status:hover { color: var(--ph-primary); }
+
+.agenda-card-titulo { font-weight: 600; margin-bottom: .25rem; overflow-wrap: anywhere; }
+
+.agenda-card-alca {
+    color: var(--ph-text-muted);
+    cursor: grab;
+    flex-shrink: 0;
+    align-self: center;
+    opacity: .5;
+}
+.agenda-card:hover .agenda-card-alca { opacity: 1; }
+
+.agenda-card-notas {
+    margin: .5rem 0 0;
+    padding-top: .5rem;
+    border-top: 1px dashed var(--ph-border);
+    font-size: .85rem;
+    color: var(--ph-text-muted);
+    white-space: pre-wrap;
+}

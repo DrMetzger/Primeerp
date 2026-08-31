@@ -1160,6 +1160,34 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fontes_globais_categoria ON fontes_globais (categoria)");
+
+        // Agenda de trabalho da GESTÃO (aba "Agenda", agenda.php) -- pedido
+        // do Kleber: ele tem todos os chamados mas fica perdido em qual
+        // cliente atender primeiro num dia -- aqui ele monta um plano do dia
+        // (opcionalmente ligado a um cliente/chamado, ou só uma tarefa
+        // livre), com ordem de prioridade arrastável. Só admin/diretor/CEO
+        // usam isso por enquanto ("colaborador não precisa") -- compartilhado
+        // entre eles (não é "agenda pessoal" de cada um, é o mesmo quadro pra
+        // todo mundo da gestão ver e mexer).
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS agenda_tarefas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                data DATE NOT NULL,
+                ordem INT NOT NULL DEFAULT 0,
+                titulo VARCHAR(200) NOT NULL,
+                cliente_id INT NULL,
+                chamado_id INT NULL,
+                notas TEXT NULL,
+                status ENUM('pendente','em_andamento','concluida') NOT NULL DEFAULT 'pendente',
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT fk_agenda_tarefas_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,
+                CONSTRAINT fk_agenda_tarefas_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE SET NULL,
+                CONSTRAINT fk_agenda_tarefas_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_agenda_tarefas_data ON agenda_tarefas (data)");
     }
 
     /**
