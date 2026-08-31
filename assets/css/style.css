@@ -1959,6 +1959,13 @@ a.card-cliente, a.card-cliente:hover {
 .dropzone-arquivo-texto { color: var(--ph-text-muted); font-size: .88rem; }
 .dropzone-arquivo-nome { font-weight: 600; }
 
+/* Variante compacta -- pra caber lado a lado com outros campos numa mesma
+   linha de formulário (ex.: cadastro rápido de fonte/patch em fontes.php),
+   em vez de ocupar a largura/altura toda de um formulário próprio. */
+.dropzone-arquivo-sm { padding: .5rem .75rem; flex-direction: row; gap: .5rem; }
+.dropzone-arquivo-sm .dropzone-arquivo-icone { font-size: 1.2rem; }
+.dropzone-arquivo-sm .dropzone-arquivo-texto { font-size: .8rem; }
+
 /* ------------------------------------------- Overlay de progresso de upload
    Mostrado enquanto um arquivo está subindo (barra com % de verdade, não só
    um spinner) -- pedido do Kleber depois de levantar o limite de anexo pra

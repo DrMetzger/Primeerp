@@ -212,6 +212,34 @@ define('ANEXO_CHAMADO_EXTENSOES_PROTHEUS', ['prw', 'ptm', 'prx', 'tlpp']);
 // no servidor.
 define('ANEXO_CHAMADO_ACCEPT_HTML', '.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.txt,.csv,.prw,.ptm,.prx,.tlpp,.rtf,.zip,.rar,.7z');
 
+// Biblioteca GERAL de fontes/patches ADVPL (fontes.php, tabela
+// fontes_globais) -- pedido do Kleber: um lugar só, fora de qualquer
+// cliente específico, organizado por categoria/departamento, pra guardar
+// fonte/patch de uso geral da equipe. Chave = valor gravado no banco
+// (categoria), label = o que aparece na tela.
+define('FONTES_GLOBAIS_CATEGORIAS', [
+    'integracoes' => 'Integrações',
+    'compras' => 'Compras',
+    'estoque' => 'Estoque',
+    'faturamento' => 'Faturamento',
+    'pcp' => 'PCP',
+    'qualidade' => 'Qualidade',
+    'financeiro' => 'Financeiro',
+    'fiscal' => 'Fiscal',
+    'contabilidade' => 'Contabilidade',
+    'importacoes' => 'Importações',
+    'exportacoes' => 'Exportações',
+    'miscelanea' => 'Miscelânea',
+]);
+// Mesmas 4 extensões de fonte/patch ADVPL do Protheus já aceitas em anexo de
+// chamado (ver ANEXO_CHAMADO_EXTENSOES_PROTHEUS) -- .prw/.tlpp são fonte
+// (texto), .prx é fonte precompilado (binário), .ptm é patch (pacote de
+// atualização). Valida pela extensão ORIGINAL do arquivo (mesmo motivo do
+// comentário de ANEXO_CHAMADO_EXTENSOES_PROTHEUS acima: mime_content_type()
+// não reconhece nenhuma dessas de forma confiável).
+define('FONTES_GLOBAIS_EXTENSOES_PERMITIDAS', ['prw', 'prx', 'tlpp', 'ptm']);
+define('FONTES_GLOBAIS_ACCEPT_HTML', '.prw,.prx,.tlpp,.ptm');
+
 // Vídeo aulas por setor (cliente.php e portal do cliente) -- Kleber sobe uma
 // gravação em MP4 pra cada rotina/processo do setor; reaproveita a mesma
 // tabela "documentos" (categoria 'Vídeo aula', mesmo padrão já usado por

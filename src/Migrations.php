@@ -1135,6 +1135,31 @@ class Migrations
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $pdo->exec("ALTER TABLE usuario_login_log ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL COMMENT 'Cabeçalho User-Agent do navegador no login -- só dá pra identificar SO/navegador aproximados, nunca nome da máquina/processador/memória (nenhum site tem acesso a isso, é bloqueado por design pelo navegador)' AFTER ip");
+
+        // Biblioteca GERAL de fontes/patches ADVPL (PRW/PRX/TLPP/PTM),
+        // organizada por categoria/departamento (ver FONTES_GLOBAIS_
+        // CATEGORIAS em config.php) -- pedido do Kleber pra ter um lugar só,
+        // fora de qualquer cliente específico, pra guardar fonte/patch de
+        // uso geral da equipe (não é o mesmo que setor_fontes_advpl, que é
+        // o fonte DESSE cliente/setor específico). Mesmo padrão de backup
+        // em dados (LONGBLOB) do resto do sistema -- ver
+        // Migrations::restaurarArquivoSeNecessario().
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS fontes_globais (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                categoria VARCHAR(30) NOT NULL,
+                nome VARCHAR(200) NOT NULL,
+                descricao TEXT NULL,
+                arquivo_nome_original VARCHAR(255) NOT NULL,
+                arquivo_caminho VARCHAR(255) NOT NULL,
+                arquivo_tamanho INT NOT NULL DEFAULT 0,
+                dados LONGBLOB NULL,
+                criado_por INT NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_fontes_globais_criado_por FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fontes_globais_categoria ON fontes_globais (categoria)");
     }
 
     /**

@@ -32,6 +32,7 @@ use AdminPrime\Auth;
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
         <li class="nav-item"><a class="nav-link" href="<?= url('dashboard.php') ?>"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
         <li class="nav-item"><a class="nav-link" href="<?= url('clientes.php') ?>"><i class="bi bi-people-fill"></i> Clientes</a></li>
+        <li class="nav-item"><a class="nav-link" href="<?= url('fontes.php') ?>"><i class="bi bi-file-earmark-code"></i> Fontes</a></li>
         <?php if (Auth::isAdmin()): ?>
         <li class="nav-item"><a class="nav-link" href="<?= url('usuarios.php') ?>"><i class="bi bi-person-gear"></i> Usuários</a></li>
         <li class="nav-item"><a class="nav-link" href="<?= url('relatorios.php') ?>"><i class="bi bi-clipboard-data"></i> Relatórios</a></li>
