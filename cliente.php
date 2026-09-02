@@ -2719,6 +2719,7 @@ $setores = $pdo->prepare('
         s.*,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id) AS chamados_total,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe")) AS chamados_pendentes,
+        (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status = "aguardando_cliente") AS chamados_aguardando_cliente,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ("aberto","aguardando_equipe") AND ch.prioridade IN ("alta","urgente")) AS chamados_urgentes,
         (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status = "fechado") AS chamados_fechados,
         (SELECT AVG(TIMESTAMPDIFF(MINUTE, ch.criado_em, ch.fechado_em)) FROM chamados ch WHERE ch.setor_id = s.id AND ch.fechado_em IS NOT NULL) AS tempo_medio_min
@@ -3384,6 +3385,11 @@ require __DIR__ . '/templates/header.php';
                             <span class="badge modulo-pill <?= (int) $s['chamados_pendentes'] > 0 ? 'badge-aguardando-equipe' : 'modulo-ok' ?>">
                                 <?= (int) $s['chamados_pendentes'] ?> pendente<?= (int) $s['chamados_pendentes'] !== 1 ? 's' : '' ?>
                             </span>
+                            <?php if ((int) $s['chamados_aguardando_cliente'] > 0): ?>
+                            <span class="badge modulo-pill modulo-aguardando-cliente" title="Já respondemos, esperando o cliente responder">
+                                <i class="bi bi-hourglass-split"></i> <?= (int) $s['chamados_aguardando_cliente'] ?> aguardando cliente
+                            </span>
+                            <?php endif; ?>
                             <?php if ((int) $s['chamados_urgentes'] > 0): ?>
                                 <span class="badge prio-urgente modulo-pill"><?= (int) $s['chamados_urgentes'] ?> urgente<?= (int) $s['chamados_urgentes'] !== 1 ? 's' : '' ?></span>
                             <?php endif; ?>
