@@ -2284,6 +2284,35 @@ $chamados = array_values(array_filter($chamados, function ($c) use ($clienteId) 
     return Auth::podeAcessarSetor($clienteId, $c['setor_id'] !== null ? (int) $c['setor_id'] : null);
 }));
 
+// Resumo geral (todos os setores + sem setor juntos, já respeitando o
+// escopo do colaborador restrito de cima) -- pedido do Kleber: "quero um
+// container totalizando tudo que está pendente, aberto, aguardando nós,
+// aguardando cliente" pra bater o olho nesse cliente sem precisar abrir
+// setor por setor. Fechado não entra na conta -- já tá resolvido. Se não
+// sobrar nada em aberto, vira uma mensagem de parabéns em vez dos badges
+// (ver card "Todos os setores" mais abaixo).
+$resumoChamadosAbertos = 0;
+$resumoChamadosAguardandoEquipe = 0;
+$resumoChamadosAguardandoCliente = 0;
+$resumoChamadosMaisAntigoMin = null;
+foreach ($chamados as $c) {
+    if ($c['status'] === 'fechado') {
+        continue;
+    }
+    if ($c['status'] === 'aberto') {
+        $resumoChamadosAbertos++;
+    } elseif ($c['status'] === 'aguardando_equipe') {
+        $resumoChamadosAguardandoEquipe++;
+    } elseif ($c['status'] === 'aguardando_cliente') {
+        $resumoChamadosAguardandoCliente++;
+    }
+    $minutosParadoResumo = (time() - strtotime($c['criado_em'])) / 60;
+    if ($resumoChamadosMaisAntigoMin === null || $minutosParadoResumo > $resumoChamadosMaisAntigoMin) {
+        $resumoChamadosMaisAntigoMin = $minutosParadoResumo;
+    }
+}
+$resumoChamadosTotalGeral = $resumoChamadosAbertos + $resumoChamadosAguardandoEquipe + $resumoChamadosAguardandoCliente;
+
 // Monta a conversa completa de cada chamado (mensagem de abertura + todas as
 // respostas + anexos de cada uma), já num formato único pro template só
 // percorrer e desenhar as bolhas -- antes a mensagem de abertura ficava de
@@ -3361,6 +3390,27 @@ require __DIR__ . '/templates/header.php';
             <div class="grid-setores">
                 <div class="card-setor card-setor-todos active" data-setor-filtro="todos" role="button" tabindex="0">
                     <div class="card-setor-topo"><i class="bi bi-collection"></i> <span class="fw-semibold">Todos os setores</span></div>
+                    <?php if ($resumoChamadosTotalGeral === 0): ?>
+                    <div class="card-setor-parabens">
+                        <div class="card-setor-parabens-emojis">🎉 ✅ 🥳</div>
+                        <div class="fw-semibold text-success small">Tudo em dia!</div>
+                        <div class="text-muted small">Nenhum chamado pendente nesse cliente.</div>
+                    </div>
+                    <?php else: ?>
+                    <div class="card-setor-insights">
+                        <?php if ($resumoChamadosAbertos > 0): ?>
+                        <span class="badge modulo-pill modulo-aberto"><i class="bi bi-envelope-open"></i> <?= $resumoChamadosAbertos ?> aberto<?= $resumoChamadosAbertos !== 1 ? 's' : '' ?></span>
+                        <?php endif; ?>
+                        <?php if ($resumoChamadosAguardandoEquipe > 0): ?>
+                        <span class="badge modulo-pill badge-aguardando-equipe"><i class="bi bi-exclamation-circle-fill"></i> <?= $resumoChamadosAguardandoEquipe ?> aguardando nós</span>
+                        <?php endif; ?>
+                        <?php if ($resumoChamadosAguardandoCliente > 0): ?>
+                        <span class="badge modulo-pill modulo-aguardando-cliente"><i class="bi bi-hourglass-split"></i> <?= $resumoChamadosAguardandoCliente ?> aguardando cliente</span>
+                        <?php endif; ?>
+                        <span class="badge modulo-pill modulo-neutro"><?= $resumoChamadosTotalGeral ?> no total</span>
+                        <span class="badge modulo-pill modulo-neutro" title="Chamado em aberto há mais tempo, sem contar os fechados"><i class="bi bi-clock-history"></i> <?= e(formatar_duracao_minutos($resumoChamadosMaisAntigoMin)) ?></span>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <?php foreach ($setores as $s): ?>
                     <div class="card-setor <?= (int) $s['chamados_urgentes'] > 0 ? 'setor-atencao' : '' ?>" data-setor-filtro="<?= $s['id'] ?>" role="button" tabindex="0" style="<?= (int) $s['chamados_urgentes'] > 0 ? '' : 'border-left: 4px solid ' . cor_setor($s['id']) . ';' ?>">

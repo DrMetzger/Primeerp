@@ -1463,6 +1463,14 @@ a.card-cliente, a.card-cliente:hover {
    resposta do cliente; agora um indicador próprio, cor diferente de
    "pendente"/"urgente" pra não parecer que é problema nosso. */
 .modulo-aguardando-cliente { background-color: #ede9fe; color: #6d28d9; }
+.modulo-aberto { background-color: var(--ph-info-bg); color: var(--ph-info); }
+
+/* Card "Todos os setores" (cliente.php, aba Chamados) -- resumo geral de
+   pendências, e mensagem de parabéns quando não sobra nada em aberto pra
+   esse cliente (pedido do Kleber: "se tudo estiver fechado, dê os
+   parabéns com emojis"). */
+.card-setor-parabens { margin-top: .5rem; }
+.card-setor-parabens-emojis { font-size: 1.6rem; line-height: 1; margin-bottom: .15rem; }
 
 /* Painel de setores independentes (cliente.php, aba Chamados, e portal do
    cliente pro usuário master) -- mesmo espírito visual do grid de clientes
