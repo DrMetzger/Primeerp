@@ -2279,8 +2279,16 @@ $chamados = $chamados->fetchAll();
 // chamados dos setores vinculados a ele nesse cliente (ou sem setor
 // nenhum, contanto que tenha pelo menos 1 vínculo aqui) -- sem restrição
 // (admin/diretor/ceo, ou colaborador sem o toggle), continua vendo todos,
-// exatamente como sempre.
-$chamados = array_values(array_filter($chamados, function ($c) use ($clienteId) {
+// exatamente como sempre. EXCEÇÃO: se o chamado está atribuído
+// DIRETAMENTE a ele (responsavel_id), sempre aparece, mesmo fora do setor
+// permitido -- senão vira uma tarefa impossível ("responsável não
+// consegue nem ver o próprio chamado atribuído", bug real do Caio no
+// chamado #242/CIAP WERK, setor Custos fora do escopo dele).
+$usuarioLogadoId = Auth::userId();
+$chamados = array_values(array_filter($chamados, function ($c) use ($clienteId, $usuarioLogadoId) {
+    if ((int) ($c['responsavel_id'] ?? 0) === $usuarioLogadoId) {
+        return true;
+    }
     return Auth::podeAcessarSetor($clienteId, $c['setor_id'] !== null ? (int) $c['setor_id'] : null);
 }));
 
