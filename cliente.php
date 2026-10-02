@@ -4517,13 +4517,6 @@ require __DIR__ . '/templates/header.php';
 
     <!-- T-CLOUD (ambientes + configs VSCode) -->
     <div class="tab-pane" id="tcloud">
-        <div class="alert alert-warning d-flex align-items-start gap-2">
-            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
-            <div>
-                <strong>Área restrita.</strong> Links de ambiente e de acesso remoto do T-Cloud -- mesma trava da aba Acessos.
-            </div>
-        </div>
-
         <div class="mb-3">
             <h6 class="mb-0"><i class="bi bi-cloud"></i> Ambientes</h6>
             <p class="text-muted small mb-0">Clique num ambiente pra ver/editar os links (Protheus, REST, Schedule, modo exclusivo).</p>
