@@ -2879,7 +2879,7 @@ require __DIR__ . '/templates/header.php';
     <?php endif; ?>
     <?php if ($podeAcessarAcessosProprios): ?>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#acessos"><i class="bi bi-shield-lock"></i> Acessos</a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tcloud"><i class="bi bi-cloud"></i> T-Cloud</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tcloud"><i class="bi bi-cloud"></i> Links de Acesso</a></li>
     <?php endif; ?>
 </ul>
 
