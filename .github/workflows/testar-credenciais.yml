@@ -1,0 +1,74 @@
+# Testa se os secrets do repositório (Gemini, banco e FTP) funcionam.
+# Não imprime nenhum valor: cada job só passa (verde) ou falha (vermelho).
+name: Testar credenciais
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/testar-credenciais.yml
+
+permissions:
+  contents: read
+
+jobs:
+  gemini-ai-studio:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar Gemini (generativelanguage.googleapis.com)
+        env:
+          KEY: ${{ secrets.GEMINI_KEY }}
+        run: |
+          test -n "$KEY" || { echo "GEMINI_KEY vazio"; exit 1; }
+          for M in gemini-flash-lite-latest gemini-flash-latest; do
+            CODE=$(curl -sS -o resp.json -w '%{http_code}' -H 'Content-Type: application/json' -H "x-goog-api-key: $KEY" \
+              "https://generativelanguage.googleapis.com/v1beta/models/$M:generateContent" \
+              -d '{"contents":[{"parts":[{"text":"Responda apenas: OK"}]}]}')
+            echo "$M -> HTTP $CODE"
+            jq -r '.error.message // .candidates[0].content.parts[0].text' resp.json || true
+            [ "$CODE" = 200 ] && exit 0
+          done
+          exit 1
+
+  gemini-vertex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar Gemini (aiplatform.googleapis.com)
+        env:
+          KEY: ${{ secrets.GEMINI_KEY }}
+        run: |
+          test -n "$KEY" || { echo "GEMINI_KEY vazio"; exit 1; }
+          CODE=$(curl -sS -o resp.json -w '%{http_code}' -H 'Content-Type: application/json' \
+            "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash-lite:generateContent?key=$KEY" \
+            -d '{"contents":[{"role":"user","parts":[{"text":"Responda apenas: OK"}]}]}')
+          echo "HTTP $CODE"
+          jq -r '.error.message // .candidates[0].content.parts[0].text' resp.json || true
+          [ "$CODE" = 200 ]
+
+  banco:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conectar no MySQL
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          MYSQL_PWD: ${{ secrets.DB_PASS }}
+        run: |
+          for v in DB_HOST DB_NAME DB_USER MYSQL_PWD; do test -n "${!v}" || { echo "$v vazio"; exit 1; }; done
+          mysql --connect-timeout=20 -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) AS tabelas FROM information_schema.tables WHERE table_schema = DATABASE();"
+
+  ftp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conectar no FTP
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USR: ${{ secrets.FTP_USR }}
+          FTP_PSW: ${{ secrets.FTP_PSW }}
+        run: |
+          for v in FTP_HOST FTP_USR FTP_PSW; do test -n "${!v}" || { echo "$v vazio"; exit 1; }; done
+          H="${FTP_HOST#ftp://}"; H="${H%/}"
+          printf 'user = "%s:%s"\n' "$FTP_USR" "$FTP_PSW" > cfg
+          curl -sS --connect-timeout 20 -K cfg --list-only "ftp://$H/" | head -50 \
+            || curl -sS --connect-timeout 20 -K cfg --ssl-reqd --list-only "ftp://$H/" | head -50
