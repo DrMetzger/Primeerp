@@ -13,9 +13,12 @@ use PDO;
  *  2. Se achou algum, UMA chamada ao modelo mais barato (flash-lite), sem
  *     busca na internet, perguntando se aquelas soluções resolvem o chamado
  *     novo e já escrevendo a resposta no nosso jeito de falar.
- *  3. Só se a base não resolver: UMA chamada com a busca do Google ligada,
- *     restrita ao TDN da TOTVS e ao User Function. Essa é a etapa que custa
- *     mais, por isso tem limite diário próprio (ver configuracoes.php).
+ *  3. Se a base não resolver: procura no User Function pela API pública do
+ *     site (sem custo de busca) e o modelo barato responde com base nos
+ *     artigos encontrados.
+ *  4. Só se nada disso resolver: busca do Google no TDN da TOTVS (o site
+ *     bloqueia acesso direto). É a única etapa cobrada por pesquisa, por
+ *     isso tem limite diário próprio (ver configuracoes.php).
  *
  * O resultado fica em chamado_ia_analises. Modo "sugestao" (padrão): só
  * aparece pra equipe dentro do chamado, com botão pra usar como resposta.
@@ -33,7 +36,9 @@ class IaChamados
     // Modelo "flash" cheio pensa antes de responder (tokens de raciocínio
     // contam na saída), então precisa de mais folga pra não cortar a resposta.
     private const MAX_TOKENS_RESPOSTA_BUSCA = 4000;
-    public const MODELOS_BUSCA = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
+    // "flash" cheio primeiro na busca: nos testes o "flash-lite" respondia
+    // sem nem chamar a ferramenta de busca do Google.
+    public const MODELOS_BUSCA = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 
     private const STOPWORDS = [
         'para', 'pelo', 'pela', 'pelos', 'pelas', 'como', 'quando', 'onde', 'porque', 'porém', 'porem', 'mais', 'menos',
@@ -245,18 +250,51 @@ class IaChamados
             }
         }
 
-        // Etapa 2: TDN / User Function (busca do Google = a parte que custa).
+        // Etapa 2: User Function (API pública do site, sem custo de busca).
+        $consultas = self::consultasDeBusca($chamado, $tokensEntrada, $tokensSaida);
+        $artigos = self::artigosUserFunction($consultas);
+        if ($artigos) {
+            $r = AiSugestoes::gerar(
+                self::promptArtigos($chamado, $artigos, $primeiroNome),
+                [],
+                null,
+                [],
+                ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.3, 'responseMimeType' => 'application/json']
+            );
+            if ($r['ok']) {
+                $tokensEntrada += $r['uso']['entrada'];
+                $tokensSaida += $r['uso']['saida'];
+                $json = json_decode(self::extrairJson($r['texto']), true);
+                if (!empty($json['resolve']) && trim($json['resposta'] ?? '') !== '') {
+                    $usados = array_values(array_filter(array_map(
+                        fn ($i) => $artigos[(int) $i - 1] ?? null,
+                        (array) ($json['artigos'] ?? [])
+                    )));
+
+                    return self::finalizar($pdo, $chamado, $manual, [
+                        'fonte' => 'internet',
+                        'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
+                        'links' => json_encode(array_map(fn ($a) => ['titulo' => $a['titulo'], 'url' => $a['url']], $usados ?: $artigos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        'tokens_entrada' => $tokensEntrada,
+                        'tokens_saida' => $tokensSaida,
+                    ]);
+                }
+            }
+        }
+
+        // Etapa 3: TDN via busca do Google -- a única parte cobrada por
+        // pesquisa, por isso tem limite diário próprio.
         if (self::analisesHoje($pdo, true) >= self::limiteBuscaDia($pdo)) {
             return [
                 'status' => 'sem_resposta',
-                'erro' => 'Nada parecido na base e o limite diário de buscas na internet já foi atingido.',
+                'erro' => 'Nada parecido na base nem no User Function, e o limite diário de buscas no TDN já foi atingido.',
                 'tokens_entrada' => $tokensEntrada,
                 'tokens_saida' => $tokensSaida,
             ];
         }
 
         $r = AiSugestoes::gerar(
-            self::promptBusca($chamado, $primeiroNome),
+            self::promptBusca($chamado, $primeiroNome, $consultas),
             [['google_search' => (object) []]],
             AiSugestoes::chaveParaBuscaOuAnalise(),
             [],
@@ -270,20 +308,19 @@ class IaChamados
         $tokensEntrada += $r['uso']['entrada'];
         $tokensSaida += $r['uso']['saida'];
 
-        $texto = trim($r['texto']);
-        $encontrou = (bool) preg_match('/^\s*ENCONTROU:\s*SIM/i', $texto);
-        $resposta = trim(preg_replace('/^\s*ENCONTROU:\s*(SIM|N[AÃ]O)\s*/iu', '', $texto));
+        $resposta = trim($r['texto']);
+        $naoEncontrou = $resposta === '' || stripos($resposta, 'NAO_ENCONTRADO') !== false;
 
         // Só vale se pelo menos uma das páginas usadas for da TOTVS ou do
         // User Function -- resposta montada com blog aleatório não serve.
         $fontesOficiais = array_values(array_filter($r['fontes'], fn ($f) => preg_match('/totvs|userfunction/i', $f['titulo'] . ' ' . $f['url'])));
 
-        if (!$encontrou || $resposta === '' || !$fontesOficiais) {
+        if ($naoEncontrou || !$fontesOficiais) {
             return [
                 'status' => 'sem_resposta',
                 'usou_busca' => 1,
                 'links' => $r['fontes'] ? json_encode($r['fontes'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
-                'erro' => 'Não encontrou nada confiável na base nem no TDN/User Function.',
+                'erro' => 'Não encontrou nada confiável na base, no User Function nem no TDN.',
                 'tokens_entrada' => $tokensEntrada,
                 'tokens_saida' => $tokensSaida,
             ];
@@ -297,6 +334,81 @@ class IaChamados
             'tokens_entrada' => $tokensEntrada,
             'tokens_saida' => $tokensSaida,
         ]);
+    }
+
+    /**
+     * 2-3 consultas curtas (ex.: "difal protheus") geradas pelo modelo barato
+     * -- palavra-chave crua do chamado (F2_DIFAL, nº de nota) busca mal em site.
+     */
+    private static function consultasDeBusca(array $chamado, int &$tokensEntrada, int &$tokensSaida): array
+    {
+        $r = AiSugestoes::gerar(
+            "Chamado de suporte TOTVS Protheus:\nTítulo: {$chamado['titulo']}\nDescrição: " . mb_substr($chamado['descricao'], 0, 1500)
+            . "\n\nGere de 2 a 3 consultas de busca CURTAS (2 a 4 palavras cada, em português, sem nome de cliente nem número de documento) "
+            . 'pra achar artigos sobre esse problema em sites de Protheus, da mais específica pra mais genérica. '
+            . 'Responda só JSON: {"consultas": ["...", "..."]}',
+            [],
+            null,
+            [],
+            ['maxOutputTokens' => 150, 'temperature' => 0.2, 'responseMimeType' => 'application/json']
+        );
+        if (!$r['ok']) {
+            return [];
+        }
+        $tokensEntrada += $r['uso']['entrada'];
+        $tokensSaida += $r['uso']['saida'];
+        $json = json_decode(self::extrairJson($r['texto']), true);
+
+        return array_slice(array_values(array_filter(array_map('trim', (array) ($json['consultas'] ?? [])), 'strlen')), 0, 3);
+    }
+
+    /** Até 3 artigos do User Function (API pública do WordPress do site). */
+    private static function artigosUserFunction(array $consultas): array
+    {
+        $ids = [];
+        foreach ($consultas as $consulta) {
+            $resultados = json_decode((string) self::httpGet('https://userfunction.com.br/wp-json/wp/v2/search?per_page=3&subtype=post&search=' . rawurlencode($consulta)), true);
+            foreach (is_array($resultados) ? $resultados : [] as $item) {
+                if (!empty($item['id'])) {
+                    $ids[(int) $item['id']] = true;
+                }
+            }
+            if (count($ids) >= 3) {
+                break;
+            }
+        }
+
+        $artigos = [];
+        foreach (array_slice(array_keys($ids), 0, 3) as $id) {
+            $post = json_decode((string) self::httpGet("https://userfunction.com.br/wp-json/wp/v2/posts/{$id}?_fields=title,content,link"), true);
+            if (empty($post['content']['rendered'])) {
+                continue;
+            }
+            $texto = html_entity_decode(strip_tags(preg_replace('#<(script|style)[^>]*>.*?</\1>#si', '', $post['content']['rendered'])), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $artigos[] = [
+                'titulo' => html_entity_decode(strip_tags($post['title']['rendered'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                'url' => $post['link'],
+                'texto' => mb_substr(trim(preg_replace('/\s+/u', ' ', $texto)), 0, 3500),
+            ];
+        }
+
+        return $artigos;
+    }
+
+    private static function httpGet(string $url): ?string
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_USERAGENT => 'PrimeHub/1.0 (+https://www.primeerp.com.br)',
+        ]);
+        $corpo = curl_exec($ch);
+        $codigo = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return ($corpo !== false && $codigo === 200) ? $corpo : null;
     }
 
     /**
@@ -488,19 +600,35 @@ TXT;
             . 'Responda SOMENTE com JSON neste formato: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "referencias": [ids dos chamados de referência usados]}';
     }
 
-    private static function promptBusca(array $chamado, string $primeiroNome): string
+    private static function promptArtigos(array $chamado, array $artigos, string $primeiroNome): string
     {
+        $blocos = '';
+        foreach ($artigos as $i => $a) {
+            $blocos .= "\n--- Artigo " . ($i + 1) . ": {$a['titulo']} ---\n{$a['texto']}\n";
+        }
+
+        return "Você é consultor de TOTVS Protheus na PrimeERP. Chegou o chamado abaixo. Separei artigos do site User Function "
+            . "(referência técnica de Protheus) que podem ajudar.\n\n"
+            . self::blocoChamado($chamado)
+            . "\nARTIGOS:" . $blocos . "\n\n"
+            . "TAREFA: decida se algum artigo realmente orienta a solução DESTE problema (tema parecido não basta). "
+            . "Se sim, escreva a resposta pro cliente baseada SÓ no que os artigos dizem.\n\n"
+            . self::regrasDeEscrita($primeiroNome) . "\n\n"
+            . 'Responda SOMENTE com JSON: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "artigos": [números dos artigos usados]}';
+    }
+
+    private static function promptBusca(array $chamado, string $primeiroNome, array $consultas = []): string
+    {
+        $sugestoes = $consultas ? ' Sugestões de termos: ' . implode('; ', $consultas) . '.' : '';
+
         return "Você é consultor de TOTVS Protheus na PrimeERP. Chegou o chamado abaixo e precisamos de uma orientação técnica confiável.\n\n"
             . self::blocoChamado($chamado)
-            . "\nPESQUISE usando a busca do Google SOMENTE nestes sites oficiais/de referência:\n"
-            . "- TDN da TOTVS: use consultas com site:tdn.totvs.com (e, se precisar, site:centraldeatendimento.totvs.com)\n"
-            . "- User Function: use consultas com site:userfunction.com.br\n"
-            . "Você DEVE usar a ferramenta de busca antes de responder: faça de 2 a 4 pesquisas curtas com os termos técnicos do chamado "
-            . "(rotina, campo, parâmetro, mensagem de erro, tema fiscal), sempre com o site: na frente. "
-            . "Ignore qualquer outro site. Só responda NAO depois de pesquisar e não achar nada que realmente se aplique; nunca invente.\n\n"
+            . "\nPrimeiro PESQUISE com a busca do Google na documentação oficial da TOTVS: consultas com site:tdn.totvs.com "
+            . "(e, se precisar, site:centraldeatendimento.totvs.com).{$sugestoes} Faça de 2 a 4 pesquisas curtas antes de concluir. "
+            . "Use só o que encontrar nessas páginas da TOTVS; não use outros sites e nunca invente rotina, parâmetro ou campo.\n\n"
             . self::regrasDeEscrita($primeiroNome) . "\n\n"
-            . "FORMATO DA SAÍDA: a primeira linha deve ser exatamente \"ENCONTROU: SIM\" ou \"ENCONTROU: NAO\". "
-            . "Se SIM, a partir da segunda linha escreva só a resposta pro cliente. Se NAO, não escreva mais nada.";
+            . "SAÍDA: escreva só a resposta pro cliente. Se depois de pesquisar não achar nada que realmente se aplique, "
+            . "escreva apenas a palavra NAO_ENCONTRADO.";
     }
 
     // --- Utilitários -------------------------------------------------------------
