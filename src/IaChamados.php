@@ -30,6 +30,10 @@ class IaChamados
     private const MAX_PALAVRAS_CHAVE = 8;
     // Resposta curta = barata e com cara de conversa (não de manual).
     private const MAX_TOKENS_RESPOSTA = 900;
+    // Modelo "flash" cheio pensa antes de responder (tokens de raciocínio
+    // contam na saída), então precisa de mais folga pra não cortar a resposta.
+    private const MAX_TOKENS_RESPOSTA_BUSCA = 4000;
+    public const MODELOS_BUSCA = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
 
     private const STOPWORDS = [
         'para', 'pelo', 'pela', 'pelos', 'pelas', 'como', 'quando', 'onde', 'porque', 'porém', 'porem', 'mais', 'menos',
@@ -233,7 +237,7 @@ class IaChamados
 
                 return self::finalizar($pdo, $chamado, $manual, [
                     'fonte' => 'base',
-                    'resposta' => self::limparTexto($json['resposta']),
+                    'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
                     'chamados_referencia' => implode(',', $referencias ?: array_map(fn ($s) => (int) $s['id'], $similares)),
                     'tokens_entrada' => $tokensEntrada,
                     'tokens_saida' => $tokensSaida,
@@ -256,7 +260,8 @@ class IaChamados
             [['google_search' => (object) []]],
             AiSugestoes::chaveParaBuscaOuAnalise(),
             [],
-            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.3]
+            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA_BUSCA, 'temperature' => 0.3],
+            self::MODELOS_BUSCA
         );
         if (!$r['ok']) {
             return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500), 'usou_busca' => 1,
@@ -286,7 +291,7 @@ class IaChamados
 
         return self::finalizar($pdo, $chamado, $manual, [
             'fonte' => 'internet',
-            'resposta' => self::limparTexto($resposta),
+            'resposta' => self::garantirNome(self::limparTexto($resposta), $primeiroNome),
             'links' => json_encode($fontesOficiais, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'usou_busca' => 1,
             'tokens_entrada' => $tokensEntrada,
@@ -435,7 +440,7 @@ class IaChamados
     private static function regrasDeEscrita(string $primeiroNome): string
     {
         $saudacao = $primeiroNome !== ''
-            ? "Comece cumprimentando {$primeiroNome} pelo primeiro nome, de um jeito simples e variado (ex.: \"Oi, {$primeiroNome}, tudo bem?\")."
+            ? "OBRIGATÓRIO: a primeira frase cumprimenta {$primeiroNome} pelo nome, de um jeito simples (ex.: \"Oi, {$primeiroNome}, tudo bem?\" ou \"Olá, {$primeiroNome}!\")."
             : 'Comece com um cumprimento simples (ex.: "Olá, tudo bem?").';
 
         return <<<TXT
@@ -443,7 +448,7 @@ COMO ESCREVER A RESPOSTA (muito importante):
 - Você escreve como um consultor Protheus da PrimeERP falando com o cliente: português do Brasil, cordial, direto e natural, como uma pessoa de verdade escreveria no chamado.
 - {$saudacao}
 - Nunca diga que é IA, robô, assistente virtual ou modelo. Não fale em "base de dados", "chamados anteriores", "outros clientes", "pesquisei" ou "encontrei na internet".
-- Nunca cite nome de outro cliente nem dados de outro chamado.
+- Nunca cite nome de outro cliente nem dados de outro chamado. Não copie respostas antigas palavra por palavra: escreva de novo, para ESTE chamado (mencione o que o cliente relatou, ex.: número da nota, rotina, mensagem de erro).
 - Texto puro: sem markdown, sem asteriscos, sem #, sem tabelas, sem emojis. Se precisar de passo a passo, use linhas "1)", "2)", "3)".
 - Seja curto: no máximo uns 170 palavras. Nada de introdução longa nem despedida formal; não assine (o nome já aparece no chamado).
 - Use os nomes certos de rotina, parâmetro (MV_...), tabela e campo, mas NUNCA invente um. Se faltar informação pra ter certeza, peça de forma objetiva (ex.: print do erro, rotina, filial, exemplo de documento).
@@ -490,7 +495,9 @@ TXT;
             . "\nPESQUISE usando a busca do Google SOMENTE nestes sites oficiais/de referência:\n"
             . "- TDN da TOTVS: use consultas com site:tdn.totvs.com (e, se precisar, site:centraldeatendimento.totvs.com)\n"
             . "- User Function: use consultas com site:userfunction.com.br\n"
-            . "Ignore qualquer outro site. Se nesses sites não houver nada que realmente se aplique a esse problema, não invente.\n\n"
+            . "Você DEVE usar a ferramenta de busca antes de responder: faça de 2 a 4 pesquisas curtas com os termos técnicos do chamado "
+            . "(rotina, campo, parâmetro, mensagem de erro, tema fiscal), sempre com o site: na frente. "
+            . "Ignore qualquer outro site. Só responda NAO depois de pesquisar e não achar nada que realmente se aplique; nunca invente.\n\n"
             . self::regrasDeEscrita($primeiroNome) . "\n\n"
             . "FORMATO DA SAÍDA: a primeira linha deve ser exatamente \"ENCONTROU: SIM\" ou \"ENCONTROU: NAO\". "
             . "Se SIM, a partir da segunda linha escreva só a resposta pro cliente. Se NAO, não escreva mais nada.";
@@ -531,6 +538,21 @@ TXT;
         $fim = strrpos($texto, '}');
 
         return ($inicio !== false && $fim !== false) ? substr($texto, $inicio, $fim - $inicio + 1) : $texto;
+    }
+
+    /** Se o modelo esqueceu o nome no cumprimento ("Oi, tudo bem?"), põe. */
+    private static function garantirNome(string $texto, string $primeiroNome): string
+    {
+        if ($primeiroNome === '' || mb_stripos(mb_substr($texto, 0, 80), $primeiroNome) !== false) {
+            return $texto;
+        }
+
+        return preg_replace_callback('/^(Oi|Olá|Ola|Bom dia|Boa tarde|Boa noite)\b[,!.]?\s*(\S?)/u', function ($m) use ($primeiroNome) {
+            // "Oi, tudo bem?" -> "Oi, Mariana, tudo bem?"; "Olá! Essa..." -> "Olá, Mariana! Essa..."
+            $continuaMinusculo = $m[2] !== '' && mb_strtolower($m[2]) === $m[2] && mb_strtoupper($m[2]) !== $m[2];
+
+            return $m[1] . ', ' . $primeiroNome . ($continuaMinusculo ? ', ' : '! ') . $m[2];
+        }, $texto, 1) ?? $texto;
     }
 
     private static function semAcento(string $texto): string

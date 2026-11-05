@@ -126,7 +126,7 @@ class AiSugestoes
      * recusado pelo Gemini etc.), pra quem chamou avisar sem abortar a
      * geração inteira por causa de UM anexo com problema.
      */
-    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = [], array $configGeracao = []): array
+    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = [], array $configGeracao = [], ?array $modelos = null): array
     {
         $chave ??= self::chaveAnalise();
         if ($chave === '') {
@@ -161,8 +161,11 @@ class AiSugestoes
         // insistir no mesmo. Só não vale repetir o MESMO modelo de novo
         // nesse caso (por isso o "break", não um retry) -- só o Google sabe
         // se um 429/503 vale a pena tentar de novo com o mesmo modelo.
-        foreach ([self::MODELO, self::MODELO_RESERVA] as $indiceModelo => $modelo) {
-            $ehUltimoModelo = $indiceModelo === 1;
+        // $modelos permite a quem chama escolher outra ordem (ex.: busca na
+        // internet funciona melhor no "flash" cheio) -- padrão de sempre.
+        $listaModelos = $modelos ?: [self::MODELO, self::MODELO_RESERVA];
+        foreach ($listaModelos as $indiceModelo => $modelo) {
+            $ehUltimoModelo = $indiceModelo === count($listaModelos) - 1;
             $tentativas = $ehUltimoModelo ? 1 : self::TENTATIVAS_POR_MODELO;
 
             for ($tentativa = 1; $tentativa <= $tentativas; $tentativa++) {
