@@ -1,0 +1,74 @@
+# Publica o sistema na Hostinger por FTP (pasta public_html/AdminPrime).
+#
+# Segurança do deploy:
+#  - Só ENVIA arquivos versionados; nunca apaga nada que não tenha sido
+#    enviado por este próprio deploy (ele guarda o estado em
+#    AdminPrime/.ftp-deploy-sync-state.json e, nas próximas vezes, só manda
+#    o que mudou).
+#  - uploads/ e assets/avatars/ (anexos, fotos e logos enviados pelos
+#    usuários) e a pasta .git da Hostinger ficam de fora.
+name: Deploy FTP (Hostinger)
+
+on:
+  push:
+    branches:
+      - main
+      - claude/ecstatic-feynman-p65s7l
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ftp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # true = só mostra o que seria enviado, sem enviar nada.
+  ENSAIO: 'true'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir servidor e pasta de destino
+        id: servidor
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USR: ${{ secrets.FTP_USR }}
+          FTP_PSW: ${{ secrets.FTP_PSW }}
+        run: |
+          H="${FTP_HOST#ftp://}"; H="${H%/}"
+          echo "host=$H" >> "$GITHUB_OUTPUT"
+          printf 'user = "%s:%s"\n' "$FTP_USR" "$FTP_PSW" > cfg
+          # Prefere FTPS (senha criptografada); só cai pra FTP puro se o servidor não aceitar.
+          if curl -sS --connect-timeout 20 -K cfg --ssl-reqd --list-only "ftp://$H/AdminPrime/" > lista 2>/dev/null; then
+            echo "protocolo=ftps" >> "$GITHUB_OUTPUT"; echo "Conexão: FTPS"
+          else
+            curl -sS --connect-timeout 20 -K cfg --list-only "ftp://$H/AdminPrime/" > lista
+            echo "protocolo=ftp" >> "$GITHUB_OUTPUT"; echo "Conexão: FTP"
+          fi
+          rm -f cfg
+          for f in cliente.php bootstrap.php config uploads; do
+            grep -qx "$f" lista && echo "ok: $f existe no destino" || { echo "ERRO: $f não encontrado em AdminPrime/ -- pasta errada?"; exit 1; }
+          done
+
+      - name: Enviar arquivos
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ steps.servidor.outputs.host }}
+          username: ${{ secrets.FTP_USR }}
+          password: ${{ secrets.FTP_PSW }}
+          protocol: ${{ steps.servidor.outputs.protocolo }}
+          server-dir: AdminPrime/
+          dry-run: ${{ env.ENSAIO == 'true' }}
+          log-level: standard
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**
+            uploads/**
+            assets/avatars/**
+            README.md
