@@ -666,6 +666,7 @@ COMO ESCREVER A RESPOSTA (muito importante):
 - Seja curto: no máximo uns 170 palavras. Nada de introdução longa nem despedida formal; não assine (o nome já aparece no chamado).
 - Use os nomes certos de rotina, parâmetro (MV_...), tabela e campo, mas NUNCA invente um. Se faltar informação pra ter certeza, peça de forma objetiva (ex.: print do erro, rotina, filial, exemplo de documento).
 - Não prometa prazo. Se a solução exigir ajuste em fonte/customização, diga que a equipe vai verificar e retornar.
+- Você fala EM NOME da equipe: mensagens marcadas "Equipe" na conversa foram escritas por nós. Fale em primeira pessoa ("eu", "nós", "já validamos"), nunca da equipe ou de um colega em terceira pessoa (nada de "o Kleber fez").
 TXT;
     }
 
