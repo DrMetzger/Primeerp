@@ -1259,6 +1259,7 @@ class Migrations
         if ($colunaFonteIa && stripos($colunaFonteIa['Type'], 'conversa') === false) {
             $pdo->exec("ALTER TABLE chamado_ia_analises MODIFY COLUMN fonte ENUM('base','internet','conversa') NULL");
         }
+        $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS progresso MEDIUMTEXT NULL COMMENT 'JSON com o passo a passo da análise (mostrado ao vivo na tela)' AFTER erro");
         $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS tentativas TINYINT NOT NULL DEFAULT 0 COMMENT 'Quantas vezes já tentou (falha passageira do Google volta pra fila até 3x)' AFTER usou_busca");
     }
 

@@ -52,6 +52,14 @@ class AiSugestoes
     private const ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 2;
     private const TIMEOUT_POR_CHAMADA_SEGUNDOS = 55;
 
+    /**
+     * Ajustes por quem chama (IaChamados usa no botão "Sugerir resposta",
+     * que tem tempo total limitado): timeout menor por chamada e um aviso a
+     * cada nova tentativa/troca de modelo, pra mostrar o passo a passo na tela.
+     */
+    public static ?int $timeoutPorChamada = null;
+    public static ?\Closure $aoTentarDeNovo = null;
+
     // Upload de cada anexo pela Files API do Gemini (ver enviarArquivo())
     // em vez de embutir os bytes em base64 direto no corpo da requisição
     // (inline_data) -- o corpo de uma requisição inline tem um teto de
@@ -182,11 +190,21 @@ class AiSugestoes
                     ];
                 }
 
+                $resumoErro = preg_match('/HTTP (\d+)/', (string) $resultado['erro'], $mCodigo)
+                    ? ($mCodigo[1] === '503' ? 'Google sobrecarregado (503)' : 'Google respondeu HTTP ' . $mCodigo[1])
+                    : 'falha de rede/tempo esgotado';
+
                 if (!$resultado['tentar_de_novo']) {
+                    if (self::$aoTentarDeNovo && !$ehUltimoModelo) {
+                        (self::$aoTentarDeNovo)("{$resumoErro} no modelo {$modelo}, trocando de modelo");
+                    }
                     break; // não vale repetir ESSE modelo -- tenta o próximo modelo da lista (se ainda tiver)
                 }
 
                 $ultimaTentativaDesseModelo = $tentativa === $tentativas;
+                if (self::$aoTentarDeNovo && !($ultimaTentativaDesseModelo && $ehUltimoModelo)) {
+                    (self::$aoTentarDeNovo)($resumoErro . ($ultimaTentativaDesseModelo ? ', trocando de modelo' : ', tentando de novo'));
+                }
                 if (!$ultimaTentativaDesseModelo) {
                     sleep(self::ESPERA_ENTRE_TENTATIVAS_SEGUNDOS);
                 }
@@ -348,7 +366,8 @@ class AiSugestoes
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => ['content-type: application/json'],
             CURLOPT_POSTFIELDS => json_encode($corpo),
-            CURLOPT_TIMEOUT => self::TIMEOUT_POR_CHAMADA_SEGUNDOS,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => self::$timeoutPorChamada ?? self::TIMEOUT_POR_CHAMADA_SEGUNDOS,
         ]);
 
         $resposta = curl_exec($ch);

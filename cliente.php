@@ -3627,6 +3627,7 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
                     <div class="ia-sugestao-info small text-muted mb-2" style="display:none;"></div>
+                    <div class="ia-passos small mb-2 p-2 rounded" style="display:none; background:#f5f3ff; border:1px solid #ddd6fe;"></div>
                     <div class="d-flex flex-wrap align-items-center gap-3 mb-2 resposta-opcoes-envio">
                         <button type="button" class="btn btn-sm btn-ia-sugerir" data-chamado-id="<?= $c['id'] ?>"
                             title="A IA lê o chamado e os prints, procura em chamados que já resolvemos e no TDN/User Function, e escreve a resposta no campo acima. Nada é enviado: você revisa e envia."
@@ -6916,66 +6917,126 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <script>
-// Botão "Sugerir resposta com IA" (ver ia_sugerir_resposta.php): preenche o
-// campo de resposta com o texto da IA. NÃO envia nada -- a pessoa revisa,
-// edita se quiser e envia pelo botão normal.
-document.addEventListener('click', function (evento) {
-    var botao = evento.target.closest('.btn-ia-sugerir');
-    if (!botao || botao.disabled) {
-        return;
+// Botão "Sugerir resposta com IA" (ver ia_sugerir_resposta.php): começa a
+// análise no servidor e mostra o passo a passo ao vivo; no fim preenche o
+// campo de resposta. NÃO envia nada -- a pessoa revisa e envia pelo botão normal.
+(function () {
+    var URL_IA = <?= json_encode(url('ia_sugerir_resposta.php')) ?>;
+    var ICONES = { andamento: '⏳', ok: '✔️', aviso: '⚠️', erro: '❌' };
+    var CORES = { andamento: '#5b21b6', ok: '#166534', aviso: '#92400e', erro: '#b91c1c' };
+
+    function postar(form, chamadoId, acao) {
+        var dados = new FormData();
+        dados.append('csrf_token', form.querySelector('input[name=csrf_token]').value);
+        dados.append('chamado_id', chamadoId);
+        dados.append('acao', acao);
+        return fetch(URL_IA, { method: 'POST', body: dados, credentials: 'same-origin', cache: 'no-store' })
+            .then(function (r) { return r.json(); });
     }
-    var form = botao.closest('form');
-    var campo = form.querySelector('textarea[name=mensagem]');
-    var info = form.querySelector('.ia-sugestao-info');
-    var rotulo = botao.querySelector('.rotulo');
 
-    if (campo.value.trim() !== '' && !confirm('O campo de resposta já tem texto. Substituir pela sugestão da IA?')) {
-        return;
+    function desenharPassos(painel, passos, inicio) {
+        painel.style.display = 'block';
+        painel.innerHTML = '';
+        var titulo = document.createElement('div');
+        titulo.className = 'fw-semibold mb-1';
+        titulo.style.color = '#5b21b6';
+        titulo.textContent = '🤖 Passo a passo da IA · ' + Math.round((Date.now() - inicio) / 1000) + 's';
+        painel.appendChild(titulo);
+        if (!passos.length) {
+            var esperando = document.createElement('div');
+            esperando.textContent = '⏳ Iniciando no servidor...';
+            painel.appendChild(esperando);
+        }
+        passos.forEach(function (p) {
+            var linha = document.createElement('div');
+            linha.style.color = CORES[p.tipo] || '#374151';
+            var tempo = p.duracao !== undefined ? ' (' + String(p.duracao).replace('.', ',') + 's)' : (p.tipo === 'andamento' ? '...' : '');
+            linha.textContent = (ICONES[p.tipo] || '•') + ' ' + p.texto + tempo;
+            painel.appendChild(linha);
+        });
     }
 
-    var dados = new FormData();
-    dados.append('csrf_token', form.querySelector('input[name=csrf_token]').value);
-    dados.append('chamado_id', botao.dataset.chamadoId);
+    document.addEventListener('click', function (evento) {
+        var botao = evento.target.closest('.btn-ia-sugerir');
+        if (!botao || botao.disabled) {
+            return;
+        }
+        var form = botao.closest('form');
+        var campo = form.querySelector('textarea[name=mensagem]');
+        var info = form.querySelector('.ia-sugestao-info');
+        var painel = form.querySelector('.ia-passos');
+        var rotulo = botao.querySelector('.rotulo');
+        var chamadoId = botao.dataset.chamadoId;
 
-    botao.disabled = true;
-    rotulo.textContent = 'Analisando o chamado...';
-    info.style.display = 'none';
+        if (campo.value.trim() !== '' && !confirm('O campo de resposta já tem texto. Substituir pela sugestão da IA?')) {
+            return;
+        }
 
-    fetch(<?= json_encode(url('ia_sugerir_resposta.php')) ?>, { method: 'POST', body: dados, credentials: 'same-origin' })
-        .then(function (r) { return r.json(); })
-        .then(function (r) {
-            info.style.display = 'block';
-            info.textContent = '';
-            if (!r.ok) {
-                info.className = 'ia-sugestao-info small text-danger mb-2';
-                info.textContent = r.erro;
-                return;
-            }
-            campo.value = r.resposta;
-            campo.rows = 10;
-            campo.focus();
-            info.className = 'ia-sugestao-info small text-muted mb-2';
-            info.appendChild(document.createTextNode('✨ Sugestão da IA ' + r.fonte + '. Revise antes de enviar. '));
-            (r.links || []).forEach(function (link) {
-                var a = document.createElement('a');
-                a.href = link.url;
-                a.target = '_blank';
-                a.rel = 'noopener';
-                a.className = 'me-2';
-                a.textContent = link.titulo;
-                info.appendChild(a);
-            });
-        })
-        .catch(function () {
-            info.style.display = 'block';
-            info.className = 'ia-sugestao-info small text-danger mb-2';
-            info.textContent = 'Não deu pra falar com a IA agora. Tente de novo.';
-        })
-        .finally(function () {
+        var inicio = Date.now();
+        var LIMITE_MS = 4 * 60 * 1000; // segurança extra: a tela nunca fica esperando mais que isso
+        botao.disabled = true;
+        rotulo.textContent = 'Analisando...';
+        info.style.display = 'none';
+        desenharPassos(painel, [], inicio);
+
+        function terminar(mensagem, ehErro) {
             botao.disabled = false;
             rotulo.textContent = 'Sugerir resposta com IA';
+            info.style.display = 'block';
+            info.className = 'ia-sugestao-info small mb-2 ' + (ehErro ? 'text-danger' : 'text-muted');
+            info.textContent = mensagem;
+        }
+
+        function acompanhar() {
+            if (Date.now() - inicio > LIMITE_MS) {
+                terminar('A análise passou de 4 minutos e foi interrompida na tela. Tente de novo.', true);
+                return;
+            }
+            postar(form, chamadoId, 'status').then(function (r) {
+                if (!r.ok) {
+                    terminar(r.erro, true);
+                    return;
+                }
+                desenharPassos(painel, r.passos || [], inicio);
+                if (!r.terminou) {
+                    setTimeout(acompanhar, 1500);
+                    return;
+                }
+                if (!r.sucesso) {
+                    terminar('A IA não conseguiu sugerir uma resposta: ' + r.erro, true);
+                    return;
+                }
+                campo.value = r.resposta;
+                campo.rows = 10;
+                campo.focus();
+                terminar('✨ Sugestão da IA ' + r.fonte + '. Revise antes de enviar. ', false);
+                (r.links || []).forEach(function (link) {
+                    var a = document.createElement('a');
+                    a.href = link.url;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    a.className = 'me-2';
+                    a.textContent = link.titulo;
+                    info.appendChild(a);
+                });
+            }).catch(function () {
+                // Rede piscou: tenta de novo daqui a pouco, sem desistir.
+                setTimeout(acompanhar, 3000);
+            });
+        }
+
+        postar(form, chamadoId, 'iniciar').then(function (r) {
+            if (!r.ok) {
+                terminar(r.erro, true);
+                painel.style.display = 'none';
+                return;
+            }
+            setTimeout(acompanhar, 1000);
+        }).catch(function () {
+            terminar('Não deu pra falar com o servidor agora. Tente de novo.', true);
         });
-});
+    });
+})();
 </script>
 
 <?php require __DIR__ . '/templates/footer.php'; ?>
