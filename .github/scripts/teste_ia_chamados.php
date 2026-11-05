@@ -73,20 +73,6 @@ if ($semIa) {
     exit(0);
 }
 
-echo "\n=== Comparação de modelos na busca (TDN/User Function) ===\n";
-$chNovo = $pdo->query("SELECT ch.*, 'CLIENTE TESTE IA' AS cliente_nome FROM chamados ch WHERE id = $novo")->fetch();
-$promptBusca = $ref->getMethod('promptBusca')->invoke(null, $chNovo, 'Mariana');
-foreach (['gemini-flash-lite-latest', 'gemini-flash-latest'] as $modelo) {
-    $inicio = microtime(true);
-    $r = \AdminPrime\AiSugestoes::gerar($promptBusca, [['google_search' => (object) []]], null, [], ['maxOutputTokens' => 4000, 'temperature' => 0.3], [$modelo]);
-    printf("\n--- %s: ok=%s tokens=%d+%d fontes=%d (%.1fs)\n", $modelo, $r['ok'] ? 'sim' : 'não',
-        $r['uso']['entrada'] ?? 0, $r['uso']['saida'] ?? 0, count($r['fontes'] ?? []), microtime(true) - $inicio);
-    echo ($r['ok'] ? $r['texto'] : $r['erro']) . "\n";
-    if (!empty($r['fontes'])) {
-        echo 'fontes: ' . implode(' | ', array_column($r['fontes'], 'titulo')) . "\n";
-    }
-}
-
 echo "\n=== Modo sugestão ===\n";
 Configuracoes::definir($pdo, 'ia_chamados_modo', 'sugestao', null);
 $falhas = 0;
@@ -115,6 +101,12 @@ Configuracoes::definir($pdo, 'ia_chamados_modo', 'automatico', null);
 $auto = criar_chamado($pdo, 'NOTA COM REJEICAO 539 DUPLICIDADE', 'Transmiti a NF-e e deu rejeição 539 de duplicidade com diferença na chave. O que fazer?');
 IaChamados::agendar($pdo, $auto, false);
 $r = IaChamados::processar($pdo, $auto);
+// Google instável (503) devolve pra fila -- simula o cron tentando de novo.
+for ($i = 0; $i < 2 && $r['status'] === 'pendente'; $i++) {
+    echo "Google instável, nova tentativa em 20s: {$r['erro']}\n";
+    sleep(20);
+    $r = IaChamados::processar($pdo, $auto);
+}
 $st = $pdo->query("SELECT status FROM chamados WHERE id = $auto")->fetchColumn();
 $resp = $pdo->query("SELECT autor_nome, mensagem FROM chamado_respostas WHERE chamado_id = $auto")->fetch();
 echo "status IA={$r['status']} status chamado={$st} resposta postada por=" . ($resp['autor_nome'] ?? '(nenhuma)') . "\n";

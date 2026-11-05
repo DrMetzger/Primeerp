@@ -31,6 +31,9 @@ class IaChamados
     private const MAX_CHAMADOS_REFERENCIA = 5;
     private const MAX_RESPOSTAS_POR_REFERENCIA = 3;
     private const MAX_PALAVRAS_CHAVE = 8;
+    // Google sobrecarregado (503/429) ou rede: volta pra fila e o cron tenta
+    // de novo mais tarde, até esse limite de tentativas.
+    private const MAX_TENTATIVAS = 3;
     // Resposta curta = barata e com cara de conversa (não de manual).
     private const MAX_TOKENS_RESPOSTA = 900;
     // Modelo "flash" cheio pensa antes de responder (tokens de raciocínio
@@ -119,7 +122,7 @@ class IaChamados
         try {
             if ($manual) {
                 $pdo->prepare("INSERT INTO chamado_ia_analises (chamado_id, status) VALUES (?, 'processando')
-                    ON DUPLICATE KEY UPDATE status = 'processando', erro = NULL")->execute([$chamadoId]);
+                    ON DUPLICATE KEY UPDATE status = 'processando', erro = NULL, tokens_entrada = 0, tokens_saida = 0, usou_busca = 0")->execute([$chamadoId]);
             } else {
                 // Trava atômica: só um processo pega cada chamado pendente
                 // (evita gastar 2x se o cron e a requisição rodarem juntos).
@@ -141,11 +144,20 @@ class IaChamados
             'tokens_entrada' => 0, 'tokens_saida' => 0, 'usou_busca' => 0, 'resposta_id' => null,
         ], $resultado);
 
+        $tentativas = (int) $pdo->query('SELECT tentativas FROM chamado_ia_analises WHERE chamado_id = ' . (int) $chamadoId)->fetchColumn() + 1;
+        $falhaPassageira = $campos['status'] === 'erro' && preg_match('/HTTP (429|500|503)|falha de rede/i', (string) $campos['erro']);
+        if ($falhaPassageira && !$manual && $tentativas < self::MAX_TENTATIVAS) {
+            $campos['status'] = 'pendente';
+            $campos['erro'] = 'Google instável, vai tentar de novo: ' . $campos['erro'];
+        }
+
         $pdo->prepare('UPDATE chamado_ia_analises SET status = ?, fonte = ?, resposta = ?, chamados_referencia = ?, links = ?, erro = ?,
-                tokens_entrada = ?, tokens_saida = ?, usou_busca = ?, resposta_id = ? WHERE chamado_id = ?')
+                tokens_entrada = tokens_entrada + ?, tokens_saida = tokens_saida + ?, usou_busca = GREATEST(usou_busca, ?), resposta_id = ?,
+                tentativas = ? WHERE chamado_id = ?')
             ->execute([
                 $campos['status'], $campos['fonte'], $campos['resposta'], $campos['chamados_referencia'], $campos['links'], $campos['erro'],
-                $campos['tokens_entrada'], $campos['tokens_saida'], $campos['usou_busca'], $campos['resposta_id'], $chamadoId,
+                $campos['tokens_entrada'], $campos['tokens_saida'], $campos['usou_busca'], $campos['resposta_id'],
+                $manual ? 0 : $tentativas, $chamadoId,
             ]);
 
         $stmt = $pdo->prepare('SELECT * FROM chamado_ia_analises WHERE chamado_id = ?');
@@ -162,6 +174,7 @@ class IaChamados
 
         $ids = $pdo->query("SELECT chamado_id FROM chamado_ia_analises
             WHERE status = 'pendente' AND criado_em < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+              AND (tentativas = 0 OR atualizado_em < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
             ORDER BY criado_em ASC LIMIT " . (int) $limite)->fetchAll(PDO::FETCH_COLUMN);
 
         foreach ($ids as $id) {

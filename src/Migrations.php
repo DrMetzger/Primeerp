@@ -1253,6 +1253,7 @@ class Migrations
                 CONSTRAINT fk_ia_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS tentativas TINYINT NOT NULL DEFAULT 0 COMMENT 'Quantas vezes já tentou (falha passageira do Google volta pra fila até 3x)' AFTER usou_busca");
     }
 
     /**
