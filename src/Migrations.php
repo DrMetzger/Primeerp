@@ -1227,6 +1227,32 @@ class Migrations
         if (!$pdo->query("SHOW KEYS FROM agenda_tarefas WHERE Key_name = 'fk_agenda_tarefas_responsavel'")->fetch()) {
             $pdo->exec('ALTER TABLE agenda_tarefas ADD CONSTRAINT fk_agenda_tarefas_responsavel FOREIGN KEY (responsavel_id) REFERENCES usuarios(id) ON DELETE SET NULL');
         }
+
+        // Análise automática de chamado novo pela IA (ver src/IaChamados.php)
+        // -- uma linha por chamado: primeiro procura chamados parecidos já
+        // resolvidos na nossa base, e só se não achar nada pesquisa na
+        // internet (TDN da TOTVS / User Function). Guarda tokens gastos e se
+        // usou busca, pra controlar custo e respeitar os limites diários.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS chamado_ia_analises (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chamado_id INT NOT NULL,
+                status ENUM('pendente','processando','sugerida','enviada','sem_resposta','erro','ignorada') NOT NULL DEFAULT 'pendente',
+                fonte ENUM('base','internet') NULL COMMENT 'De onde veio a resposta: chamados já resolvidos ou busca na internet',
+                resposta TEXT NULL,
+                chamados_referencia VARCHAR(255) NULL COMMENT 'Ids dos chamados da base usados como referência, separados por vírgula',
+                links TEXT NULL COMMENT 'JSON com as páginas consultadas na busca',
+                erro VARCHAR(500) NULL,
+                tokens_entrada INT NOT NULL DEFAULT 0,
+                tokens_saida INT NOT NULL DEFAULT 0,
+                usou_busca TINYINT(1) NOT NULL DEFAULT 0,
+                resposta_id INT NULL COMMENT 'Resposta postada no chamado (modo automático) -- nunca é reaproveitada como referência',
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_ia_chamado (chamado_id),
+                CONSTRAINT fk_ia_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
     }
 
     /**

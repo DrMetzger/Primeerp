@@ -6,6 +6,7 @@ use AdminPrime\AiSugestoes;
 use AdminPrime\Auth;
 use AdminPrime\Crypto;
 use AdminPrime\Database;
+use AdminPrime\IaChamados;
 use AdminPrime\Notificacoes;
 use AdminPrime\PdfExport;
 use AdminPrime\TempAccess;
@@ -2105,6 +2106,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Botão "Analisar com IA" dentro do chamado -- gera (ou refaz) a
+    // sugestão na hora. Pedido manual nunca responde o cliente sozinho,
+    // mesmo com o modo automático ligado: só deixa a sugestão pronta.
+    if ($acao === 'ia_analisar_chamado') {
+        $chamadoIdIa = (int) $_POST['chamado_id'];
+        $stmtChamadoIa = $pdo->prepare('SELECT cliente_id, setor_id FROM chamados WHERE id = ?');
+        $stmtChamadoIa->execute([$chamadoIdIa]);
+        $chamadoIa = $stmtChamadoIa->fetch();
+        $setorChamadoIa = $chamadoIa && $chamadoIa['setor_id'] !== null ? (int) $chamadoIa['setor_id'] : null;
+
+        if (!$chamadoIa || (int) $chamadoIa['cliente_id'] !== $clienteId || !Auth::podeAcessarSetor($clienteId, $setorChamadoIa)) {
+            flash_set('erro', 'Chamado inválido ou fora do seu escopo de acesso.');
+        } elseif (!AiSugestoes::configurada()) {
+            flash_set('erro', 'Chave do Gemini não configurada (Configurações > IA Gemini).');
+        } else {
+            $analiseIa = IaChamados::processar($pdo, $chamadoIdIa, true);
+            $statusIa = $analiseIa['status'] ?? 'erro';
+            if ($statusIa === 'sugerida') {
+                flash_set('sucesso', 'Sugestão da IA pronta, veja dentro do chamado.');
+            } else {
+                flash_set('erro', 'A IA não trouxe sugestão: ' . ($analiseIa['erro'] ?? 'motivo desconhecido.'));
+            }
+        }
+    }
+
     if ($acao === 'fechar_chamado') {
         $chamadoIdFechar = (int) $_POST['chamado_id'];
         $stmtSetorFechar = $pdo->prepare('SELECT setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
@@ -2444,6 +2470,9 @@ if ($chamados) {
         $linhasChatPorChamado[$c['id']] = $linhas;
     }
 }
+
+// Sugestões/respostas da IA (ver src/IaChamados.php), por chamado.
+$iaPorChamado = IaChamados::analisesPorChamado($pdo, array_map(fn ($c) => (int) $c['id'], $chamados));
 
 // KPI (métrica) agora pode ser de um setor específico (aba Setores) ou
 // geral do cliente (setor_id NULL) -- ver Migrations. Agrupado por setor_id
@@ -3590,6 +3619,45 @@ require __DIR__ . '/templates/header.php';
                         </div>
                     </div>
                 <?php endforeach; ?>
+                </div>
+
+                <?php $ia = $iaPorChamado[$c['id']] ?? null; ?>
+                <div class="ia-sugestao mt-3 p-2 rounded" style="background:#f5f3ff; border:1px solid #ddd6fe;">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                        <span class="small fw-semibold" style="color:#5b21b6;"><i class="bi bi-robot"></i> IA
+                            <?php if ($ia && in_array($ia['status'], ['sugerida', 'enviada'], true)): ?>
+                                <span class="text-muted fw-normal">
+                                    · <?= $ia['fonte'] === 'base' ? 'baseada em chamados que já resolvemos' . ($ia['chamados_referencia'] ? ' (#' . e(str_replace(',', ', #', $ia['chamados_referencia'])) . ')' : '') : 'baseada no TDN/User Function' ?>
+                                    <?= $ia['status'] === 'enviada' ? ' · já enviada ao cliente' : '' ?>
+                                </span>
+                            <?php elseif ($ia && in_array($ia['status'], ['pendente', 'processando'], true)): ?>
+                                <span class="text-muted fw-normal">· analisando...</span>
+                            <?php elseif ($ia && $ia['erro']): ?>
+                                <span class="text-muted fw-normal">· <?= e($ia['erro']) ?></span>
+                            <?php endif; ?>
+                        </span>
+                        <form method="post" class="d-inline">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="acao" value="ia_analisar_chamado">
+                            <input type="hidden" name="aba_retorno" value="chamados">
+                            <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
+                            <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary py-0" onclick="this.disabled=true; this.innerHTML='Analisando...'; this.form.submit(); return false;">
+                                <i class="bi bi-stars"></i> <?= $ia && $ia['resposta'] ? 'Gerar de novo' : 'Analisar com IA' ?>
+                            </button>
+                        </form>
+                    </div>
+                    <?php if ($ia && $ia['status'] === 'sugerida' && $ia['resposta']): ?>
+                        <div class="small mt-2" style="white-space: pre-wrap;"><?= e($ia['resposta']) ?></div>
+                        <?php foreach (json_decode($ia['links'] ?? '[]', true) ?: [] as $link): ?>
+                            <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener" class="small d-inline-block me-2"><i class="bi bi-link-45deg"></i><?= e($link['titulo']) ?></a>
+                        <?php endforeach; ?>
+                        <button type="button" class="btn btn-sm btn-primary mt-2 py-0"
+                            data-sugestao="<?= e($ia['resposta']) ?>"
+                            onclick="var t = this.closest('.card-body').querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus();">
+                            <i class="bi bi-reply"></i> Usar como resposta (dá pra editar antes de enviar)
+                        </button>
+                    <?php endif; ?>
                 </div>
 
                 <form method="post" enctype="multipart/form-data" class="mt-3">

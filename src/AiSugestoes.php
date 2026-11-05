@@ -96,6 +96,16 @@ class AiSugestoes
     }
 
     /**
+     * Chave usada pela busca na internet dos chamados (IaChamados): a de
+     * busca se tiver uma separada, senão a própria chave de análise (caso
+     * de um projeto só, já com faturamento ativado).
+     */
+    public static function chaveParaBuscaOuAnalise(): string
+    {
+        return self::chaveBusca() !== '' ? self::chaveBusca() : self::chaveAnalise();
+    }
+
+    /**
      * $prompt já vem pronto (contexto do setor montado por quem chamou --
      * cliente.php sabe os dados, essa classe só sabe falar com a API).
      * $ferramentas é a lista de "tools" do Gemini (ex.: [['google_search' =>
@@ -116,7 +126,7 @@ class AiSugestoes
      * recusado pelo Gemini etc.), pra quem chamou avisar sem abortar a
      * geração inteira por causa de UM anexo com problema.
      */
-    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = []): array
+    public static function gerar(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = [], array $configGeracao = []): array
     {
         $chave ??= self::chaveAnalise();
         if ($chave === '') {
@@ -131,6 +141,12 @@ class AiSugestoes
         $corpo = ['contents' => [['parts' => $partes]]];
         if ($ferramentas) {
             $corpo['tools'] = $ferramentas;
+        }
+        // generationConfig opcional (ex.: maxOutputTokens/temperature/
+        // responseMimeType) -- usado por IaChamados pra limitar o tamanho
+        // (e o custo) da resposta. Vazio = padrão do Google, como sempre foi.
+        if ($configGeracao) {
+            $corpo['generationConfig'] = $configGeracao;
         }
 
         // Tenta o modelo estável algumas vezes (503 "alta demanda" costuma
@@ -153,7 +169,14 @@ class AiSugestoes
                 $resultado = self::chamarModelo($modelo, $chave, $corpo);
 
                 if ($resultado['ok']) {
-                    return ['ok' => true, 'texto' => $resultado['texto'], 'erro' => null, 'arquivos_com_falha' => $arquivosComFalha];
+                    return [
+                        'ok' => true,
+                        'texto' => $resultado['texto'],
+                        'erro' => null,
+                        'arquivos_com_falha' => $arquivosComFalha,
+                        'uso' => $resultado['uso'],
+                        'fontes' => $resultado['fontes'],
+                    ];
                 }
 
                 if (!$resultado['tentar_de_novo']) {
@@ -342,7 +365,21 @@ class AiSugestoes
             return ['ok' => false, 'texto' => null, 'erro' => "Gemini respondeu sem texto (motivo: {$motivo}).", 'tentar_de_novo' => false];
         }
 
-        return ['ok' => true, 'texto' => $texto, 'erro' => null, 'tentar_de_novo' => false];
+        // Tokens gastos (pra controle de custo em IaChamados) e as páginas
+        // usadas quando a busca do Google estava ligada (groundingMetadata).
+        $uso = [
+            'entrada' => (int) ($dados['usageMetadata']['promptTokenCount'] ?? 0),
+            'saida' => (int) ($dados['usageMetadata']['candidatesTokenCount'] ?? 0)
+                + (int) ($dados['usageMetadata']['thoughtsTokenCount'] ?? 0),
+        ];
+        $fontes = [];
+        foreach ($dados['candidates'][0]['groundingMetadata']['groundingChunks'] ?? [] as $trecho) {
+            if (!empty($trecho['web']['uri'])) {
+                $fontes[] = ['titulo' => $trecho['web']['title'] ?? $trecho['web']['uri'], 'url' => $trecho['web']['uri']];
+            }
+        }
+
+        return ['ok' => true, 'texto' => $texto, 'erro' => null, 'tentar_de_novo' => false, 'uso' => $uso, 'fontes' => $fontes];
     }
 
     /**

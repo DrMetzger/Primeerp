@@ -4,6 +4,7 @@ require_once __DIR__ . '/../bootstrap.php';
 
 use AdminPrime\ClienteAuth;
 use AdminPrime\Database;
+use AdminPrime\IaChamados;
 use AdminPrime\Notificacoes;
 
 ClienteAuth::requireLogin();
@@ -86,10 +87,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
 
         Notificacoes::novoChamado($pdo, $chamado, $cliente);
 
+        // Análise da IA (base de chamados -> TDN/User Function) roda DEPOIS
+        // que a página já respondeu -- o cliente não espera por ela.
+        IaChamados::agendar($pdo, $chamadoId);
+
         flash_set('sucesso', 'Chamado aberto com sucesso! Nossa equipe já foi avisada.');
     }
 
     header('Location: ' . url('portal/chamados.php'));
+    finalizar_resposta_e_notificar();
     exit;
 }
 

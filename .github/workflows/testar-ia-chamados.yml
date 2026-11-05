@@ -1,0 +1,55 @@
+# Teste de ponta a ponta da IA dos chamados (src/IaChamados.php) num MySQL
+# descartável com dados fictícios -- nunca toca o banco de produção. Usa o
+# secret GEMINI_KEY. Gasta só algumas chamadas ao Gemini por execução.
+name: Testar IA dos chamados
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/IaChamados.php
+      - src/AiSugestoes.php
+      - .github/scripts/teste_ia_chamados.php
+      - .github/workflows/testar-ia-chamados.yml
+
+permissions:
+  contents: read
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: adminprime_test
+          MARIADB_USER: adminprime
+          MARIADB_PASSWORD: testpass123
+        ports: ['3306:3306']
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
+    env:
+      ADMINPRIME_DB_HOST: 127.0.0.1
+      ADMINPRIME_DB_NAME: adminprime_test
+      ADMINPRIME_DB_USER: adminprime
+      ADMINPRIME_DB_PASS: testpass123
+      ADMINPRIME_GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, curl, mbstring
+      - name: Criar tabelas
+        # Banco zerado: algumas migrations antigas fazem ALTER antes do
+        # CREATE da tabela, então roda em modo tolerante até estabilizar.
+        run: |
+          php -r '
+            require "config/config.php";
+            spl_autoload_register(function ($c) { $f = "src/" . substr($c, 11) . ".php"; if (is_file($f)) require $f; });
+            $p = new PDO("mysql:host=127.0.0.1;dbname=adminprime_test;charset=utf8mb4", "adminprime", "testpass123",
+              [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+            for ($i = 0; $i < 4; $i++) { try { AdminPrime\Migrations::run($p); } catch (Throwable $e) {} }'
+          php -r 'require "bootstrap.php"; echo "Migrations OK\n";'
+      - name: Testar IA
+        run: php .github/scripts/teste_ia_chamados.php

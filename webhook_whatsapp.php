@@ -41,9 +41,14 @@ $payload = json_decode($corpoBruto, true);
 // estado da conversa fica salvo no banco a cada etapa).
 http_response_code(200);
 echo 'OK';
-if (function_exists('fastcgi_finish_request')) {
+// Hostinger roda LiteSpeed (LSAPI): a função certa lá é
+// litespeed_finish_request() -- ver finalizar_resposta_e_notificar().
+if (function_exists('litespeed_finish_request')) {
+    litespeed_finish_request();
+} elseif (function_exists('fastcgi_finish_request')) {
     fastcgi_finish_request();
 }
+ignore_user_abort(true);
 
 $pdo = Database::connection();
 

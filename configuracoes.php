@@ -28,10 +28,21 @@ $camposConfiguracao = [
     'notificacao_emails_equipe' => defined('NOTIFICACAO_EMAILS_EQUIPE') ? implode("\n", NOTIFICACAO_EMAILS_EQUIPE) : '',
     'gemini_api_key' => defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '',
     'gemini_api_key_busca' => defined('GEMINI_API_KEY_BUSCA') ? GEMINI_API_KEY_BUSCA : '',
+    'ia_chamados_modo' => 'sugestao',
+    'ia_chamados_nome_autor' => 'Equipe PrimeERP',
+    'ia_chamados_limite_dia' => '50',
+    'ia_chamados_limite_busca_dia' => '15',
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_verify();
+
+    if (!in_array($_POST['ia_chamados_modo'] ?? '', \AdminPrime\IaChamados::MODOS, true)) {
+        $_POST['ia_chamados_modo'] = 'sugestao';
+    }
+    foreach (['ia_chamados_limite_dia', 'ia_chamados_limite_busca_dia'] as $campoLimite) {
+        $_POST[$campoLimite] = (string) max(0, (int) ($_POST[$campoLimite] ?? 0));
+    }
 
     foreach (array_keys($camposConfiguracao) as $chave) {
         Configuracoes::definir($pdo, $chave, $_POST[$chave] ?? '', Auth::userId());
@@ -182,6 +193,49 @@ require __DIR__ . '/templates/header.php';
                     <div class="form-text"><strong>Precisa ser de um projeto Google Cloud SEPARADO da chave de análise</strong>, com faturamento ativado -- ativar a ferramenta de busca do Google remove o plano gratuito do projeto INTEIRO. Se for a mesma chave/projeto da análise, a análise interna que hoje é de graça passa a ser cobrada também.</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <?php
+    $usoIaHoje = $pdo->query("SELECT COUNT(*) AS analises, COALESCE(SUM(usou_busca), 0) AS buscas,
+            COALESCE(SUM(tokens_entrada), 0) AS entrada, COALESCE(SUM(tokens_saida), 0) AS saida
+        FROM chamado_ia_analises WHERE atualizado_em >= CURDATE() AND status IN ('sugerida','enviada','sem_resposta','erro')")->fetch();
+    $usoIaMes = $pdo->query("SELECT COUNT(*) AS analises, COALESCE(SUM(usou_busca), 0) AS buscas
+        FROM chamado_ia_analises WHERE atualizado_em >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND status IN ('sugerida','enviada','sem_resposta','erro')")->fetch();
+    ?>
+    <div class="card card-stat mb-3">
+        <div class="card-body">
+            <strong class="d-block mb-1"><i class="bi bi-robot"></i> IA nos chamados</strong>
+            <p class="text-muted small">Quando o cliente abre um chamado (portal ou WhatsApp), a IA procura primeiro chamados parecidos que a equipe já resolveu. Só se não achar nada pesquisa no TDN da TOTVS e no User Function, que é a etapa que gera custo maior. Os limites abaixo cortam o gasto: passou do limite, a IA para até o dia seguinte.</p>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Modo</label>
+                    <select name="ia_chamados_modo" class="form-select">
+                        <option value="sugestao" <?= $valores['ia_chamados_modo'] === 'sugestao' ? 'selected' : '' ?>>Sugestão: só a equipe vê, e decide se envia</option>
+                        <option value="automatico" <?= $valores['ia_chamados_modo'] === 'automatico' ? 'selected' : '' ?>>Automático: já responde o cliente sozinha</option>
+                        <option value="desligado" <?= $valores['ia_chamados_modo'] === 'desligado' ? 'selected' : '' ?>>Desligado</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Nome que aparece nas respostas automáticas</label>
+                    <input type="text" name="ia_chamados_nome_autor" class="form-control" value="<?= e($valores['ia_chamados_nome_autor']) ?>" maxlength="150">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Máximo de análises por dia</label>
+                    <input type="number" min="0" name="ia_chamados_limite_dia" class="form-control" value="<?= e($valores['ia_chamados_limite_dia']) ?>">
+                    <div class="form-text">Cada análise na nossa base custa frações de centavo.</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Máximo de buscas no TDN/User Function por dia</label>
+                    <input type="number" min="0" name="ia_chamados_limite_busca_dia" class="form-control" value="<?= e($valores['ia_chamados_limite_busca_dia']) ?>">
+                    <div class="form-text">A busca do Google é cobrada à parte, por pesquisa feita. 0 = nunca busca na internet.</div>
+                </div>
+            </div>
+            <p class="small text-muted mt-3 mb-0">
+                Hoje: <?= (int) $usoIaHoje['analises'] ?> análise(s), <?= (int) $usoIaHoje['buscas'] ?> com busca na internet,
+                <?= number_format((int) $usoIaHoje['entrada'] + (int) $usoIaHoje['saida'], 0, ',', '.') ?> tokens.
+                Neste mês: <?= (int) $usoIaMes['analises'] ?> análise(s), <?= (int) $usoIaMes['buscas'] ?> com busca.
+            </p>
         </div>
     </div>
 
