@@ -1253,6 +1253,12 @@ class Migrations
                 CONSTRAINT fk_ia_chamado FOREIGN KEY (chamado_id) REFERENCES chamados(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        // 'conversa' = botão "Sugerir resposta" sem nada na base/internet:
+        // resposta escrita só com o que já está no próprio chamado.
+        $colunaFonteIa = $pdo->query("SHOW COLUMNS FROM chamado_ia_analises LIKE 'fonte'")->fetch();
+        if ($colunaFonteIa && stripos($colunaFonteIa['Type'], 'conversa') === false) {
+            $pdo->exec("ALTER TABLE chamado_ia_analises MODIFY COLUMN fonte ENUM('base','internet','conversa') NULL");
+        }
         $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS tentativas TINYINT NOT NULL DEFAULT 0 COMMENT 'Quantas vezes já tentou (falha passageira do Google volta pra fila até 3x)' AFTER usou_busca");
     }
 

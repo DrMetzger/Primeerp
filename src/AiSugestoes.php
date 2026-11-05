@@ -215,6 +215,12 @@ class AiSugestoes
         foreach ($arquivos as $arquivo) {
             $nomeArquivo = $arquivo['nome'] ?? 'anexo';
 
+            // Já enviado antes (ver enviarArquivoUmaVez()) -- reaproveita.
+            if (!empty($arquivo['uri'])) {
+                $partesArquivo[] = ['file_data' => ['mime_type' => $arquivo['mime'], 'file_uri' => $arquivo['uri']]];
+                continue;
+            }
+
             if ((microtime(true) - $inicio) > self::TEMPO_MAX_UPLOADS_SEGUNDOS) {
                 $arquivosComFalha[] = $nomeArquivo . ' (tempo de upload esgotado)';
                 continue;
@@ -229,6 +235,21 @@ class AiSugestoes
         }
 
         return [$partesArquivo, $arquivosComFalha];
+    }
+
+    /**
+     * Envia um anexo uma vez só e devolve ['mime', 'uri', 'nome'] pra passar
+     * em $arquivos de várias chamadas a gerar() sem subir o arquivo de novo.
+     */
+    public static function enviarArquivoUmaVez(string $mime, string $bytes, string $nome): ?array
+    {
+        $chave = self::chaveAnalise();
+        if ($chave === '') {
+            return null;
+        }
+        $upload = self::enviarArquivo($mime, $bytes, $chave);
+
+        return $upload['ok'] ? ['mime' => $mime, 'uri' => $upload['uri'], 'nome' => $nome] : null;
     }
 
     /**

@@ -2106,31 +2106,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Botão "Analisar com IA" dentro do chamado -- gera (ou refaz) a
-    // sugestão na hora. Pedido manual nunca responde o cliente sozinho,
-    // mesmo com o modo automático ligado: só deixa a sugestão pronta.
-    if ($acao === 'ia_analisar_chamado') {
-        $chamadoIdIa = (int) $_POST['chamado_id'];
-        $stmtChamadoIa = $pdo->prepare('SELECT cliente_id, setor_id FROM chamados WHERE id = ?');
-        $stmtChamadoIa->execute([$chamadoIdIa]);
-        $chamadoIa = $stmtChamadoIa->fetch();
-        $setorChamadoIa = $chamadoIa && $chamadoIa['setor_id'] !== null ? (int) $chamadoIa['setor_id'] : null;
-
-        if (!$chamadoIa || (int) $chamadoIa['cliente_id'] !== $clienteId || !Auth::podeAcessarSetor($clienteId, $setorChamadoIa)) {
-            flash_set('erro', 'Chamado inválido ou fora do seu escopo de acesso.');
-        } elseif (!AiSugestoes::configurada()) {
-            flash_set('erro', 'Chave do Gemini não configurada (Configurações > IA Gemini).');
-        } else {
-            $analiseIa = IaChamados::processar($pdo, $chamadoIdIa, true);
-            $statusIa = $analiseIa['status'] ?? 'erro';
-            if ($statusIa === 'sugerida') {
-                flash_set('sucesso', 'Sugestão da IA pronta, veja dentro do chamado.');
-            } else {
-                flash_set('erro', 'A IA não trouxe sugestão: ' . ($analiseIa['erro'] ?? 'motivo desconhecido.'));
-            }
-        }
-    }
-
     if ($acao === 'fechar_chamado') {
         $chamadoIdFechar = (int) $_POST['chamado_id'];
         $stmtSetorFechar = $pdo->prepare('SELECT setor_id FROM chamados WHERE id = ? AND cliente_id = ?');
@@ -3622,43 +3597,27 @@ require __DIR__ . '/templates/header.php';
                 </div>
 
                 <?php $ia = $iaPorChamado[$c['id']] ?? null; ?>
-                <div class="ia-sugestao mt-3 p-2 rounded" style="background:#f5f3ff; border:1px solid #ddd6fe;">
-                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
-                        <span class="small fw-semibold" style="color:#5b21b6;"><i class="bi bi-robot"></i> IA
-                            <?php if ($ia && in_array($ia['status'], ['sugerida', 'enviada'], true)): ?>
-                                <span class="text-muted fw-normal">
-                                    · <?= $ia['fonte'] === 'base' ? 'baseada em chamados que já resolvemos' . ($ia['chamados_referencia'] ? ' (#' . e(str_replace(',', ', #', $ia['chamados_referencia'])) . ')' : '') : 'baseada no TDN/User Function' ?>
-                                    <?= $ia['status'] === 'enviada' ? ' · já enviada ao cliente' : '' ?>
-                                </span>
-                            <?php elseif ($ia && in_array($ia['status'], ['pendente', 'processando'], true)): ?>
-                                <span class="text-muted fw-normal">· analisando...</span>
-                            <?php elseif ($ia && $ia['erro']): ?>
-                                <span class="text-muted fw-normal">· <?= e($ia['erro']) ?></span>
-                            <?php endif; ?>
+                <?php if ($ia && $ia['resposta'] && in_array($ia['status'], ['sugerida', 'enviada'], true)): ?>
+                    <!-- Análise automática feita quando o cliente abriu o chamado (ver src/IaChamados.php). -->
+                    <div class="mt-3 p-2 rounded" style="background:#f5f3ff; border:1px solid #ddd6fe;">
+                        <span class="small fw-semibold" style="color:#5b21b6;"><i class="bi bi-robot"></i> Sugestão da IA</span>
+                        <span class="small text-muted">
+                            · <?= $ia['fonte'] === 'base' ? 'baseada em chamados que já resolvemos' . ($ia['chamados_referencia'] ? ' (#' . e(str_replace(',', ', #', $ia['chamados_referencia'])) . ')' : '') : ($ia['fonte'] === 'conversa' ? 'só com base na conversa' : 'baseada no TDN/User Function') ?>
+                            <?= $ia['status'] === 'enviada' ? ' · já enviada ao cliente' : '' ?>
                         </span>
-                        <form method="post" class="d-inline">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="acao" value="ia_analisar_chamado">
-                            <input type="hidden" name="aba_retorno" value="chamados">
-                            <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
-                            <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-secondary py-0" onclick="this.disabled=true; this.innerHTML='Analisando...'; this.form.submit(); return false;">
-                                <i class="bi bi-stars"></i> <?= $ia && $ia['resposta'] ? 'Gerar de novo' : 'Analisar com IA' ?>
+                        <?php if ($ia['status'] === 'sugerida'): ?>
+                            <div class="small mt-2" style="white-space: pre-wrap;"><?= e($ia['resposta']) ?></div>
+                            <?php foreach (json_decode($ia['links'] ?? '[]', true) ?: [] as $link): ?>
+                                <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener" class="small d-inline-block me-2"><i class="bi bi-link-45deg"></i><?= e($link['titulo']) ?></a>
+                            <?php endforeach; ?>
+                            <button type="button" class="btn btn-sm btn-primary mt-2 py-0"
+                                data-sugestao="<?= e($ia['resposta']) ?>"
+                                onclick="var t = this.closest('.card-body').querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus();">
+                                <i class="bi bi-reply"></i> Usar como resposta
                             </button>
-                        </form>
+                        <?php endif; ?>
                     </div>
-                    <?php if ($ia && $ia['status'] === 'sugerida' && $ia['resposta']): ?>
-                        <div class="small mt-2" style="white-space: pre-wrap;"><?= e($ia['resposta']) ?></div>
-                        <?php foreach (json_decode($ia['links'] ?? '[]', true) ?: [] as $link): ?>
-                            <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener" class="small d-inline-block me-2"><i class="bi bi-link-45deg"></i><?= e($link['titulo']) ?></a>
-                        <?php endforeach; ?>
-                        <button type="button" class="btn btn-sm btn-primary mt-2 py-0"
-                            data-sugestao="<?= e($ia['resposta']) ?>"
-                            onclick="var t = this.closest('.card-body').querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus();">
-                            <i class="bi bi-reply"></i> Usar como resposta (dá pra editar antes de enviar)
-                        </button>
-                    <?php endif; ?>
-                </div>
+                <?php endif; ?>
 
                 <form method="post" enctype="multipart/form-data" class="mt-3">
                     <?= csrf_field() ?>
@@ -3667,7 +3626,13 @@ require __DIR__ . '/templates/header.php';
                     <input type="hidden" name="scroll_para" value="chamado-<?= $c['id'] ?>">
                     <input type="hidden" name="chamado_id" value="<?= $c['id'] ?>">
                     <textarea name="mensagem" class="form-control form-control-sm mb-2" rows="2" placeholder="Responder ao cliente..."></textarea>
+                    <div class="ia-sugestao-info small text-muted mb-2" style="display:none;"></div>
                     <div class="d-flex flex-wrap align-items-center gap-3 mb-2 resposta-opcoes-envio">
+                        <button type="button" class="btn btn-sm btn-ia-sugerir" data-chamado-id="<?= $c['id'] ?>"
+                            title="A IA lê o chamado e os prints, procura em chamados que já resolvemos e no TDN/User Function, e escreve a resposta no campo acima. Nada é enviado: você revisa e envia."
+                            style="background:#7c3aed; color:#fff; border:none;">
+                            <i class="bi bi-stars"></i> <span class="rotulo">Sugerir resposta com IA</span>
+                        </button>
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" name="notificar_cliente" id="notificarCliente<?= $c['id'] ?>" value="1" checked>
                             <label class="form-check-label small" for="notificarCliente<?= $c['id'] ?>" title="Desmarque pra registrar a resposta sem avisar o cliente por e-mail/WhatsApp (ex.: encerrando chamado antigo)">Notificar cliente</label>
@@ -6947,6 +6912,69 @@ document.addEventListener('DOMContentLoaded', function () {
             aoAbrirEvento: abrirEditarTreinamento,
         });
     });
+});
+</script>
+
+<script>
+// Botão "Sugerir resposta com IA" (ver ia_sugerir_resposta.php): preenche o
+// campo de resposta com o texto da IA. NÃO envia nada -- a pessoa revisa,
+// edita se quiser e envia pelo botão normal.
+document.addEventListener('click', function (evento) {
+    var botao = evento.target.closest('.btn-ia-sugerir');
+    if (!botao || botao.disabled) {
+        return;
+    }
+    var form = botao.closest('form');
+    var campo = form.querySelector('textarea[name=mensagem]');
+    var info = form.querySelector('.ia-sugestao-info');
+    var rotulo = botao.querySelector('.rotulo');
+
+    if (campo.value.trim() !== '' && !confirm('O campo de resposta já tem texto. Substituir pela sugestão da IA?')) {
+        return;
+    }
+
+    var dados = new FormData();
+    dados.append('csrf_token', form.querySelector('input[name=csrf_token]').value);
+    dados.append('chamado_id', botao.dataset.chamadoId);
+
+    botao.disabled = true;
+    rotulo.textContent = 'Analisando o chamado...';
+    info.style.display = 'none';
+
+    fetch(<?= json_encode(url('ia_sugerir_resposta.php')) ?>, { method: 'POST', body: dados, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+            info.style.display = 'block';
+            info.textContent = '';
+            if (!r.ok) {
+                info.className = 'ia-sugestao-info small text-danger mb-2';
+                info.textContent = r.erro;
+                return;
+            }
+            campo.value = r.resposta;
+            campo.rows = 10;
+            campo.focus();
+            info.className = 'ia-sugestao-info small text-muted mb-2';
+            info.appendChild(document.createTextNode('✨ Sugestão da IA ' + r.fonte + '. Revise antes de enviar. '));
+            (r.links || []).forEach(function (link) {
+                var a = document.createElement('a');
+                a.href = link.url;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.className = 'me-2';
+                a.textContent = link.titulo;
+                info.appendChild(a);
+            });
+        })
+        .catch(function () {
+            info.style.display = 'block';
+            info.className = 'ia-sugestao-info small text-danger mb-2';
+            info.textContent = 'Não deu pra falar com a IA agora. Tente de novo.';
+        })
+        .finally(function () {
+            botao.disabled = false;
+            rotulo.textContent = 'Sugerir resposta com IA';
+        });
 });
 </script>
 

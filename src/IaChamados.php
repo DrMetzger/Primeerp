@@ -217,8 +217,9 @@ class IaChamados
             return ['status' => 'erro', 'erro' => 'Chamado não encontrado.'];
         }
 
+        $chamado['conversa'] = self::conversa($pdo, $chamadoId);
         $palavras = self::palavrasChave($chamado['titulo'] . ' ' . $chamado['descricao']);
-        if (count($palavras) < 2) {
+        if (count($palavras) < 2 && !($manual && $chamado['conversa'])) {
             return ['status' => 'ignorada', 'erro' => 'Descrição curta demais pra analisar.'];
         }
 
@@ -229,6 +230,8 @@ class IaChamados
         $primeiroNome = self::primeiroNomeContato($pdo, $chamado);
         $tokensEntrada = 0;
         $tokensSaida = 0;
+        // Prints/fotos anexados (geralmente é onde está a mensagem de erro).
+        $imagens = self::imagensDoChamado($pdo, $chamadoId);
 
         // Etapa 1: nossa base (barata).
         $similares = self::chamadosSimilares($pdo, $chamado, $palavras);
@@ -237,7 +240,7 @@ class IaChamados
                 self::promptBase($chamado, $similares, $primeiroNome),
                 [],
                 null,
-                [],
+                $imagens,
                 ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4, 'responseMimeType' => 'application/json']
             );
             if (!$r['ok']) {
@@ -271,7 +274,7 @@ class IaChamados
                 self::promptArtigos($chamado, $artigos, $primeiroNome),
                 [],
                 null,
-                [],
+                $imagens,
                 ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.3, 'responseMimeType' => 'application/json']
             );
             if ($r['ok']) {
@@ -298,6 +301,10 @@ class IaChamados
         // Etapa 3: TDN via busca do Google -- a única parte cobrada por
         // pesquisa, por isso tem limite diário próprio.
         if (self::analisesHoje($pdo, true) >= self::limiteBuscaDia($pdo)) {
+            if ($manual) {
+                return self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens, $tokensEntrada, $tokensSaida, 0);
+            }
+
             return [
                 'status' => 'sem_resposta',
                 'erro' => 'Nada parecido na base nem no User Function, e o limite diário de buscas no TDN já foi atingido.',
@@ -329,6 +336,10 @@ class IaChamados
         $fontesOficiais = array_values(array_filter($r['fontes'], fn ($f) => preg_match('/totvs|userfunction/i', $f['titulo'] . ' ' . $f['url'])));
 
         if ($naoEncontrou || !$fontesOficiais) {
+            if ($manual) {
+                return self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens, $tokensEntrada, $tokensSaida, 1);
+            }
+
             return [
                 'status' => 'sem_resposta',
                 'usou_busca' => 1,
@@ -347,6 +358,83 @@ class IaChamados
             'tokens_entrada' => $tokensEntrada,
             'tokens_saida' => $tokensSaida,
         ]);
+    }
+
+    /**
+     * Último recurso do botão "Sugerir resposta": nada na base nem na
+     * internet, então escreve a próxima resposta só com o que já está no
+     * chamado (normalmente pedindo o que falta, ou dando retorno do que a
+     * equipe já fez) -- sem inventar solução técnica.
+     */
+    private static function respostaPelaConversa(PDO $pdo, array $chamado, string $primeiroNome, array $imagens, int $tokensEntrada, int $tokensSaida, int $usouBusca): array
+    {
+        $r = AiSugestoes::gerar(
+            "Você é consultor de TOTVS Protheus na PrimeERP e vai escrever a próxima resposta da equipe neste chamado.\n\n"
+                . self::blocoChamado($chamado)
+                . "\nTAREFA: escreva a próxima resposta da equipe pro cliente, coerente com a conversa. Não temos uma solução pronta "
+                . "documentada pra esse caso: então NÃO invente solução técnica. Dê retorno do que já foi feito (se a conversa mostrar), "
+                . "faça as perguntas objetivas que faltam pra resolver, ou diga que a equipe vai analisar e retornar.\n\n"
+                . self::regrasDeEscrita($primeiroNome),
+            [],
+            null,
+            $imagens,
+            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4]
+        );
+        if (!$r['ok']) {
+            return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500), 'usou_busca' => $usouBusca,
+                'tokens_entrada' => $tokensEntrada, 'tokens_saida' => $tokensSaida];
+        }
+
+        return self::finalizar($pdo, $chamado, true, [
+            'fonte' => 'conversa',
+            'resposta' => self::garantirNome(self::limparTexto($r['texto']), $primeiroNome),
+            'usou_busca' => $usouBusca,
+            'tokens_entrada' => $tokensEntrada + $r['uso']['entrada'],
+            'tokens_saida' => $tokensSaida + $r['uso']['saida'],
+        ]);
+    }
+
+    /** Mensagens do chamado depois da abertura, em ordem. */
+    private static function conversa(PDO $pdo, int $chamadoId): array
+    {
+        $stmt = $pdo->prepare("SELECT autor_tipo, autor_nome, mensagem, criado_em FROM chamado_respostas
+            WHERE chamado_id = ? ORDER BY criado_em ASC, id ASC");
+        $stmt->execute([$chamadoId]);
+
+        // As 10 últimas bastam (chamado longo não pode estourar o custo).
+        return array_slice($stmt->fetchAll(), -10);
+    }
+
+    /** Até 2 imagens anexadas no chamado, já enviadas pro Gemini. */
+    private static function imagensDoChamado(PDO $pdo, int $chamadoId): array
+    {
+        $stmt = $pdo->prepare('SELECT id, arquivo_nome_original, arquivo_caminho, arquivo_tamanho FROM chamado_anexos
+            WHERE chamado_id = ? AND arquivo_tamanho BETWEEN 1 AND 4194304 ORDER BY id DESC');
+        $stmt->execute([$chamadoId]);
+
+        $tipos = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'];
+        $imagens = [];
+        foreach ($stmt->fetchAll() as $anexo) {
+            $mime = $tipos[strtolower(pathinfo($anexo['arquivo_nome_original'], PATHINFO_EXTENSION))] ?? null;
+            if (!$mime) {
+                continue;
+            }
+            $caminho = UPLOADS_DIR . '/' . $anexo['arquivo_caminho'];
+            $bytes = is_file($caminho) ? file_get_contents($caminho) : null;
+            if (!$bytes) {
+                $dados = $pdo->prepare('SELECT dados FROM chamado_anexos WHERE id = ?');
+                $dados->execute([$anexo['id']]);
+                $bytes = $dados->fetchColumn() ?: null;
+            }
+            if ($bytes && ($enviado = AiSugestoes::enviarArquivoUmaVez($mime, $bytes, $anexo['arquivo_nome_original']))) {
+                $imagens[] = $enviado;
+            }
+            if (count($imagens) >= 2) {
+                break;
+            }
+        }
+
+        return $imagens;
     }
 
     /**
@@ -583,11 +671,22 @@ TXT;
 
     private static function blocoChamado(array $chamado): string
     {
-        return "CHAMADO NOVO\n"
+        $texto = "CHAMADO\n"
             . 'Cliente: ' . ($chamado['cliente_nome'] ?: '-') . "\n"
             . 'Título: ' . $chamado['titulo'] . "\n"
             . 'Categoria: ' . ($chamado['categoria'] ?: '-') . "\n"
-            . "Descrição:\n" . mb_substr($chamado['descricao'], 0, 3000) . "\n";
+            . "Descrição (abertura):\n" . mb_substr($chamado['descricao'], 0, 3000) . "\n";
+
+        if (!empty($chamado['conversa'])) {
+            $texto .= "\nCONVERSA ATÉ AGORA (a resposta que você vai escrever é a PRÓXIMA mensagem da equipe, então leve tudo isso em conta "
+                . "e não repita o que já foi dito):\n";
+            foreach ($chamado['conversa'] as $m) {
+                $quem = $m['autor_tipo'] === 'equipe' ? 'Equipe (' . $m['autor_nome'] . ')' : 'Cliente (' . $m['autor_nome'] . ')';
+                $texto .= '- ' . date('d/m/Y H:i', strtotime($m['criado_em'])) . " {$quem}: " . mb_substr($m['mensagem'], 0, 800) . "\n";
+            }
+        }
+
+        return $texto . "(Imagens anexadas ao chamado, se houver, vêm junto -- leia o que aparece nelas.)\n";
     }
 
     private static function promptBase(array $chamado, array $similares, string $primeiroNome): string

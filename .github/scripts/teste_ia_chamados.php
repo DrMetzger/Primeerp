@@ -96,6 +96,23 @@ foreach (['parecido (deve usar nossa base)' => $parecido, 'novo (deve buscar no 
     }
 }
 
+echo "\n=== Botão 'Sugerir resposta com IA' (manual, conversa em andamento) ===\n";
+$manual = criar_chamado($pdo, 'BOLETOS SENHA ITAU', 'DESENVOLVIMENTO DOS BOLETOS COM SENHA DO BANCO ITAÚ', 'aguardando_equipe');
+responder($pdo, $manual, 'equipe', 'boleto do banco itaú foi validado e testado no C6 BANK');
+$antes = (int) $pdo->query("SELECT COUNT(*) FROM chamado_respostas WHERE chamado_id = $manual")->fetchColumn();
+$r = IaChamados::processar($pdo, $manual, true);
+for ($i = 0; $i < 2 && $r['status'] === 'erro' && preg_match('/HTTP 503/', (string) $r['erro']); $i++) {
+    sleep(15);
+    $r = IaChamados::processar($pdo, $manual, true);
+}
+$depois = (int) $pdo->query("SELECT COUNT(*) FROM chamado_respostas WHERE chamado_id = $manual")->fetchColumn();
+printf("status=%s fonte=%s tokens=%d+%d respostas no chamado antes/depois=%d/%d\n", $r['status'], $r['fonte'] ?? '-', $r['tokens_entrada'], $r['tokens_saida'], $antes, $depois);
+echo ($r['resposta'] ?? $r['erro']) . "\n";
+if ($depois !== $antes || $r['status'] !== 'sugerida') {
+    echo "FALHA: botão manual não pode postar nada no chamado e deve trazer sugestão\n";
+    $falhas++;
+}
+
 echo "\n=== Modo automático (posta no chamado) ===\n";
 Configuracoes::definir($pdo, 'ia_chamados_modo', 'automatico', null);
 $auto = criar_chamado($pdo, 'NOTA COM REJEICAO 539 DUPLICIDADE', 'Transmiti a NF-e e deu rejeição 539 de duplicidade com diferença na chave. O que fazer?');
