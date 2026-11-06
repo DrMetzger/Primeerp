@@ -39,9 +39,12 @@ class IaChamados
     // chamada ao Google. Passou do prazo, pula direto pro fim (resposta com
     // base na conversa) em vez de deixar a tela esperando pra sempre.
     private const PRAZO_MANUAL_SEGUNDOS = 100;
-    private const TIMEOUT_CHAMADA_MANUAL_SEGUNDOS = 25;
-    // Sem nenhum passo novo por esse tempo = processo morreu no servidor.
-    public const SEGUNDOS_SEM_PROGRESSO_PARADO = 120;
+    // Cada chamada ao Google tem no máximo isso (cada etapa faz no máximo
+    // uma chamada, com até 2 novas tentativas se o Google estiver instável).
+    private const TIMEOUT_CHAMADA_SEGUNDOS = 25;
+    // Etapa marcada "em execução" há mais tempo que isso = o processo
+    // morreu no meio (a hospedagem mata requisição longa) -- é pulada.
+    public const SEGUNDOS_ETAPA_MORTA = 100;
 
     // Passo a passo da análise em andamento (gravado em chamado_ia_analises.progresso).
     private static ?PDO $pdoProgresso = null;
@@ -125,43 +128,190 @@ class IaChamados
     }
 
     /**
-     * Roda a análise de um chamado. $manual = pedido explícito da equipe pelo
-     * botão "Analisar com IA" -- refaz mesmo se já tiver análise, e NUNCA
-     * responde o cliente sozinho (só gera a sugestão), qualquer que seja o modo.
-     * Retorna a linha final de chamado_ia_analises (ou null se nem chegou a rodar).
+     * Roda a análise inteira num processo só (abertura de chamado, cron,
+     * WhatsApp, testes): executa as etapas uma atrás da outra. $manual =
+     * pedido explícito da equipe -- refaz do zero e NUNCA responde o cliente
+     * sozinho. Retorna a linha final de chamado_ia_analises (ou null se não
+     * rodou porque outro processo já está cuidando dela).
      */
     public static function processar(PDO $pdo, int $chamadoId, bool $manual = false): ?array
     {
         @set_time_limit(300);
         ignore_user_abort(true);
 
-        self::$pdoProgresso = $pdo;
-        self::$chamadoProgresso = $chamadoId;
-        self::$passos = [];
-        self::$inicio = microtime(true);
-        self::$prazo = self::$inicio + ($manual ? self::PRAZO_MANUAL_SEGUNDOS : 240);
-        AiSugestoes::$timeoutPorChamada = $manual ? self::TIMEOUT_CHAMADA_MANUAL_SEGUNDOS : null;
-        AiSugestoes::$aoTentarDeNovo = fn (string $msg) => self::passo($msg, 'aviso');
-
-        try {
-            if ($manual) {
-                self::iniciarManual($pdo, $chamadoId);
-            } else {
-                // Trava atômica: só um processo pega cada chamado pendente
-                // (evita gastar 2x se o cron e a requisição rodarem juntos).
-                $trava = $pdo->prepare("UPDATE chamado_ia_analises SET status = 'processando' WHERE chamado_id = ? AND status = 'pendente'");
-                $trava->execute([$chamadoId]);
-                if ($trava->rowCount() === 0) {
-                    return null;
-                }
-            }
-
-            $resultado = self::analisar($pdo, $chamadoId, $manual);
-        } catch (\Throwable $e) {
-            error_log('IA chamados: erro no chamado #' . $chamadoId . ': ' . $e->getMessage());
-            $resultado = ['status' => 'erro', 'erro' => mb_substr($e->getMessage(), 0, 500)];
+        if ($manual) {
+            self::iniciarManual($pdo, $chamadoId);
+        } elseif (!self::assumirAutomatica($pdo, $chamadoId)) {
+            return null;
         }
 
+        for ($i = 0; $i < 12; $i++) {
+            $r = self::executarEtapa($pdo, $chamadoId, $manual);
+            if ($r['terminou']) {
+                break;
+            }
+            if ($r['ocupada']) {
+                return null; // outro processo está no meio de uma etapa
+            }
+        }
+
+        return self::linha($pdo, $chamadoId) ?: null;
+    }
+
+    /** Começa (ou recomeça) a análise manual do zero. */
+    public static function iniciarManual(PDO $pdo, int $chamadoId): void
+    {
+        $estado = json_encode(['etapa' => 'inicio', 'inicio' => microtime(true), 'manual' => true]);
+        $pdo->prepare("INSERT INTO chamado_ia_analises (chamado_id, status, progresso, estado) VALUES (?, 'processando', '[]', ?)
+            ON DUPLICATE KEY UPDATE status = 'processando', erro = NULL, resposta = NULL, fonte = NULL, links = NULL,
+                chamados_referencia = NULL, progresso = '[]', estado = VALUES(estado), tokens_entrada = 0, tokens_saida = 0, usou_busca = 0")
+            ->execute([$chamadoId, $estado]);
+    }
+
+    /**
+     * Análise automática: pega pra si uma pendente (nova) ou uma que ficou
+     * parada no meio (processo morreu) -- trava atômica, pra dois processos
+     * nunca rodarem a mesma ao mesmo tempo.
+     */
+    private static function assumirAutomatica(PDO $pdo, int $chamadoId): bool
+    {
+        $estado = json_encode(['etapa' => 'inicio', 'inicio' => microtime(true), 'manual' => false]);
+        $nova = $pdo->prepare("UPDATE chamado_ia_analises SET status = 'processando', progresso = '[]', estado = ?, tentativas = tentativas + 1
+            WHERE chamado_id = ? AND status = 'pendente' AND tentativas < " . self::MAX_TENTATIVAS);
+        $nova->execute([$estado, $chamadoId]);
+        if ($nova->rowCount() > 0) {
+            return true;
+        }
+
+        $parada = $pdo->prepare("UPDATE chamado_ia_analises SET atualizado_em = NOW()
+            WHERE chamado_id = ? AND status = 'processando'
+              AND atualizado_em < DATE_SUB(NOW(), INTERVAL " . self::SEGUNDOS_ETAPA_MORTA . " SECOND)");
+        $parada->execute([$chamadoId]);
+
+        return $parada->rowCount() > 0;
+    }
+
+    private static function linha(PDO $pdo, int $chamadoId): ?array
+    {
+        $stmt = $pdo->prepare('SELECT * FROM chamado_ia_analises WHERE chamado_id = ?');
+        $stmt->execute([$chamadoId]);
+
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * Executa UMA etapa da análise e grava o estado no banco. Cada etapa é
+     * curta (no máximo uma chamada ao Google), então cabe numa requisição
+     * normal da hospedagem. Se o processo morrer no meio de uma etapa, na
+     * próxima vez ela é pulada e a análise segue pra próxima.
+     * Retorna ['terminou' => bool, 'ocupada' => bool].
+     */
+    public static function executarEtapa(PDO $pdo, int $chamadoId, bool $manual, bool $anteriorFalhou = false): array
+    {
+        $linha = self::linha($pdo, $chamadoId);
+        if (!$linha || $linha['status'] !== 'processando') {
+            return ['terminou' => true, 'ocupada' => false];
+        }
+
+        $estado = json_decode($linha['estado'] ?? '', true) ?: ['etapa' => 'inicio', 'inicio' => microtime(true), 'manual' => $manual];
+        self::$pdoProgresso = $pdo;
+        self::$chamadoProgresso = $chamadoId;
+        self::$passos = json_decode($linha['progresso'] ?? '[]', true) ?: [];
+        self::$inicio = (float) $estado['inicio'];
+        self::$prazo = self::$inicio + ($manual ? self::PRAZO_MANUAL_SEGUNDOS : 240);
+        AiSugestoes::$timeoutPorChamada = self::TIMEOUT_CHAMADA_SEGUNDOS;
+        AiSugestoes::$aoTentarDeNovo = fn (string $msg) => self::passo($msg, 'aviso');
+
+        $etapa = $estado['etapa'];
+
+        // Etapa marcada "em execução" por outra requisição: ou ainda está
+        // rodando (espera), ou o processo morreu no meio (pula ela).
+        if (!empty($estado['executando'])) {
+            // $anteriorFalhou: a tela viu a requisição anterior cair (erro de
+            // servidor), então não precisa esperar o tempo todo pra pular.
+            $limite = $anteriorFalhou ? 5 : self::SEGUNDOS_ETAPA_MORTA;
+            if (microtime(true) - (float) $estado['executando'] < $limite) {
+                return ['terminou' => false, 'ocupada' => true];
+            }
+            self::resultado('não terminou no servidor (processo interrompido), pulando', 'erro');
+            $estado['executando'] = null;
+            $estado['etapa'] = self::ETAPA_SE_FALHAR[$etapa] ?? 'fim_erro';
+            self::salvarEstado($estado);
+            if (str_starts_with($estado['etapa'], 'fim_')) {
+                self::concluir($pdo, $chamadoId, $manual, $estado['etapa'] === 'fim_erro'
+                    ? ['status' => 'erro', 'erro' => 'A etapa "' . $etapa . '" foi interrompida no servidor.']
+                    : ['status' => 'sem_resposta', 'erro' => 'Não encontrou nada confiável (uma etapa foi interrompida no servidor).']);
+
+                return ['terminou' => true, 'ocupada' => false];
+            }
+
+            return ['terminou' => false, 'ocupada' => false];
+        }
+
+        $estado['executando'] = microtime(true);
+        self::salvarEstado($estado);
+
+        // Erro fatal do PHP no meio da etapa (ou limite de tempo da
+        // hospedagem): deixa registrado no passo a passo, pra dar pra ver o motivo.
+        register_shutdown_function(function () use ($chamadoId) {
+            $erro = error_get_last();
+            if ($erro && in_array($erro['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true) && self::$chamadoProgresso === $chamadoId) {
+                self::resultado('erro no servidor: ' . mb_substr($erro['message'], 0, 180), 'erro');
+            }
+        });
+
+        try {
+            $r = self::rodarEtapa($pdo, $chamadoId, $manual, $estado);
+        } catch (\Throwable $e) {
+            error_log('IA chamados: erro na etapa ' . $etapa . ' do chamado #' . $chamadoId . ': ' . $e->getMessage());
+            self::resultado('erro: ' . mb_substr($e->getMessage(), 0, 150), 'erro');
+            $proxima = self::ETAPA_SE_FALHAR[$etapa] ?? 'fim_erro';
+            $r = $proxima === 'fim_erro'
+                ? ['fim' => ['status' => 'erro', 'erro' => mb_substr($e->getMessage(), 0, 500)]]
+                : ['proxima' => $proxima];
+        }
+
+        $estado = $r['estado'] ?? $estado;
+        $estado['executando'] = null;
+
+        if (isset($r['fim'])) {
+            $estado['etapa'] = 'fim';
+            self::salvarEstado($estado);
+            self::concluir($pdo, $chamadoId, $manual, $r['fim']);
+
+            return ['terminou' => true, 'ocupada' => false];
+        }
+
+        $estado['etapa'] = $r['proxima'];
+        self::salvarEstado($estado);
+
+        return ['terminou' => false, 'ocupada' => false];
+    }
+
+    // Pra onde ir quando uma etapa falha ou morre no meio.
+    private const ETAPA_SE_FALHAR = [
+        'inicio' => 'fim_erro',
+        'base' => 'termos',
+        'termos' => 'tdn',
+        'uf_busca' => 'tdn',
+        'uf_ler' => 'tdn',
+        'tdn' => 'conversa',
+        'conversa' => 'fim_erro',
+    ];
+
+    private static function salvarEstado(array $estado): void
+    {
+        try {
+            self::$pdoProgresso->prepare('UPDATE chamado_ia_analises SET estado = ?, progresso = ? WHERE chamado_id = ?')
+                ->execute([json_encode($estado, JSON_UNESCAPED_UNICODE), json_encode(self::$passos, JSON_UNESCAPED_UNICODE), self::$chamadoProgresso]);
+        } catch (\Throwable $e) {
+            error_log('IA chamados: falha ao salvar estado: ' . $e->getMessage());
+        }
+    }
+
+    /** Gravação final (resposta/erro) -- e, na automática, nova tentativa se o Google estava instável. */
+    private static function concluir(PDO $pdo, int $chamadoId, bool $manual, array $resultado): void
+    {
         $fim = [
             'sugerida' => ['Sugestão pronta', 'ok'],
             'enviada' => ['Resposta enviada ao cliente', 'ok'],
@@ -172,47 +322,25 @@ class IaChamados
         if ($fim) {
             self::passo($fim[0], $fim[1]);
         }
-        AiSugestoes::$timeoutPorChamada = null;
-        AiSugestoes::$aoTentarDeNovo = null;
 
         $campos = array_merge([
-            'fonte' => null, 'resposta' => null, 'chamados_referencia' => null, 'links' => null, 'erro' => null,
-            'tokens_entrada' => 0, 'tokens_saida' => 0, 'usou_busca' => 0, 'resposta_id' => null,
+            'fonte' => null, 'resposta' => null, 'chamados_referencia' => null, 'links' => null, 'erro' => null, 'resposta_id' => null,
         ], $resultado);
 
-        $tentativas = (int) $pdo->query('SELECT tentativas FROM chamado_ia_analises WHERE chamado_id = ' . (int) $chamadoId)->fetchColumn() + 1;
-        $falhaPassageira = $campos['status'] === 'erro' && preg_match('/HTTP (429|500|503)|falha de rede/i', (string) $campos['erro']);
-        if ($falhaPassageira && !$manual && $tentativas < self::MAX_TENTATIVAS) {
+        $linha = self::linha($pdo, $chamadoId);
+        $falhaPassageira = $campos['status'] === 'erro' && preg_match('/HTTP (429|500|503)|falha de rede|interrompida/i', (string) $campos['erro']);
+        if ($falhaPassageira && !$manual && (int) ($linha['tentativas'] ?? 0) < self::MAX_TENTATIVAS) {
             $campos['status'] = 'pendente';
             $campos['erro'] = 'Google instável, vai tentar de novo: ' . $campos['erro'];
         }
 
         $pdo->prepare('UPDATE chamado_ia_analises SET status = ?, fonte = ?, resposta = ?, chamados_referencia = ?, links = ?, erro = ?,
-                tokens_entrada = tokens_entrada + ?, tokens_saida = tokens_saida + ?, usou_busca = GREATEST(usou_busca, ?), resposta_id = ?,
-                tentativas = ? WHERE chamado_id = ?')
+                resposta_id = ?, progresso = ? WHERE chamado_id = ?')
             ->execute([
-                $campos['status'], $campos['fonte'], $campos['resposta'], $campos['chamados_referencia'], $campos['links'], $campos['erro'],
-                $campos['tokens_entrada'], $campos['tokens_saida'], $campos['usou_busca'], $campos['resposta_id'],
-                $manual ? 0 : $tentativas, $chamadoId,
+                $campos['status'], $campos['fonte'], $campos['resposta'], $campos['chamados_referencia'], $campos['links'],
+                $campos['erro'] !== null ? mb_substr($campos['erro'], 0, 500) : null, $campos['resposta_id'],
+                json_encode(self::$passos, JSON_UNESCAPED_UNICODE), $chamadoId,
             ]);
-
-        $stmt = $pdo->prepare('SELECT * FROM chamado_ia_analises WHERE chamado_id = ?');
-        $stmt->execute([$chamadoId]);
-
-        return $stmt->fetch() ?: null;
-    }
-
-    /**
-     * Zera a análise manual pra começar do zero (o botão chama isso antes de
-     * responder pro navegador, pra tela já ver "processando" na hora).
-     */
-    public static function iniciarManual(PDO $pdo, int $chamadoId): void
-    {
-        $pdo->prepare("INSERT INTO chamado_ia_analises (chamado_id, status, progresso) VALUES (?, 'processando', '[]')
-            ON DUPLICATE KEY UPDATE status = 'processando', erro = NULL, resposta = NULL, fonte = NULL, links = NULL,
-                chamados_referencia = NULL, progresso = '[]',
-                tokens_entrada = 0, tokens_saida = 0, usou_busca = 0")
-            ->execute([$chamadoId]);
     }
 
     /**
@@ -271,15 +399,26 @@ class IaChamados
         return microtime(true) > self::$prazo;
     }
 
-    /** Pendentes que ficaram pra trás (usado pelo cron). */
+    /** Chama o Gemini e já soma os tokens gastos na análise. */
+    private static function gerarIa(string $prompt, array $ferramentas = [], ?string $chave = null, array $arquivos = [], array $config = [], ?array $modelos = null): array
+    {
+        $r = AiSugestoes::gerar($prompt, $ferramentas, $chave, $arquivos, $config, $modelos);
+        if ($r['ok'] && self::$pdoProgresso) {
+            self::$pdoProgresso->prepare('UPDATE chamado_ia_analises SET tokens_entrada = tokens_entrada + ?, tokens_saida = tokens_saida + ? WHERE chamado_id = ?')
+                ->execute([$r['uso']['entrada'], $r['uso']['saida'], self::$chamadoProgresso]);
+        }
+
+        return $r;
+    }
+
+    /** Análises que ficaram pra trás: pendentes ou paradas no meio (usado pelo cron). */
     public static function processarPendentes(PDO $pdo, int $limite = 5): int
     {
-        // "processando" há muito tempo = processo morreu no meio; volta pra fila.
-        $pdo->exec("UPDATE chamado_ia_analises SET status = 'pendente' WHERE status = 'processando' AND atualizado_em < DATE_SUB(NOW(), INTERVAL 15 MINUTE)");
-
         $ids = $pdo->query("SELECT chamado_id FROM chamado_ia_analises
-            WHERE status = 'pendente' AND criado_em < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
-              AND (tentativas = 0 OR atualizado_em < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
+            WHERE (status = 'pendente' AND criado_em < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+                    AND (tentativas = 0 OR atualizado_em < DATE_SUB(NOW(), INTERVAL 10 MINUTE)))
+               OR (status = 'processando' AND atualizado_em < DATE_SUB(NOW(), INTERVAL " . self::SEGUNDOS_ETAPA_MORTA . " SECOND)
+                    AND (estado IS NULL OR estado NOT LIKE '%\"manual\":true%'))
             ORDER BY criado_em ASC LIMIT " . (int) $limite)->fetchAll(PDO::FETCH_COLUMN);
 
         foreach ($ids as $id) {
@@ -307,214 +446,198 @@ class IaChamados
         return $porChamado;
     }
 
-    // --- Análise -------------------------------------------------------------
+    // --- Etapas --------------------------------------------------------------
 
-    private static function analisar(PDO $pdo, int $chamadoId, bool $manual): array
+    /** Dados do chamado que toda etapa usa (recarregados a cada requisição). */
+    private static function contexto(PDO $pdo, int $chamadoId): ?array
     {
-        if (!AiSugestoes::configurada()) {
-            return ['status' => 'erro', 'erro' => 'Chave do Gemini não configurada (Configurações > IA Gemini).'];
-        }
-
-        self::passo('Lendo o chamado e a conversa');
         $stmt = $pdo->prepare('SELECT ch.*, c.nome AS cliente_nome FROM chamados ch LEFT JOIN clientes c ON c.id = ch.cliente_id WHERE ch.id = ?');
         $stmt->execute([$chamadoId]);
         $chamado = $stmt->fetch();
         if (!$chamado) {
-            return ['status' => 'erro', 'erro' => 'Chamado não encontrado.'];
+            return null;
         }
-
         $chamado['conversa'] = self::conversa($pdo, $chamadoId);
-        $palavras = self::palavrasChave($chamado['titulo'] . ' ' . $chamado['descricao']);
-        self::resultado(count($chamado['conversa']) . ' mensagem(ns) além da abertura');
-        if (count($palavras) < 2 && !($manual && $chamado['conversa'])) {
-            return ['status' => 'ignorada', 'erro' => 'Descrição curta demais pra analisar.'];
-        }
 
-        if (!$manual && self::analisesHoje($pdo, false) >= self::limiteDia($pdo)) {
-            return ['status' => 'ignorada', 'erro' => 'Limite diário de análises atingido.'];
-        }
+        return $chamado;
+    }
 
+    /**
+     * Uma etapa. Devolve ['proxima' => etapa] ou ['fim' => resultado], e
+     * opcionalmente 'estado' atualizado (termos de busca, artigos...).
+     */
+    private static function rodarEtapa(PDO $pdo, int $chamadoId, bool $manual, array $estado): array
+    {
+        $chamado = self::contexto($pdo, $chamadoId);
+        if (!$chamado) {
+            return ['fim' => ['status' => 'erro', 'erro' => 'Chamado não encontrado.']];
+        }
         $primeiroNome = self::primeiroNomeContato($pdo, $chamado);
-        $tokensEntrada = 0;
-        $tokensSaida = 0;
+        $palavras = self::palavrasChave($chamado['titulo'] . ' ' . $chamado['descricao']);
+        $imagens = $estado['imagens'] ?? [];
 
-        // Prints/fotos anexados (geralmente é onde está a mensagem de erro).
-        self::passo('Enviando os prints anexados pra IA ler');
-        $imagens = self::imagensDoChamado($pdo, $chamadoId);
-        self::resultado($imagens ? count($imagens) . ' imagem(ns): ' . implode(', ', array_column($imagens, 'nome')) : 'nenhuma imagem no chamado');
-
-        // Etapa 1: nossa base (barata).
-        self::passo('Procurando chamados parecidos na nossa base (palavras: ' . implode(', ', array_slice($palavras, 0, 6)) . ')');
-        $similares = self::chamadosSimilares($pdo, $chamado, $palavras);
-        self::resultado($similares
-            ? count($similares) . ' parecido(s): #' . implode(', #', array_column($similares, 'id'))
-            : 'nenhum parecido');
-
-        if ($similares && !self::tempoEsgotado()) {
-            self::passo('IA conferindo se a solução dos chamados parecidos serve pra este');
-            $r = AiSugestoes::gerar(
-                self::promptBase($chamado, $similares, $primeiroNome),
-                [],
-                null,
-                $imagens,
-                ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4, 'responseMimeType' => 'application/json']
-            );
-            if (!$r['ok']) {
-                self::resultado(self::erroCurto($r['erro']), 'erro');
-                if (!$manual || self::erroDeChave($r['erro'])) {
-                    return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500)];
+        switch ($estado['etapa']) {
+            case 'inicio':
+                if (!AiSugestoes::configurada()) {
+                    return ['fim' => ['status' => 'erro', 'erro' => 'Chave do Gemini não configurada (Configurações > IA Gemini).']];
                 }
-            } else {
-                $tokensEntrada += $r['uso']['entrada'];
-                $tokensSaida += $r['uso']['saida'];
+                self::passo('Lendo o chamado e a conversa');
+                self::resultado(count($chamado['conversa']) . ' mensagem(ns) além da abertura');
+                if (count($palavras) < 2 && !($manual && $chamado['conversa'])) {
+                    return ['fim' => ['status' => 'ignorada', 'erro' => 'Descrição curta demais pra analisar.']];
+                }
+                if (!$manual && self::analisesHoje($pdo, false) >= self::limiteDia($pdo)) {
+                    return ['fim' => ['status' => 'ignorada', 'erro' => 'Limite diário de análises atingido.']];
+                }
+                // Prints/fotos anexados (geralmente é onde está a mensagem de erro).
+                self::passo('Enviando os prints anexados pra IA ler');
+                $estado['imagens'] = self::imagensDoChamado($pdo, $chamadoId);
+                self::resultado($estado['imagens'] ? count($estado['imagens']) . ' imagem(ns): ' . implode(', ', array_column($estado['imagens'], 'nome')) : 'nenhuma imagem no chamado');
 
+                return ['proxima' => 'base', 'estado' => $estado];
+
+            case 'base':
+                // Nossa base: busca por palavra-chave no MySQL, sem custo.
+                self::passo('Procurando chamados parecidos na nossa base (palavras: ' . implode(', ', array_slice($palavras, 0, 6)) . ')');
+                $similares = self::chamadosSimilares($pdo, $chamado, $palavras);
+                self::resultado($similares ? count($similares) . ' parecido(s): #' . implode(', #', array_column($similares, 'id')) : 'nenhum parecido');
+                if (!$similares) {
+                    return ['proxima' => 'termos'];
+                }
+
+                self::passo('IA conferindo se a solução dos chamados parecidos serve pra este');
+                $r = self::gerarIa(self::promptBase($chamado, $similares, $primeiroNome), [], null, $imagens,
+                    ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4, 'responseMimeType' => 'application/json']);
+                if (!$r['ok']) {
+                    self::resultado(self::erroCurto($r['erro']), 'erro');
+
+                    return (!$manual || self::erroDeChave($r['erro']))
+                        ? ['fim' => ['status' => 'erro', 'erro' => $r['erro']]]
+                        : ['proxima' => 'termos'];
+                }
                 $json = json_decode(self::extrairJson($r['texto']), true);
-                if (!empty($json['resolve']) && trim($json['resposta'] ?? '') !== '') {
-                    self::resultado('serve');
-                    $referencias = array_values(array_intersect(
-                        array_map('intval', (array) ($json['referencias'] ?? [])),
-                        array_map(fn ($s) => (int) $s['id'], $similares)
-                    ));
+                if (empty($json['resolve']) || trim($json['resposta'] ?? '') === '') {
+                    self::resultado('não é o mesmo problema');
 
-                    return self::finalizar($pdo, $chamado, $manual, [
-                        'fonte' => 'base',
-                        'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
-                        'chamados_referencia' => implode(',', $referencias ?: array_map(fn ($s) => (int) $s['id'], $similares)),
-                        'tokens_entrada' => $tokensEntrada,
-                        'tokens_saida' => $tokensSaida,
-                    ]);
+                    return ['proxima' => 'termos'];
                 }
-                self::resultado('não é o mesmo problema');
-            }
-        }
+                self::resultado('serve');
+                $referencias = array_values(array_intersect(
+                    array_map('intval', (array) ($json['referencias'] ?? [])),
+                    array_map(fn ($s) => (int) $s['id'], $similares)
+                ));
 
-        // Etapa 2: User Function (API pública do site, sem custo de busca).
-        $consultas = [];
-        if (!self::tempoEsgotado()) {
-            self::passo('IA criando termos de busca');
-            self::$ultimoErro = null;
-            $consultas = self::consultasDeBusca($chamado, $tokensEntrada, $tokensSaida);
-            self::resultado($consultas ? '"' . implode('", "', $consultas) . '"' : 'não conseguiu gerar termos' . (self::$ultimoErro ? ' (' . self::erroCurto(self::$ultimoErro) . ')' : ''), $consultas ? 'ok' : 'aviso');
-            if (!$consultas && self::erroDeChave(self::$ultimoErro)) {
-                return ['status' => 'erro', 'erro' => mb_substr((string) self::$ultimoErro, 0, 500), 'tokens_entrada' => $tokensEntrada, 'tokens_saida' => $tokensSaida];
-            }
-        }
+                return ['fim' => self::finalizar($pdo, $chamado, $manual, [
+                    'fonte' => 'base',
+                    'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
+                    'chamados_referencia' => implode(',', $referencias ?: array_map(fn ($s) => (int) $s['id'], $similares)),
+                ])];
 
-        $artigos = [];
-        if ($consultas && !self::tempoEsgotado()) {
-            self::passo('Buscando artigos no User Function');
-            $artigos = self::artigosUserFunction($consultas);
-            self::resultado($artigos ? count($artigos) . ' artigo(s): ' . implode(' | ', array_column($artigos, 'titulo')) : 'nenhum artigo encontrado');
-        }
-
-        if ($artigos && !self::tempoEsgotado()) {
-            self::passo('IA lendo os artigos do User Function');
-            $r = AiSugestoes::gerar(
-                self::promptArtigos($chamado, $artigos, $primeiroNome),
-                [],
-                null,
-                $imagens,
-                ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.3, 'responseMimeType' => 'application/json']
-            );
-            if (!$r['ok']) {
-                self::resultado(self::erroCurto($r['erro']), 'erro');
-                if (self::erroDeChave($r['erro'])) {
-                    return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500), 'tokens_entrada' => $tokensEntrada, 'tokens_saida' => $tokensSaida];
+            case 'termos':
+                if (self::tempoEsgotado()) {
+                    return ['proxima' => 'tdn'];
                 }
-            } else {
-                $tokensEntrada += $r['uso']['entrada'];
-                $tokensSaida += $r['uso']['saida'];
+                self::passo('IA criando termos de busca');
+                self::$ultimoErro = null;
+                $tokE = 0;
+                $tokS = 0;
+                $estado['consultas'] = self::consultasDeBusca($chamado, $tokE, $tokS);
+                if ($tokE && self::$pdoProgresso) {
+                    $pdo->prepare('UPDATE chamado_ia_analises SET tokens_entrada = tokens_entrada + ?, tokens_saida = tokens_saida + ? WHERE chamado_id = ?')
+                        ->execute([$tokE, $tokS, $chamadoId]);
+                }
+                if (!$estado['consultas']) {
+                    self::resultado('não conseguiu gerar termos' . (self::$ultimoErro ? ' (' . self::erroCurto(self::$ultimoErro) . ')' : ''), 'aviso');
+
+                    return self::erroDeChave(self::$ultimoErro)
+                        ? ['fim' => ['status' => 'erro', 'erro' => self::$ultimoErro]]
+                        : ['proxima' => 'tdn', 'estado' => $estado];
+                }
+                self::resultado('"' . implode('", "', $estado['consultas']) . '"');
+
+                return ['proxima' => 'uf_busca', 'estado' => $estado];
+
+            case 'uf_busca':
+                // User Function: API pública do site, sem custo de busca.
+                self::passo('Buscando artigos no User Function');
+                $estado['artigos'] = self::artigosUserFunction($estado['consultas'] ?? []);
+                self::resultado($estado['artigos'] ? count($estado['artigos']) . ' artigo(s): ' . implode(' | ', array_column($estado['artigos'], 'titulo')) : 'nenhum artigo encontrado');
+
+                return ['proxima' => $estado['artigos'] ? 'uf_ler' : 'tdn', 'estado' => $estado];
+
+            case 'uf_ler':
+                $artigos = $estado['artigos'] ?? [];
+                self::passo('IA lendo os artigos do User Function');
+                $r = self::gerarIa(self::promptArtigos($chamado, $artigos, $primeiroNome), [], null, $imagens,
+                    ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.3, 'responseMimeType' => 'application/json']);
+                if (!$r['ok']) {
+                    self::resultado(self::erroCurto($r['erro']), 'erro');
+
+                    return self::erroDeChave($r['erro']) ? ['fim' => ['status' => 'erro', 'erro' => $r['erro']]] : ['proxima' => 'tdn'];
+                }
                 $json = json_decode(self::extrairJson($r['texto']), true);
-                if (!empty($json['resolve']) && trim($json['resposta'] ?? '') !== '') {
-                    self::resultado('encontrou a solução');
-                    $usados = array_values(array_filter(array_map(
-                        fn ($i) => $artigos[(int) $i - 1] ?? null,
-                        (array) ($json['artigos'] ?? [])
-                    )));
+                if (empty($json['resolve']) || trim($json['resposta'] ?? '') === '') {
+                    self::resultado('os artigos não resolvem este caso');
 
-                    return self::finalizar($pdo, $chamado, $manual, [
-                        'fonte' => 'internet',
-                        'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
-                        'links' => json_encode(array_map(fn ($a) => ['titulo' => $a['titulo'], 'url' => $a['url']], $usados ?: $artigos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                        'tokens_entrada' => $tokensEntrada,
-                        'tokens_saida' => $tokensSaida,
-                    ]);
+                    return ['proxima' => 'tdn'];
                 }
-                self::resultado('os artigos não resolvem este caso');
-            }
+                self::resultado('encontrou a solução');
+                $usados = array_values(array_filter(array_map(fn ($i) => $artigos[(int) $i - 1] ?? null, (array) ($json['artigos'] ?? []))));
+
+                return ['fim' => self::finalizar($pdo, $chamado, $manual, [
+                    'fonte' => 'internet',
+                    'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
+                    'links' => json_encode(array_map(fn ($a) => ['titulo' => $a['titulo'], 'url' => $a['url']], $usados ?: $artigos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ])];
+
+            case 'tdn':
+                // TDN via busca do Google -- a única parte cobrada por
+                // pesquisa, por isso tem limite diário próprio.
+                $semTempo = self::tempoEsgotado();
+                $semCota = self::analisesHoje($pdo, true) >= self::limiteBuscaDia($pdo);
+                if ($semTempo || $semCota) {
+                    self::passo($semTempo ? 'Pulando a busca no TDN: tempo máximo da análise atingido' : 'Pulando a busca no TDN: limite diário de buscas atingido', 'aviso');
+
+                    return ['proxima' => 'conversa'];
+                }
+                // Conta a busca ANTES de chamar (se o processo morrer no
+                // meio, ainda assim entra no limite diário de custo).
+                $pdo->prepare('UPDATE chamado_ia_analises SET usou_busca = 1 WHERE chamado_id = ?')->execute([$chamadoId]);
+
+                self::passo('Pesquisando no TDN da TOTVS (busca do Google)');
+                $r = self::gerarIa(self::promptBusca($chamado, $primeiroNome, $estado['consultas'] ?? []), [['google_search' => (object) []]],
+                    AiSugestoes::chaveParaBuscaOuAnalise(), [], ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA_BUSCA, 'temperature' => 0.3], self::MODELOS_BUSCA);
+                if (!$r['ok']) {
+                    self::resultado(self::erroCurto($r['erro']), 'erro');
+                    if (!self::erroDeChave($r['erro'])) {
+                        return ['proxima' => 'conversa'];
+                    }
+
+                    return ['fim' => ['status' => 'erro', 'erro' => $r['erro']]];
+                }
+                $resposta = trim($r['texto']);
+                $naoEncontrou = $resposta === '' || stripos($resposta, 'NAO_ENCONTRADO') !== false;
+                // Só vale se pelo menos uma das páginas usadas for da TOTVS ou do
+                // User Function -- resposta montada com blog aleatório não serve.
+                $fontesOficiais = array_values(array_filter($r['fontes'], fn ($f) => preg_match('/totvs|userfunction/i', $f['titulo'] . ' ' . $f['url'])));
+                if ($naoEncontrou || !$fontesOficiais) {
+                    self::resultado($r['fontes'] ? 'páginas consultadas não resolvem' : 'nada encontrado na TOTVS', 'aviso');
+
+                    return ['proxima' => 'conversa'];
+                }
+                self::resultado(count($fontesOficiais) . ' página(s) da TOTVS');
+
+                return ['fim' => self::finalizar($pdo, $chamado, $manual, [
+                    'fonte' => 'internet',
+                    'resposta' => self::garantirNome(self::limparTexto($resposta), $primeiroNome),
+                    'links' => json_encode($fontesOficiais, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ])];
+
+            case 'conversa':
+                return ['fim' => self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens)];
         }
 
-        // Etapa 3: TDN via busca do Google -- a única parte cobrada por
-        // pesquisa, por isso tem limite diário próprio.
-        $semTempo = self::tempoEsgotado();
-        $semCota = self::analisesHoje($pdo, true) >= self::limiteBuscaDia($pdo);
-        if ($semTempo || $semCota) {
-            self::passo($semTempo ? 'Pulando a busca no TDN: tempo máximo da análise atingido' : 'Pulando a busca no TDN: limite diário de buscas atingido', 'aviso');
-            if ($manual) {
-                return self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens, $tokensEntrada, $tokensSaida, 0);
-            }
-
-            return [
-                'status' => 'sem_resposta',
-                'erro' => 'Nada parecido na base nem no User Function, e ' . ($semTempo ? 'o tempo máximo acabou.' : 'o limite diário de buscas no TDN já foi atingido.'),
-                'tokens_entrada' => $tokensEntrada,
-                'tokens_saida' => $tokensSaida,
-            ];
-        }
-
-        self::passo('Pesquisando no TDN da TOTVS (busca do Google)');
-        $r = AiSugestoes::gerar(
-            self::promptBusca($chamado, $primeiroNome, $consultas),
-            [['google_search' => (object) []]],
-            AiSugestoes::chaveParaBuscaOuAnalise(),
-            [],
-            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA_BUSCA, 'temperature' => 0.3],
-            self::MODELOS_BUSCA
-        );
-        if (!$r['ok']) {
-            self::resultado(self::erroCurto($r['erro']), 'erro');
-            if ($manual && !self::erroDeChave($r['erro'])) {
-                return self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens, $tokensEntrada, $tokensSaida, 1);
-            }
-
-            return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500), 'usou_busca' => 1,
-                'tokens_entrada' => $tokensEntrada, 'tokens_saida' => $tokensSaida];
-        }
-        $tokensEntrada += $r['uso']['entrada'];
-        $tokensSaida += $r['uso']['saida'];
-
-        $resposta = trim($r['texto']);
-        $naoEncontrou = $resposta === '' || stripos($resposta, 'NAO_ENCONTRADO') !== false;
-
-        // Só vale se pelo menos uma das páginas usadas for da TOTVS ou do
-        // User Function -- resposta montada com blog aleatório não serve.
-        $fontesOficiais = array_values(array_filter($r['fontes'], fn ($f) => preg_match('/totvs|userfunction/i', $f['titulo'] . ' ' . $f['url'])));
-
-        if ($naoEncontrou || !$fontesOficiais) {
-            self::resultado($r['fontes'] ? 'páginas consultadas não resolvem' : 'nada encontrado na TOTVS', 'aviso');
-            if ($manual) {
-                return self::respostaPelaConversa($pdo, $chamado, $primeiroNome, $imagens, $tokensEntrada, $tokensSaida, 1);
-            }
-
-            return [
-                'status' => 'sem_resposta',
-                'usou_busca' => 1,
-                'links' => $r['fontes'] ? json_encode($r['fontes'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
-                'erro' => 'Não encontrou nada confiável na base, no User Function nem no TDN.',
-                'tokens_entrada' => $tokensEntrada,
-                'tokens_saida' => $tokensSaida,
-            ];
-        }
-        self::resultado(count($fontesOficiais) . ' página(s) da TOTVS');
-
-        return self::finalizar($pdo, $chamado, $manual, [
-            'fonte' => 'internet',
-            'resposta' => self::garantirNome(self::limparTexto($resposta), $primeiroNome),
-            'links' => json_encode($fontesOficiais, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'usou_busca' => 1,
-            'tokens_entrada' => $tokensEntrada,
-            'tokens_saida' => $tokensSaida,
-        ]);
+        return ['fim' => ['status' => 'erro', 'erro' => 'Etapa desconhecida: ' . $estado['etapa']]];
     }
 
     /** Chave errada/sem permissão: não adianta tentar as outras etapas. */
@@ -537,15 +660,15 @@ class IaChamados
     }
 
     /**
-     * Último recurso do botão "Sugerir resposta": nada na base nem na
+     * Último recurso (botão ou abertura do chamado): nada na base nem na
      * internet, então escreve a próxima resposta só com o que já está no
      * chamado (normalmente pedindo o que falta, ou dando retorno do que a
      * equipe já fez) -- sem inventar solução técnica.
      */
-    private static function respostaPelaConversa(PDO $pdo, array $chamado, string $primeiroNome, array $imagens, int $tokensEntrada, int $tokensSaida, int $usouBusca): array
+    private static function respostaPelaConversa(PDO $pdo, array $chamado, string $primeiroNome, array $imagens): array
     {
         self::passo('Sem solução documentada: IA escrevendo a resposta com base na conversa');
-        $r = AiSugestoes::gerar(
+        $r = self::gerarIa(
             "Você é consultor de TOTVS Protheus na PrimeERP e vai escrever a próxima resposta da equipe neste chamado.\n\n"
                 . self::blocoChamado($chamado)
                 . "\nTAREFA: escreva a próxima resposta da equipe pro cliente, coerente com a conversa. Não temos uma solução pronta "
@@ -560,16 +683,14 @@ class IaChamados
         if (!$r['ok']) {
             self::resultado(self::erroCurto($r['erro']), 'erro');
 
-            return ['status' => 'erro', 'erro' => mb_substr($r['erro'], 0, 500), 'usou_busca' => $usouBusca,
-                'tokens_entrada' => $tokensEntrada, 'tokens_saida' => $tokensSaida];
+            return ['status' => 'erro', 'erro' => $r['erro']];
         }
 
+        // Sempre só SUGESTÃO (manual=true no finalizar): sem solução
+        // documentada, nunca vai pro cliente sozinha, nem no modo automático.
         return self::finalizar($pdo, $chamado, true, [
             'fonte' => 'conversa',
             'resposta' => self::garantirNome(self::limparTexto($r['texto']), $primeiroNome),
-            'usou_busca' => $usouBusca,
-            'tokens_entrada' => $tokensEntrada + $r['uso']['entrada'],
-            'tokens_saida' => $tokensSaida + $r['uso']['saida'],
         ]);
     }
 
@@ -929,6 +1050,13 @@ TXT;
 
     private static function primeiroNomeContato(PDO $pdo, array $chamado): string
     {
+        // Quem escreveu por último do lado do cliente (é com essa pessoa que
+        // estamos falando agora), senão quem abriu o chamado.
+        foreach (array_reverse($chamado['conversa'] ?? []) as $mensagem) {
+            if ($mensagem['autor_tipo'] === 'cliente' && trim((string) $mensagem['autor_nome']) !== '') {
+                return self::formatarPrimeiroNome($mensagem['autor_nome']);
+            }
+        }
         try {
             if (!$chamado['cliente_id']) {
                 return '';
@@ -944,9 +1072,7 @@ TXT;
             if ($nome === '' || mb_strtolower($nome) === mb_strtolower((string) $cliente['nome'])) {
                 return '';
             }
-            $primeiro = explode(' ', $nome)[0];
-
-            return mb_convert_case(mb_strtolower($primeiro, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+            return self::formatarPrimeiroNome($nome);
         } catch (\Throwable $e) {
             return '';
         }
@@ -962,10 +1088,21 @@ TXT;
         return ($inicio !== false && $fim !== false) ? substr($texto, $inicio, $fim - $inicio + 1) : $texto;
     }
 
+    private static function formatarPrimeiroNome(string $nome): string
+    {
+        $primeiro = explode(' ', trim($nome))[0];
+
+        return mb_convert_case(mb_strtolower($primeiro, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+    }
+
     /** Se o modelo esqueceu o nome no cumprimento ("Oi, tudo bem?"), põe. */
     private static function garantirNome(string $texto, string $primeiroNome): string
     {
         if ($primeiroNome === '' || mb_stripos(mb_substr($texto, 0, 80), $primeiroNome) !== false) {
+            return $texto;
+        }
+        // Já cumprimenta alguém pelo nome ("Oi, Maico, ...")? Não mexe.
+        if (preg_match('/^(Oi|Olá|Ola|Bom dia|Boa tarde|Boa noite)[,!]?\s+\p{Lu}\p{Ll}+/u', $texto)) {
             return $texto;
         }
 

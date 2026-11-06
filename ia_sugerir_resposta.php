@@ -2,11 +2,12 @@
 /**
  * Botão "Sugerir resposta com IA" dentro do chamado (cliente.php).
  *
- *  - acao=iniciar: começa a análise e responde NA HORA; a análise roda em
- *    segundo plano no servidor (cada requisição na Hostinger tem limite de
- *    tempo, e a análise faz várias chamadas ao Google).
- *  - acao=status: passo a passo até agora (a tela pergunta a cada ~1,5s) e,
- *    quando terminar, o texto sugerido.
+ *  - acao=iniciar: zera e prepara a análise (responde na hora).
+ *  - acao=passo: executa UMA etapa e devolve o passo a passo até agora. A
+ *    tela chama de novo até terminar. Etapa curta = cabe no limite de tempo
+ *    de cada requisição da Hostinger (rodar tudo de uma vez, ou em segundo
+ *    plano, fazia o servidor matar o processo no meio da busca no TDN).
+ *  - acao=status: só lê o passo a passo/resultado, sem executar nada.
  *
  * NUNCA envia nada pro cliente: só devolve o texto. Quem envia é a pessoa
  * da equipe, depois de ler/editar, pelo botão normal de responder.
@@ -53,28 +54,19 @@ session_write_close();
 
 $acao = $_POST['acao'] ?? 'iniciar';
 
-if ($acao === 'status') {
-    $stmt = $pdo->prepare('SELECT *, TIMESTAMPDIFF(SECOND, atualizado_em, NOW()) AS segundos_parado FROM chamado_ia_analises WHERE chamado_id = ?');
+/** Passo a passo + resultado, no formato que a tela entende. */
+function estado_para_tela(PDO $pdo, int $chamadoId): array
+{
+    $stmt = $pdo->prepare('SELECT * FROM chamado_ia_analises WHERE chamado_id = ?');
     $stmt->execute([$chamadoId]);
     $analise = $stmt->fetch();
     if (!$analise) {
-        responder_json(['ok' => false, 'erro' => 'Nenhuma análise em andamento.']);
+        return ['ok' => false, 'erro' => 'Nenhuma análise em andamento.'];
     }
 
     $passos = json_decode($analise['progresso'] ?? '[]', true) ?: [];
-    $emAndamento = in_array($analise['status'], ['processando', 'pendente'], true);
-
-    // Sem nenhum passo novo há muito tempo = o processo morreu no servidor
-    // (limite de tempo da hospedagem, por exemplo). Encerra e avisa onde parou.
-    if ($emAndamento && (int) $analise['segundos_parado'] > IaChamados::SEGUNDOS_SEM_PROGRESSO_PARADO) {
-        $ultimo = $passos ? end($passos)['texto'] : 'antes de começar';
-        $erro = 'A análise parou no servidor na etapa: "' . $ultimo . '". Tente de novo.';
-        $pdo->prepare("UPDATE chamado_ia_analises SET status = 'erro', erro = ? WHERE chamado_id = ?")->execute([mb_substr($erro, 0, 500), $chamadoId]);
-        responder_json(['ok' => true, 'terminou' => true, 'sucesso' => false, 'passos' => $passos, 'erro' => $erro]);
-    }
-
-    if ($emAndamento) {
-        responder_json(['ok' => true, 'terminou' => false, 'passos' => $passos]);
+    if (in_array($analise['status'], ['processando', 'pendente'], true)) {
+        return ['ok' => true, 'terminou' => false, 'passos' => $passos];
     }
 
     if ($analise['status'] !== 'sugerida' || !$analise['resposta']) {
@@ -84,7 +76,8 @@ if ($acao === 'status') {
         } elseif (preg_match('/HTTP (429|500|503)/', $erro)) {
             $erro = 'o Google está sobrecarregado agora. Tente de novo em alguns segundos.';
         }
-        responder_json(['ok' => true, 'terminou' => true, 'sucesso' => false, 'passos' => $passos, 'erro' => $erro]);
+
+        return ['ok' => true, 'terminou' => true, 'sucesso' => false, 'passos' => $passos, 'erro' => $erro];
     }
 
     $rotulosFonte = [
@@ -93,7 +86,7 @@ if ($acao === 'status') {
         'conversa' => 'sem solução documentada: só com base na conversa, confira com atenção',
     ];
 
-    responder_json([
+    return [
         'ok' => true,
         'terminou' => true,
         'sucesso' => true,
@@ -101,7 +94,23 @@ if ($acao === 'status') {
         'resposta' => $analise['resposta'],
         'fonte' => $rotulosFonte[$analise['fonte']] ?? '',
         'links' => json_decode($analise['links'] ?? '[]', true) ?: [],
-    ]);
+    ];
+}
+
+if ($acao === 'status') {
+    responder_json(estado_para_tela($pdo, $chamadoId));
+}
+
+if ($acao === 'passo') {
+    // Uma etapa por requisição (cada uma faz no máximo uma chamada ao
+    // Google) -- cabe no limite de tempo da hospedagem. A tela chama de novo
+    // até terminar; se uma requisição morrer no meio, a próxima pula aquela etapa.
+    @set_time_limit(120);
+    ignore_user_abort(true);
+    $r = IaChamados::executarEtapa($pdo, $chamadoId, true, ($_POST['anterior_falhou'] ?? '') === '1');
+    $tela = estado_para_tela($pdo, $chamadoId);
+    $tela['ocupada'] = $r['ocupada'];
+    responder_json($tela);
 }
 
 // --- acao=iniciar ---------------------------------------------------------
@@ -110,23 +119,13 @@ if (!AiSugestoes::configurada()) {
     responder_json(['ok' => false, 'erro' => 'Chave do Gemini não configurada (Configurações > IA Gemini).']);
 }
 
-// Já tem uma análise rodando pra esse chamado (clique duplo, outra aba)?
-// Só acompanha a que já existe, não começa outra (e não gasta 2x).
+// Já tem uma análise manual rodando pra esse chamado (clique duplo, outra
+// aba)? Só acompanha a que já existe, não começa outra (e não gasta 2x).
 $stmt = $pdo->prepare("SELECT 1 FROM chamado_ia_analises WHERE chamado_id = ? AND status = 'processando'
-    AND atualizado_em > DATE_SUB(NOW(), INTERVAL " . IaChamados::SEGUNDOS_SEM_PROGRESSO_PARADO . ' SECOND)');
+    AND estado LIKE '%\"manual\":true%' AND atualizado_em > DATE_SUB(NOW(), INTERVAL " . IaChamados::SEGUNDOS_ETAPA_MORTA . ' SECOND)');
 $stmt->execute([$chamadoId]);
-if ($stmt->fetchColumn()) {
-    responder_json(['ok' => true, 'iniciado' => true, 'ja_estava_rodando' => true]);
+if (!$stmt->fetchColumn()) {
+    IaChamados::iniciarManual($pdo, $chamadoId);
 }
 
-IaChamados::iniciarManual($pdo, $chamadoId);
-
-// Responde pro navegador AGORA e só então roda a análise (mesmo mecanismo
-// das notificações: litespeed_finish_request na Hostinger).
-notificar_depois(fn () => IaChamados::processar($pdo, $chamadoId, true));
-http_response_code(200);
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store');
-echo json_encode(['ok' => true, 'iniciado' => true]);
-finalizar_resposta_e_notificar();
-exit;
+responder_json(['ok' => true, 'iniciado' => true]);

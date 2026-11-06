@@ -93,6 +93,12 @@ class AiSugestoes
         return Configuracoes::get(Database::connection(), 'gemini_api_key_busca', defined('GEMINI_API_KEY_BUSCA') ? GEMINI_API_KEY_BUSCA : '') ?? '';
     }
 
+    /** Endereço da API -- só muda em teste local (Gemini falso), nunca em produção. */
+    private static function urlBase(): string
+    {
+        return getenv('ADMINPRIME_GEMINI_URL_TESTE') ?: 'https://generativelanguage.googleapis.com';
+    }
+
     public static function configurada(): bool
     {
         return self::chaveAnalise() !== '';
@@ -281,7 +287,7 @@ class AiSugestoes
     private static function enviarArquivo(string $mime, string $bytes, string $chave): array
     {
         $tamanho = strlen($bytes);
-        $urlInicio = 'https://generativelanguage.googleapis.com/upload/v1beta/files?key=' . $chave;
+        $urlInicio = self::urlBase() . '/upload/v1beta/files?key=' . $chave;
 
         $ch = curl_init($urlInicio);
         curl_setopt_array($ch, [
@@ -358,7 +364,7 @@ class AiSugestoes
      */
     private static function chamarModelo(string $modelo, string $chave, array $corpo): array
     {
-        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . $modelo . ':generateContent?key=' . $chave;
+        $url = self::urlBase() . '/v1beta/models/' . $modelo . ':generateContent?key=' . $chave;
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [

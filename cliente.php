@@ -3597,15 +3597,30 @@ require __DIR__ . '/templates/header.php';
                 </div>
 
                 <?php $ia = $iaPorChamado[$c['id']] ?? null; ?>
-                <?php if ($ia && $ia['resposta'] && in_array($ia['status'], ['sugerida', 'enviada'], true)): ?>
-                    <!-- Análise automática feita quando o cliente abriu o chamado (ver src/IaChamados.php). -->
+                <?php if ($ia): ?>
+                    <?php
+                    // Análise da IA (automática na abertura do chamado, ou a última
+                    // do botão "Sugerir resposta") -- aparece SEMPRE, com o que
+                    // aconteceu, pra ninguém achar que a IA "não fez nada".
+                    $passosIa = json_decode($ia['progresso'] ?? '[]', true) ?: [];
+                    $rotuloStatusIa = [
+                        'pendente' => ['⏳ Na fila pra analisar (o cron termina em alguns minutos)', '#5b21b6'],
+                        'processando' => ['⏳ Analisando agora... atualize a página em instantes', '#5b21b6'],
+                        'sugerida' => ['✨ Sugestão pronta', '#5b21b6'],
+                        'enviada' => ['✅ Resposta da IA já enviada ao cliente', '#166534'],
+                        'sem_resposta' => ['⚠️ A IA não encontrou nada confiável pra este chamado', '#92400e'],
+                        'ignorada' => ['⚠️ A IA não analisou: ' . ($ia['erro'] ?? ''), '#92400e'],
+                        'erro' => ['❌ A análise da IA falhou: ' . ($ia['erro'] ?? ''), '#b91c1c'],
+                    ][$ia['status']] ?? [$ia['status'], '#374151'];
+                    ?>
                     <div class="mt-3 p-2 rounded" style="background:#f5f3ff; border:1px solid #ddd6fe;">
-                        <span class="small fw-semibold" style="color:#5b21b6;"><i class="bi bi-robot"></i> Sugestão da IA</span>
-                        <span class="small text-muted">
-                            · <?= $ia['fonte'] === 'base' ? 'baseada em chamados que já resolvemos' . ($ia['chamados_referencia'] ? ' (#' . e(str_replace(',', ', #', $ia['chamados_referencia'])) . ')' : '') : ($ia['fonte'] === 'conversa' ? 'só com base na conversa' : 'baseada no TDN/User Function') ?>
-                            <?= $ia['status'] === 'enviada' ? ' · já enviada ao cliente' : '' ?>
-                        </span>
-                        <?php if ($ia['status'] === 'sugerida'): ?>
+                        <span class="small fw-semibold" style="color:<?= $rotuloStatusIa[1] ?>;"><i class="bi bi-robot"></i> IA · <?= e($rotuloStatusIa[0]) ?></span>
+                        <?php if ($ia['resposta'] && in_array($ia['status'], ['sugerida', 'enviada'], true)): ?>
+                            <span class="small text-muted">
+                                · <?= $ia['fonte'] === 'base' ? 'baseada em chamados que já resolvemos' . ($ia['chamados_referencia'] ? ' (#' . e(str_replace(',', ', #', $ia['chamados_referencia'])) . ')' : '') : ($ia['fonte'] === 'conversa' ? 'só com base na conversa' : 'baseada no TDN/User Function') ?>
+                            </span>
+                        <?php endif; ?>
+                        <?php if ($ia['status'] === 'sugerida' && $ia['resposta']): ?>
                             <div class="small mt-2" style="white-space: pre-wrap;"><?= e($ia['resposta']) ?></div>
                             <?php foreach (json_decode($ia['links'] ?? '[]', true) ?: [] as $link): ?>
                                 <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener" class="small d-inline-block me-2"><i class="bi bi-link-45deg"></i><?= e($link['titulo']) ?></a>
@@ -3615,6 +3630,17 @@ require __DIR__ . '/templates/header.php';
                                 onclick="var t = this.closest('.card-body').querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus();">
                                 <i class="bi bi-reply"></i> Usar como resposta
                             </button>
+                        <?php endif; ?>
+                        <?php if ($passosIa): ?>
+                            <details class="small mt-1">
+                                <summary class="text-muted" style="cursor:pointer;">Ver passo a passo (<?= count($passosIa) ?> etapas)</summary>
+                                <?php foreach ($passosIa as $passoIa): ?>
+                                    <div style="color:<?= ['ok' => '#166534', 'aviso' => '#92400e', 'erro' => '#b91c1c'][$passoIa['tipo']] ?? '#5b21b6' ?>;">
+                                        <?= ['ok' => '✔️', 'aviso' => '⚠️', 'erro' => '❌'][$passoIa['tipo']] ?? '⏳' ?>
+                                        <?= e($passoIa['texto']) ?><?= isset($passoIa['duracao']) ? ' (' . str_replace('.', ',', (string) $passoIa['duracao']) . 's)' : '' ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </details>
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
@@ -6917,24 +6943,31 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <script>
-// Botão "Sugerir resposta com IA" (ver ia_sugerir_resposta.php): começa a
-// análise no servidor e mostra o passo a passo ao vivo; no fim preenche o
-// campo de resposta. NÃO envia nada -- a pessoa revisa e envia pelo botão normal.
+// Botão "Sugerir resposta com IA" (ver ia_sugerir_resposta.php): executa a
+// análise UMA ETAPA POR VEZ (cada uma é uma requisição curta) e mostra o
+// passo a passo ao vivo; no fim preenche o campo de resposta. NÃO envia
+// nada -- a pessoa revisa e envia pelo botão normal.
 (function () {
     var URL_IA = <?= json_encode(url('ia_sugerir_resposta.php')) ?>;
     var ICONES = { andamento: '⏳', ok: '✔️', aviso: '⚠️', erro: '❌' };
     var CORES = { andamento: '#5b21b6', ok: '#166534', aviso: '#92400e', erro: '#b91c1c' };
 
-    function postar(form, chamadoId, acao) {
+    function postar(form, chamadoId, acao, extra) {
         var dados = new FormData();
         dados.append('csrf_token', form.querySelector('input[name=csrf_token]').value);
         dados.append('chamado_id', chamadoId);
         dados.append('acao', acao);
+        Object.keys(extra || {}).forEach(function (k) { dados.append(k, extra[k]); });
         return fetch(URL_IA, { method: 'POST', body: dados, credentials: 'same-origin', cache: 'no-store' })
-            .then(function (r) { return r.json(); });
+            .then(function (r) {
+                if (!r.ok && r.status >= 500) {
+                    throw new Error('HTTP ' + r.status);
+                }
+                return r.json();
+            });
     }
 
-    function desenharPassos(painel, passos, inicio) {
+    function desenharPassos(painel, passos, inicio, extra) {
         painel.style.display = 'block';
         painel.innerHTML = '';
         var titulo = document.createElement('div');
@@ -6944,10 +6977,10 @@ document.addEventListener('DOMContentLoaded', function () {
         painel.appendChild(titulo);
         if (!passos.length) {
             var esperando = document.createElement('div');
-            esperando.textContent = '⏳ Iniciando no servidor...';
+            esperando.textContent = '⏳ Começando...';
             painel.appendChild(esperando);
         }
-        passos.forEach(function (p) {
+        passos.concat(extra || []).forEach(function (p) {
             var linha = document.createElement('div');
             linha.style.color = CORES[p.tipo] || '#374151';
             var tempo = p.duracao !== undefined ? ' (' + String(p.duracao).replace('.', ',') + 's)' : (p.tipo === 'andamento' ? '...' : '');
@@ -6974,12 +7007,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var inicio = Date.now();
         var LIMITE_MS = 4 * 60 * 1000; // segurança extra: a tela nunca fica esperando mais que isso
+        var passosAtuais = [];
+        var falhasSeguidas = 0;
         botao.disabled = true;
         rotulo.textContent = 'Analisando...';
         info.style.display = 'none';
         desenharPassos(painel, [], inicio);
 
+        // Relógio andando mesmo enquanto uma etapa demora.
+        var relogio = setInterval(function () { desenharPassos(painel, passosAtuais, inicio); }, 1000);
+
         function terminar(mensagem, ehErro) {
+            clearInterval(relogio);
+            desenharPassos(painel, passosAtuais, inicio);
             botao.disabled = false;
             rotulo.textContent = 'Sugerir resposta com IA';
             info.style.display = 'block';
@@ -6987,19 +7027,22 @@ document.addEventListener('DOMContentLoaded', function () {
             info.textContent = mensagem;
         }
 
-        function acompanhar() {
+        function proximaEtapa(anteriorFalhou) {
             if (Date.now() - inicio > LIMITE_MS) {
-                terminar('A análise passou de 4 minutos e foi interrompida na tela. Tente de novo.', true);
+                terminar('A análise passou de 4 minutos e foi interrompida. Tente de novo.', true);
                 return;
             }
-            postar(form, chamadoId, 'status').then(function (r) {
+            postar(form, chamadoId, 'passo', { anterior_falhou: anteriorFalhou ? '1' : '0' }).then(function (r) {
                 if (!r.ok) {
                     terminar(r.erro, true);
                     return;
                 }
-                desenharPassos(painel, r.passos || [], inicio);
+                falhasSeguidas = 0;
+                passosAtuais = r.passos || [];
+                desenharPassos(painel, passosAtuais, inicio);
                 if (!r.terminou) {
-                    setTimeout(acompanhar, 1500);
+                    // Etapa ocupada por outra requisição: espera um pouco; senão segue direto.
+                    setTimeout(function () { proximaEtapa(false); }, r.ocupada ? 2000 : 50);
                     return;
                 }
                 if (!r.sucesso) {
@@ -7019,9 +7062,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     a.textContent = link.titulo;
                     info.appendChild(a);
                 });
-            }).catch(function () {
-                // Rede piscou: tenta de novo daqui a pouco, sem desistir.
-                setTimeout(acompanhar, 3000);
+            }).catch(function (e) {
+                // Requisição caiu (servidor encerrou a etapa): pede pra pular
+                // a etapa travada e seguir. Desiste só se cair várias vezes seguidas.
+                falhasSeguidas++;
+                passosAtuais = passosAtuais.concat([{ texto: 'Servidor interrompeu esta etapa (' + e.message + '), seguindo pra próxima', tipo: 'aviso' }]);
+                if (falhasSeguidas >= 4) {
+                    terminar('O servidor interrompeu a análise várias vezes seguidas. Tente de novo em instantes.', true);
+                    return;
+                }
+                setTimeout(function () { proximaEtapa(true); }, 1500);
             });
         }
 
@@ -7031,7 +7081,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 painel.style.display = 'none';
                 return;
             }
-            setTimeout(acompanhar, 1000);
+            proximaEtapa(false);
         }).catch(function () {
             terminar('Não deu pra falar com o servidor agora. Tente de novo.', true);
         });
