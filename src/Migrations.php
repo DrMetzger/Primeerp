@@ -1259,6 +1259,15 @@ class Migrations
         if ($colunaFonteIa && stripos($colunaFonteIa['Type'], 'conversa') === false) {
             $pdo->exec("ALTER TABLE chamado_ia_analises MODIFY COLUMN fonte ENUM('base','internet','conversa') NULL");
         }
+        $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS status_sugerido VARCHAR(20) NULL COMMENT 'Status que a IA escolheu pro chamado depois da resposta' AFTER fonte");
+        // Pedido do Kleber (06/11/2026): IA respondendo os chamados sozinha.
+        // A tela de Configurações tinha gravado 'sugestao' (padrão do campo)
+        // quando a chave foi salva -- liga o automático UMA vez; depois disso
+        // quem manda é só a tela (dá pra voltar pra sugestão quando quiser).
+        if (!$pdo->query("SELECT 1 FROM configuracoes WHERE chave = 'ia_chamados_modo_auto_ligado'")->fetchColumn()) {
+            $pdo->exec("INSERT INTO configuracoes (chave, valor) VALUES ('ia_chamados_modo', 'automatico') ON DUPLICATE KEY UPDATE valor = IF(valor = 'desligado', valor, 'automatico')");
+            $pdo->exec("INSERT INTO configuracoes (chave, valor) VALUES ('ia_chamados_modo_auto_ligado', '1')");
+        }
         $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS estado MEDIUMTEXT NULL COMMENT 'JSON com a etapa atual da análise e o que já foi levantado (termos, artigos, imagens)' AFTER erro");
         $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS progresso MEDIUMTEXT NULL COMMENT 'JSON com o passo a passo da análise (mostrado ao vivo na tela)' AFTER erro");
         $pdo->exec("ALTER TABLE chamado_ia_analises ADD COLUMN IF NOT EXISTS tentativas TINYINT NOT NULL DEFAULT 0 COMMENT 'Quantas vezes já tentou (falha passageira do Google volta pra fila até 3x)' AFTER usou_busca");

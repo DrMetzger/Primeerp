@@ -113,22 +113,29 @@ if ($depois !== $antes || $r['status'] !== 'sugerida') {
     $falhas++;
 }
 
-echo "\n=== Modo automático (posta no chamado) ===\n";
+echo "\n=== Modo automático: responde e escolhe o status ===\n";
 Configuracoes::definir($pdo, 'ia_chamados_modo', 'automatico', null);
-$auto = criar_chamado($pdo, 'NOTA COM REJEICAO 539 DUPLICIDADE', 'Transmiti a NF-e e deu rejeição 539 de duplicidade com diferença na chave. O que fazer?');
-IaChamados::agendar($pdo, $auto, false);
-$r = IaChamados::processar($pdo, $auto);
-// Google instável (503) devolve pra fila -- simula o cron tentando de novo.
-for ($i = 0; $i < 2 && $r['status'] === 'pendente'; $i++) {
-    echo "Google instável, nova tentativa em 20s: {$r['erro']}\n";
-    sleep(20);
-    $r = IaChamados::processar($pdo, $auto);
-}
-$st = $pdo->query("SELECT status FROM chamados WHERE id = $auto")->fetchColumn();
-$resp = $pdo->query("SELECT autor_nome, mensagem FROM chamado_respostas WHERE chamado_id = $auto")->fetch();
-echo "status IA={$r['status']} status chamado={$st} resposta postada por=" . ($resp['autor_nome'] ?? '(nenhuma)') . "\n";
-if ($r['status'] !== 'enviada' || !$resp) {
-    $falhas++;
+$casos = [
+    'cliente precisa agir (passos pra seguir)' => [['NOTA COM REJEICAO 539 DUPLICIDADE', 'Transmiti a NF-e e deu rejeição 539 de duplicidade com diferença na chave. O que fazer?'], ['aguardando_cliente']],
+    'pedido de desenvolvimento (trabalho nosso)' => [['CAMPO D3_OBSERVA NA ROTINA MATA261', 'Bom dia! A rotina MATA241 tem o campo D3_OBSERVA e quero disponibilizar ele na rotina MATA261, ambas usam a tabela SD3. Pode disponibilizar na base teste para validarmos e posterior na produção?'], ['aguardando_equipe']],
+];
+foreach ($casos as $rotulo => [[$titulo, $descricao], $esperados]) {
+    $id = criar_chamado($pdo, $titulo, $descricao);
+    IaChamados::agendar($pdo, $id, false);
+    $r = IaChamados::processar($pdo, $id);
+    // Google instável (503) devolve pra fila -- simula o cron tentando de novo.
+    for ($i = 0; $i < 2 && $r && $r['status'] === 'pendente'; $i++) {
+        echo "Google instável, nova tentativa em 20s\n";
+        sleep(20);
+        $r = IaChamados::processar($pdo, $id);
+    }
+    $st = $pdo->query("SELECT status FROM chamados WHERE id = $id")->fetchColumn();
+    $resp = $pdo->query("SELECT autor_nome, mensagem FROM chamado_respostas WHERE chamado_id = $id")->fetch();
+    printf("\n--- %s: IA=%s fonte=%s chamado ficou=%s (esperado: %s)\n%s\n", $rotulo, $r['status'] ?? '-', $r['fonte'] ?? '-', $st, implode('/', $esperados), $resp['mensagem'] ?? '(nada postado)');
+    if (($r['status'] ?? '') !== 'enviada' || !$resp || !in_array($st, $esperados, true)) {
+        echo "FALHA\n";
+        $falhas++;
+    }
 }
 
 exit($falhas ? 1 : 0);

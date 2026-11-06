@@ -3607,7 +3607,7 @@ require __DIR__ . '/templates/header.php';
                         'pendente' => ['⏳ Na fila pra analisar (o cron termina em alguns minutos)', '#5b21b6'],
                         'processando' => ['⏳ Analisando agora... atualize a página em instantes', '#5b21b6'],
                         'sugerida' => ['✨ Sugestão pronta', '#5b21b6'],
-                        'enviada' => ['✅ Resposta da IA já enviada ao cliente', '#166534'],
+                        'enviada' => ['✅ Resposta da IA já enviada ao cliente · chamado ficou ' . IaChamados::rotuloStatus($ia['status_sugerido']), '#166534'],
                         'sem_resposta' => ['⚠️ A IA não encontrou nada confiável pra este chamado', '#92400e'],
                         'ignorada' => ['⚠️ A IA não analisou: ' . ($ia['erro'] ?? ''), '#92400e'],
                         'erro' => ['❌ A análise da IA falhou: ' . ($ia['erro'] ?? ''), '#b91c1c'],
@@ -3625,9 +3625,11 @@ require __DIR__ . '/templates/header.php';
                             <?php foreach (json_decode($ia['links'] ?? '[]', true) ?: [] as $link): ?>
                                 <a href="<?= e($link['url']) ?>" target="_blank" rel="noopener" class="small d-inline-block me-2"><i class="bi bi-link-45deg"></i><?= e($link['titulo']) ?></a>
                             <?php endforeach; ?>
+                            <div class="small text-muted mt-1">Deixar como: <?= e(IaChamados::rotuloStatus($ia['status_sugerido'])) ?></div>
                             <button type="button" class="btn btn-sm btn-primary mt-2 py-0"
                                 data-sugestao="<?= e($ia['resposta']) ?>"
-                                onclick="var t = this.closest('.card-body').querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus();">
+                                data-status="<?= e($ia['status_sugerido'] ?: 'aguardando_cliente') ?>"
+                                onclick="var c = this.closest('.card-body'); var t = c.querySelector('textarea[name=mensagem]'); t.value = this.dataset.sugestao; t.rows = 8; t.focus(); var st = c.querySelector('select[name=status_apos_resposta]'); if (st) { st.value = this.dataset.status; }">
                                 <i class="bi bi-reply"></i> Usar como resposta
                             </button>
                         <?php endif; ?>
@@ -7052,7 +7054,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 campo.value = r.resposta;
                 campo.rows = 10;
                 campo.focus();
-                terminar('✨ Sugestão da IA ' + r.fonte + '. Revise antes de enviar. ', false);
+                // Status que a IA escolheu já vai pro "Deixar como".
+                var selectStatus = form.querySelector('select[name=status_apos_resposta]');
+                if (selectStatus && r.status_sugerido) {
+                    selectStatus.value = r.status_sugerido;
+                }
+                terminar('✨ Sugestão da IA ' + r.fonte + '. Deixar como: ' + r.rotulo_status + '. Revise antes de enviar. ', false);
                 (r.links || []).forEach(function (link) {
                     var a = document.createElement('a');
                     a.href = link.url;

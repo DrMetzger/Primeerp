@@ -94,6 +94,8 @@ function estado_para_tela(PDO $pdo, int $chamadoId): array
         'resposta' => $analise['resposta'],
         'fonte' => $rotulosFonte[$analise['fonte']] ?? '',
         'links' => json_decode($analise['links'] ?? '[]', true) ?: [],
+        'status_sugerido' => $analise['status_sugerido'] ?: 'aguardando_cliente',
+        'rotulo_status' => IaChamados::rotuloStatus($analise['status_sugerido']),
     ];
 }
 

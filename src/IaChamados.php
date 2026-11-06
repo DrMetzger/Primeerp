@@ -313,8 +313,8 @@ class IaChamados
     private static function concluir(PDO $pdo, int $chamadoId, bool $manual, array $resultado): void
     {
         $fim = [
-            'sugerida' => ['Sugestão pronta', 'ok'],
-            'enviada' => ['Resposta enviada ao cliente', 'ok'],
+            'sugerida' => ['Sugestão pronta (deixar como: ' . self::rotuloStatus($resultado['status_sugerido'] ?? '') . ')', 'ok'],
+            'enviada' => ['Resposta enviada ao cliente, chamado ' . self::rotuloStatus($resultado['status_sugerido'] ?? ''), 'ok'],
             'sem_resposta' => ['Nada confiável encontrado: ' . ($resultado['erro'] ?? ''), 'aviso'],
             'ignorada' => ['Análise não feita: ' . ($resultado['erro'] ?? ''), 'aviso'],
             'erro' => ['Erro: ' . self::erroCurto($resultado['erro'] ?? ''), 'erro'],
@@ -325,6 +325,7 @@ class IaChamados
 
         $campos = array_merge([
             'fonte' => null, 'resposta' => null, 'chamados_referencia' => null, 'links' => null, 'erro' => null, 'resposta_id' => null,
+            'status_sugerido' => null,
         ], $resultado);
 
         $linha = self::linha($pdo, $chamadoId);
@@ -335,10 +336,10 @@ class IaChamados
         }
 
         $pdo->prepare('UPDATE chamado_ia_analises SET status = ?, fonte = ?, resposta = ?, chamados_referencia = ?, links = ?, erro = ?,
-                resposta_id = ?, progresso = ? WHERE chamado_id = ?')
+                resposta_id = ?, status_sugerido = ?, progresso = ? WHERE chamado_id = ?')
             ->execute([
                 $campos['status'], $campos['fonte'], $campos['resposta'], $campos['chamados_referencia'], $campos['links'],
-                $campos['erro'] !== null ? mb_substr($campos['erro'], 0, 500) : null, $campos['resposta_id'],
+                $campos['erro'] !== null ? mb_substr($campos['erro'], 0, 500) : null, $campos['resposta_id'], $campos['status_sugerido'],
                 json_encode(self::$passos, JSON_UNESCAPED_UNICODE), $chamadoId,
             ]);
     }
@@ -472,6 +473,7 @@ class IaChamados
         if (!$chamado) {
             return ['fim' => ['status' => 'erro', 'erro' => 'Chamado não encontrado.']];
         }
+        $chamado['__manual'] = $manual;
         $primeiroNome = self::primeiroNomeContato($pdo, $chamado);
         $palavras = self::palavrasChave($chamado['titulo'] . ' ' . $chamado['descricao']);
         $imagens = $estado['imagens'] ?? [];
@@ -529,6 +531,7 @@ class IaChamados
 
                 return ['fim' => self::finalizar($pdo, $chamado, $manual, [
                     'fonte' => 'base',
+                    'status_chamado' => self::statusEscolhido($json['status'] ?? ''),
                     'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
                     'chamados_referencia' => implode(',', $referencias ?: array_map(fn ($s) => (int) $s['id'], $similares)),
                 ])];
@@ -586,6 +589,7 @@ class IaChamados
 
                 return ['fim' => self::finalizar($pdo, $chamado, $manual, [
                     'fonte' => 'internet',
+                    'status_chamado' => self::statusEscolhido($json['status'] ?? ''),
                     'resposta' => self::garantirNome(self::limparTexto($json['resposta']), $primeiroNome),
                     'links' => json_encode(array_map(fn ($a) => ['titulo' => $a['titulo'], 'url' => $a['url']], $usados ?: $artigos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ])];
@@ -616,6 +620,11 @@ class IaChamados
                     return ['fim' => ['status' => 'erro', 'erro' => $r['erro']]];
                 }
                 $resposta = trim($r['texto']);
+                $statusTdn = 'aguardando_cliente';
+                if (preg_match('/\n?\s*STATUS:\s*([a-z_]+)\s*$/iu', $resposta, $mStatus)) {
+                    $statusTdn = self::statusEscolhido($mStatus[1]);
+                    $resposta = trim(substr($resposta, 0, -strlen($mStatus[0])));
+                }
                 $naoEncontrou = $resposta === '' || stripos($resposta, 'NAO_ENCONTRADO') !== false;
                 // Só vale se pelo menos uma das páginas usadas for da TOTVS ou do
                 // User Function -- resposta montada com blog aleatório não serve.
@@ -629,6 +638,7 @@ class IaChamados
 
                 return ['fim' => self::finalizar($pdo, $chamado, $manual, [
                     'fonte' => 'internet',
+                    'status_chamado' => $statusTdn,
                     'resposta' => self::garantirNome(self::limparTexto($resposta), $primeiroNome),
                     'links' => json_encode($fontesOficiais, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ])];
@@ -673,12 +683,15 @@ class IaChamados
                 . self::blocoChamado($chamado)
                 . "\nTAREFA: escreva a próxima resposta da equipe pro cliente, coerente com a conversa. Não temos uma solução pronta "
                 . "documentada pra esse caso: então NÃO invente solução técnica. Dê retorno do que já foi feito (se a conversa mostrar), "
-                . "faça as perguntas objetivas que faltam pra resolver, ou diga que a equipe vai analisar e retornar.\n\n"
-                . self::regrasDeEscrita($primeiroNome),
+                . "faça as perguntas objetivas que faltam pra resolver, ou diga que a equipe vai analisar/fazer e retornar "
+                . "(ex.: pedido de desenvolvimento ou ajuste: confirme o que foi pedido e diga que vamos fazer e avisar).\n\n"
+                . self::regrasDeEscrita($primeiroNome) . "\n\n"
+                . self::REGRAS_STATUS . "\n\n"
+                . 'Responda SOMENTE com JSON: {"resposta": "texto pro cliente", "status": "aguardando_equipe" ou "aguardando_cliente" ou "fechado"}',
             [],
             null,
             $imagens,
-            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4]
+            ['maxOutputTokens' => self::MAX_TOKENS_RESPOSTA, 'temperature' => 0.4, 'responseMimeType' => 'application/json']
         );
         if (!$r['ok']) {
             self::resultado(self::erroCurto($r['erro']), 'erro');
@@ -686,11 +699,26 @@ class IaChamados
             return ['status' => 'erro', 'erro' => $r['erro']];
         }
 
-        // Sempre só SUGESTÃO (manual=true no finalizar): sem solução
-        // documentada, nunca vai pro cliente sozinha, nem no modo automático.
-        return self::finalizar($pdo, $chamado, true, [
+        $json = json_decode(self::extrairJson($r['texto']), true);
+        $texto = trim((string) ($json['resposta'] ?? ''));
+        if ($texto === '') {
+            self::resultado('a IA não devolveu texto', 'erro');
+
+            return ['status' => 'erro', 'erro' => 'A IA não devolveu a resposta no formato esperado.'];
+        }
+
+        // Sem solução documentada: no modo automático vai pro cliente também
+        // (normalmente "vamos verificar e retornar" ou pedindo o que falta),
+        // mas nunca fecha o chamado -- só aguardando nós/cliente.
+        $statusConversa = self::statusEscolhido($json['status'] ?? '', 'aguardando_equipe');
+        if ($statusConversa === 'fechado') {
+            $statusConversa = 'aguardando_cliente';
+        }
+
+        return self::finalizar($pdo, $chamado, (bool) ($chamado['__manual'] ?? false), [
             'fonte' => 'conversa',
-            'resposta' => self::garantirNome(self::limparTexto($r['texto']), $primeiroNome),
+            'status_chamado' => $statusConversa,
+            'resposta' => self::garantirNome(self::limparTexto($texto), $primeiroNome),
         ]);
     }
 
@@ -821,6 +849,9 @@ class IaChamados
     private static function finalizar(PDO $pdo, array $chamado, bool $manual, array $dados): array
     {
         $dados['status'] = 'sugerida';
+        $statusChamado = self::statusEscolhido($dados['status_chamado'] ?? '');
+        $dados['status_sugerido'] = $statusChamado;
+        unset($dados['status_chamado']);
 
         if ($manual || self::modo($pdo) !== 'automatico' || !$chamado['cliente_id']) {
             return $dados;
@@ -839,7 +870,12 @@ class IaChamados
         $dados['resposta_id'] = (int) $pdo->lastInsertId();
         $dados['status'] = 'enviada';
 
-        recalcular_status_chamado($pdo, (int) $chamado['id']);
+        // Status escolhido pela IA (mesmas opções do "Deixar como" da tela).
+        if ($statusChamado === 'fechado') {
+            $pdo->prepare("UPDATE chamados SET status = 'fechado', fechado_em = NOW() WHERE id = ?")->execute([$chamado['id']]);
+        } else {
+            $pdo->prepare('UPDATE chamados SET status = ?, fechado_em = NULL WHERE id = ?')->execute([$statusChamado, $chamado['id']]);
+        }
 
         try {
             $stmtCliente = $pdo->prepare('SELECT * FROM clientes WHERE id = ?');
@@ -852,7 +888,9 @@ class IaChamados
             if ($cliente && $chamadoAtualizado) {
                 $pessoa = resolver_pessoa_do_chamado($pdo, $chamadoAtualizado, $cliente);
                 Notificacoes::novaRespostaEquipe($chamadoAtualizado, $pessoa, $nomeAutor, $dados['resposta'], []);
-                if (!empty($pessoa['telefone'])) {
+                // Igual à resposta manual: só pergunta no WhatsApp o que o
+                // cliente quer fazer se o chamado NÃO foi encerrado agora.
+                if (!empty($pessoa['telefone']) && $statusChamado !== 'fechado') {
                     WhatsAppBot::prepararConversaPosResposta($pdo, $chamadoAtualizado, $pessoa['telefone']);
                 }
             }
@@ -952,6 +990,32 @@ class IaChamados
 
     // --- Prompts -------------------------------------------------------------
 
+    /**
+     * Como a IA decide em que status o chamado fica depois da resposta --
+     * mesmos 3 do "Deixar como" da tela de resposta.
+     */
+    private const REGRAS_STATUS = <<<TXT
+ESCOLHA DO STATUS do chamado depois desta resposta (campo "status"):
+- "aguardando_equipe": o próximo passo é NOSSO -- desenvolvimento, customização, ajuste de fonte/dicionário, liberar algo na base, análise na base do cliente, ou qualquer coisa que a equipe ainda precisa fazer. A resposta deve dizer de forma natural que vamos verificar/fazer e retornar.
+- "aguardando_cliente": o próximo passo é do CLIENTE -- seguir os passos que você passou, testar/validar, mandar print/informação que falta, confirmar se resolveu.
+- "fechado": SÓ quando a resposta resolve de fato e por completo (ex.: dúvida simples totalmente respondida) e não depende de nenhuma ação, teste ou confirmação do cliente. Nesse caso termine dizendo, de forma natural, que estamos encerrando o chamado e que se precisar é só responder por aqui. Na dúvida, NÃO feche: use "aguardando_cliente".
+TXT;
+
+    private const STATUS_CHAMADO_VALIDOS = ['aguardando_equipe', 'aguardando_cliente', 'fechado'];
+
+    public static function rotuloStatus(?string $status): string
+    {
+        return ['aguardando_equipe' => 'aguardando nós', 'aguardando_cliente' => 'aguardando cliente', 'fechado' => 'fechado'][$status] ?? 'aguardando cliente';
+    }
+
+    /** Status que a IA escolheu (ou o mais seguro, se veio algo estranho). */
+    private static function statusEscolhido($valor, string $padrao = 'aguardando_cliente'): string
+    {
+        $valor = strtolower(trim((string) $valor));
+
+        return in_array($valor, self::STATUS_CHAMADO_VALIDOS, true) ? $valor : $padrao;
+    }
+
     private static function regrasDeEscrita(string $primeiroNome): string
     {
         $saudacao = $primeiroNome !== ''
@@ -1012,7 +1076,8 @@ TXT;
             . "TAREFA: decida se as soluções acima resolvem (ou orientam bem) o chamado novo. Só considere que resolve se for "
             . "realmente o MESMO tipo de problema -- palavra parecida não basta.\n\n"
             . self::regrasDeEscrita($primeiroNome) . "\n\n"
-            . 'Responda SOMENTE com JSON neste formato: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "referencias": [ids dos chamados de referência usados]}';
+            . self::REGRAS_STATUS . "\n\n"
+            . 'Responda SOMENTE com JSON neste formato: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "status": "aguardando_equipe" ou "aguardando_cliente" ou "fechado", "referencias": [ids dos chamados de referência usados]}';
     }
 
     private static function promptArtigos(array $chamado, array $artigos, string $primeiroNome): string
@@ -1029,7 +1094,8 @@ TXT;
             . "TAREFA: decida se algum artigo realmente orienta a solução DESTE problema (tema parecido não basta). "
             . "Se sim, escreva a resposta pro cliente baseada SÓ no que os artigos dizem.\n\n"
             . self::regrasDeEscrita($primeiroNome) . "\n\n"
-            . 'Responda SOMENTE com JSON: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "artigos": [números dos artigos usados]}';
+            . self::REGRAS_STATUS . "\n\n"
+            . 'Responda SOMENTE com JSON: {"resolve": true ou false, "resposta": "texto pro cliente (vazio se resolve=false)", "status": "aguardando_equipe" ou "aguardando_cliente" ou "fechado", "artigos": [números dos artigos usados]}';
     }
 
     private static function promptBusca(array $chamado, string $primeiroNome, array $consultas = []): string
@@ -1042,8 +1108,9 @@ TXT;
             . "(e, se precisar, site:centraldeatendimento.totvs.com).{$sugestoes} Faça de 2 a 4 pesquisas curtas antes de concluir. "
             . "Use só o que encontrar nessas páginas da TOTVS; não use outros sites e nunca invente rotina, parâmetro ou campo.\n\n"
             . self::regrasDeEscrita($primeiroNome) . "\n\n"
-            . "SAÍDA: escreva só a resposta pro cliente. Se depois de pesquisar não achar nada que realmente se aplique, "
-            . "escreva apenas a palavra NAO_ENCONTRADO.";
+            . self::REGRAS_STATUS . "\n\n"
+            . "SAÍDA: escreva a resposta pro cliente e, numa ÚLTIMA linha separada, exatamente STATUS: seguido de aguardando_equipe, "
+            . "aguardando_cliente ou fechado. Se depois de pesquisar não achar nada que realmente se aplique, escreva apenas a palavra NAO_ENCONTRADO.";
     }
 
     // --- Utilitários -------------------------------------------------------------
