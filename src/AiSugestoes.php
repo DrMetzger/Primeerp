@@ -59,6 +59,10 @@ class AiSugestoes
      */
     public static ?int $timeoutPorChamada = null;
     public static ?\Closure $aoTentarDeNovo = null;
+    // Tempo esgotado sem resposta: tentar o MESMO modelo de novo quase
+    // sempre esgota de novo (busca no TDN com o "flash" levou 25s+ duas
+    // vezes seguidas no teste). true = troca direto pro modelo reserva.
+    public static bool $trocarModeloNoTimeout = false;
 
     // Upload de cada anexo pela Files API do Gemini (ver enviarArquivo())
     // em vez de embutir os bytes em base64 direto no corpo da requisição
@@ -383,7 +387,10 @@ class AiSugestoes
 
         if ($resposta === false) {
             error_log('IA: falha de rede chamando o Gemini (' . $modelo . '): ' . $erroCurl);
-            return ['ok' => false, 'texto' => null, 'erro' => 'Falha de rede ao chamar o Gemini: ' . $erroCurl, 'tentar_de_novo' => true];
+            $esgotouTempo = stripos($erroCurl, 'timed out') !== false;
+
+            return ['ok' => false, 'texto' => null, 'erro' => 'Falha de rede ao chamar o Gemini: ' . $erroCurl,
+                'tentar_de_novo' => !($esgotouTempo && self::$trocarModeloNoTimeout)];
         }
 
         $dados = json_decode($resposta, true);

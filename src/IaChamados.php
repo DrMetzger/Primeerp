@@ -220,6 +220,7 @@ class IaChamados
         self::$inicio = (float) $estado['inicio'];
         self::$prazo = self::$inicio + ($manual ? self::PRAZO_MANUAL_SEGUNDOS : 240);
         AiSugestoes::$timeoutPorChamada = self::TIMEOUT_CHAMADA_SEGUNDOS;
+        AiSugestoes::$trocarModeloNoTimeout = true;
         AiSugestoes::$aoTentarDeNovo = fn (string $msg) => self::passo($msg, 'aviso');
 
         $etapa = $estado['etapa'];
