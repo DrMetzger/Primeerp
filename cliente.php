@@ -3606,7 +3606,7 @@ require __DIR__ . '/templates/header.php';
                     $rotuloStatusIa = [
                         'pendente' => ['⏳ Na fila pra analisar (o cron termina em alguns minutos)', '#5b21b6'],
                         'processando' => ['⏳ Analisando agora... atualize a página em instantes', '#5b21b6'],
-                        'sugerida' => ['✨ Sugestão pronta', '#5b21b6'],
+                        'sugerida' => ['✨ Sugestão pronta · NÃO enviada ao cliente (só a equipe vê)', '#5b21b6'],
                         'enviada' => ['✅ Resposta da IA já enviada ao cliente · chamado ficou ' . IaChamados::rotuloStatus($ia['status_sugerido']), '#166534'],
                         'sem_resposta' => ['⚠️ A IA não encontrou nada confiável pra este chamado', '#92400e'],
                         'ignorada' => ['⚠️ A IA não analisou: ' . ($ia['erro'] ?? ''), '#92400e'],

@@ -314,7 +314,7 @@ class IaChamados
     private static function concluir(PDO $pdo, int $chamadoId, bool $manual, array $resultado): void
     {
         $fim = [
-            'sugerida' => ['Sugestão pronta (deixar como: ' . self::rotuloStatus($resultado['status_sugerido'] ?? '') . ')', 'ok'],
+            'sugerida' => ['Sugestão pronta, NÃO enviada ao cliente' . (!empty($resultado['motivo_nao_enviou']) ? ' (' . $resultado['motivo_nao_enviou'] . ')' : '') . ' · deixar como: ' . self::rotuloStatus($resultado['status_sugerido'] ?? ''), 'ok'],
             'enviada' => ['Resposta enviada ao cliente, chamado ' . self::rotuloStatus($resultado['status_sugerido'] ?? ''), 'ok'],
             'sem_resposta' => ['Nada confiável encontrado: ' . ($resultado['erro'] ?? ''), 'aviso'],
             'ignorada' => ['Análise não feita: ' . ($resultado['erro'] ?? ''), 'aviso'],
@@ -484,6 +484,8 @@ class IaChamados
                 if (!AiSugestoes::configurada()) {
                     return ['fim' => ['status' => 'erro', 'erro' => 'Chave do Gemini não configurada (Configurações > IA Gemini).']];
                 }
+                self::passo($manual ? 'Análise pedida pelo botão "Sugerir resposta" (nunca envia sozinha)' : 'Análise automática (chamado aberto pelo cliente) · modo: ' . self::modo($pdo));
+                self::resultado('');
                 self::passo('Lendo o chamado e a conversa');
                 self::resultado(count($chamado['conversa']) . ' mensagem(ns) além da abertura');
                 if (count($palavras) < 2 && !($manual && $chamado['conversa'])) {
@@ -854,7 +856,19 @@ class IaChamados
         $dados['status_sugerido'] = $statusChamado;
         unset($dados['status_chamado']);
 
-        if ($manual || self::modo($pdo) !== 'automatico' || !$chamado['cliente_id']) {
+        if ($manual) {
+            $dados['motivo_nao_enviou'] = 'pedido pelo botão, só sugere';
+
+            return $dados;
+        }
+        if (self::modo($pdo) !== 'automatico') {
+            $dados['motivo_nao_enviou'] = 'modo "' . self::modo($pdo) . '" em Configurações, não envia';
+
+            return $dados;
+        }
+        if (!$chamado['cliente_id']) {
+            $dados['motivo_nao_enviou'] = 'chamado sem cliente vinculado';
+
             return $dados;
         }
 
@@ -862,6 +876,8 @@ class IaChamados
         $jaRespondido = $pdo->prepare("SELECT 1 FROM chamado_respostas WHERE chamado_id = ? AND autor_tipo = 'equipe' LIMIT 1");
         $jaRespondido->execute([$chamado['id']]);
         if ($jaRespondido->fetchColumn()) {
+            $dados['motivo_nao_enviou'] = 'a equipe já tinha respondido o chamado';
+
             return $dados;
         }
 
