@@ -29,7 +29,7 @@ $camposConfiguracao = [
     'gemini_api_key' => defined('GEMINI_API_KEY') ? GEMINI_API_KEY : '',
     'gemini_api_key_busca' => defined('GEMINI_API_KEY_BUSCA') ? GEMINI_API_KEY_BUSCA : '',
     'ia_chamados_modo' => 'sugestao',
-    'ia_chamados_nome_autor' => 'Equipe PrimeERP',
+    'ia_chamados_usuario_id' => '',
     'ia_chamados_limite_dia' => '50',
     'ia_chamados_limite_busca_dia' => '15',
 ];
@@ -217,8 +217,14 @@ require __DIR__ . '/templates/header.php';
                     </select>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Nome que aparece nas respostas automáticas</label>
-                    <input type="text" name="ia_chamados_nome_autor" class="form-control" value="<?= e($valores['ia_chamados_nome_autor']) ?>" maxlength="150">
+                    <label class="form-label">Responder em nome de</label>
+                    <?php $autorIaAtual = \AdminPrime\IaChamados::autorResposta($pdo); ?>
+                    <select name="ia_chamados_usuario_id" class="form-select">
+                        <?php foreach ($pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll() as $usuarioIa): ?>
+                            <option value="<?= (int) $usuarioIa['id'] ?>" <?= (int) $usuarioIa['id'] === (int) $autorIaAtual['id'] ? 'selected' : '' ?>><?= e($usuarioIa['nome']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">As respostas automáticas saem com o nome e a foto dessa pessoa, igual a uma resposta feita pela tela. O cliente não vê nenhuma menção a IA.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Máximo de análises por dia</label>

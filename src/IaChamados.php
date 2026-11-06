@@ -88,9 +88,30 @@ class IaChamados
         return in_array($modo, self::MODOS, true) ? $modo : 'sugestao';
     }
 
-    private static function nomeAutor(PDO $pdo): string
+    /**
+     * Em nome de quem a IA responde: uma pessoa REAL da equipe (nome e foto
+     * dela no chat, no e-mail e no WhatsApp) -- pedido do Kleber pra manter o
+     * atendimento com cara humana. Configurável em Configurações; padrão é o
+     * Kleber, depois o primeiro admin ativo.
+     * Retorna ['id' => ?int, 'nome' => string].
+     */
+    public static function autorResposta(PDO $pdo): array
     {
-        return Configuracoes::get($pdo, 'ia_chamados_nome_autor', 'Equipe PrimeERP');
+        $idConfigurado = (int) Configuracoes::get($pdo, 'ia_chamados_usuario_id', '0');
+        $candidatos = [
+            ['SELECT id, nome FROM usuarios WHERE id = ? AND ativo = 1', [$idConfigurado]],
+            ['SELECT id, nome FROM usuarios WHERE email = ? AND ativo = 1', ['kleber.farias@primeerp.com.br']],
+            ["SELECT id, nome FROM usuarios WHERE perfil = 'admin' AND ativo = 1 ORDER BY id LIMIT 1", []],
+        ];
+        foreach ($candidatos as [$sql, $params]) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            if ($usuario = $stmt->fetch()) {
+                return ['id' => (int) $usuario['id'], 'nome' => $usuario['nome']];
+            }
+        }
+
+        return ['id' => null, 'nome' => 'Equipe PrimeERP'];
     }
 
     private static function limiteDia(PDO $pdo): int
@@ -881,9 +902,11 @@ class IaChamados
             return $dados;
         }
 
-        $nomeAutor = self::nomeAutor($pdo);
-        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, NULL, ?)')
-            ->execute([$chamado['id'], $nomeAutor, $dados['resposta']]);
+        // Sai com nome e foto de uma pessoa real da equipe (ver autorResposta()).
+        $autor = self::autorResposta($pdo);
+        $nomeAutor = $autor['nome'];
+        $pdo->prepare('INSERT INTO chamado_respostas (chamado_id, autor_tipo, autor_nome, autor_usuario_id, mensagem) VALUES (?, "equipe", ?, ?, ?)')
+            ->execute([$chamado['id'], $nomeAutor, $autor['id'], $dados['resposta']]);
         $dados['resposta_id'] = (int) $pdo->lastInsertId();
         $dados['status'] = 'enviada';
 
