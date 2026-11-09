@@ -35,9 +35,7 @@ foreach ($candidatos as $arquivo) {
     $linhas = array_slice(explode("\n", stream_get_contents($fp)), -40);
     fclose($fp);
     foreach ($linhas as $linha) {
-        if (preg_match('/Fatal|Uncaught|Parse error|Allowed memory|Maximum execution|Warning|Exception/i', $linha)) {
-            echo $mascarar(mb_substr($linha, 0, 400)) . "\n";
-        }
+        echo $mascarar(mb_substr($linha, 0, 300)) . "\n";
     }
     echo "\n";
 }
