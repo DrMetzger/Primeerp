@@ -127,22 +127,21 @@ class IaChamados
     // --- Entrada -------------------------------------------------------------
 
     /**
-     * Chamado novo aberto pelo CLIENTE (portal/WhatsApp). Registra a análise
-     * como pendente e, se $processarDepois, agenda o processamento pra depois
-     * que a página já respondeu pro navegador (ver notificar_depois()) -- o
-     * cliente não fica esperando a IA. O que sobrar pendente (ex.: requisição
-     * interrompida) o cron_ia_chamados.php pega depois.
+     * Chamado novo aberto pelo CLIENTE (portal/WhatsApp): coloca a análise
+     * na fila do cron_ia_chamados.php (roda a cada 5 minutos).
      */
-    public static function agendar(PDO $pdo, int $chamadoId, bool $processarDepois = true): void
+    public static function agendar(PDO $pdo, int $chamadoId): void
     {
         try {
             if (self::modo($pdo) === 'desligado' || !AiSugestoes::configurada()) {
                 return;
             }
+            // Só entra na fila: quem processa é o cron_ia_chamados.php (linha
+            // de comando). Rodar a análise dentro da requisição do site
+            // prendia um processo do servidor por minutos esperando o Google,
+            // e a Hostinger limita quantos processos o site pode ter ao mesmo
+            // tempo -- passando do limite, o site INTEIRO dá erro 500.
             $pdo->prepare("INSERT IGNORE INTO chamado_ia_analises (chamado_id, status) VALUES (?, 'pendente')")->execute([$chamadoId]);
-            if ($processarDepois) {
-                notificar_depois(fn () => self::processar($pdo, $chamadoId));
-            }
         } catch (\Throwable $e) {
             error_log('IA chamados: falha ao agendar chamado #' . $chamadoId . ': ' . $e->getMessage());
         }
@@ -438,7 +437,7 @@ class IaChamados
     public static function processarPendentes(PDO $pdo, int $limite = 5): int
     {
         $ids = $pdo->query("SELECT chamado_id FROM chamado_ia_analises
-            WHERE (status = 'pendente' AND criado_em < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+            WHERE (status = 'pendente'
                     AND (tentativas = 0 OR atualizado_em < DATE_SUB(NOW(), INTERVAL 10 MINUTE)))
                OR (status = 'processando' AND atualizado_em < DATE_SUB(NOW(), INTERVAL " . self::SEGUNDOS_ETAPA_MORTA . " SECOND)
                     AND (estado IS NULL OR estado NOT LIKE '%\"manual\":true%'))

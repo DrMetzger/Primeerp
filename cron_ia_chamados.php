@@ -1,10 +1,11 @@
 <?php
 /**
- * Cron job -- termina análises de IA de chamados que ficaram pendentes (ver
- * src/IaChamados.php). Normalmente a análise roda logo depois do cliente
- * abrir o chamado; isso aqui só pega o que ficou pra trás (requisição
- * interrompida, falha passageira do Google etc.). Processa poucos por vez
- * de propósito, pra não gastar de uma vez só.
+ * Cron job -- processa as análises de IA dos chamados novos (ver
+ * src/IaChamados.php): é ELE que responde os chamados, a cada 5 minutos.
+ * Roda por linha de comando, fora do servidor web, de propósito: a análise
+ * espera o Google por vários segundos e, dentro do site, isso prendia
+ * processos e derrubava o site inteiro (erro 500). Processa poucos por vez,
+ * pra não gastar de uma vez só.
  *
  * Configuração no hPanel (Cron Jobs), a cada 5 ou 10 minutos:
  *  - Comando (CLI, sem token):

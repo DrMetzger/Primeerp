@@ -77,7 +77,7 @@ echo "\n=== Modo sugestão ===\n";
 Configuracoes::definir($pdo, 'ia_chamados_modo', 'sugestao', null);
 $falhas = 0;
 foreach (['parecido (deve usar nossa base)' => $parecido, 'novo (deve buscar no TDN/User Function)' => $novo, 'curto (deve ignorar)' => $curto] as $rotulo => $id) {
-    IaChamados::agendar($pdo, $id, false);
+    IaChamados::agendar($pdo, $id);
     $inicio = microtime(true);
     $r = IaChamados::processar($pdo, $id);
     printf("\n--- Chamado #%d, %s: status=%s fonte=%s busca=%d tokens=%d+%d (%.1fs)\n",
@@ -121,7 +121,7 @@ $casos = [
 ];
 foreach ($casos as $rotulo => [[$titulo, $descricao], $esperados]) {
     $id = criar_chamado($pdo, $titulo, $descricao);
-    IaChamados::agendar($pdo, $id, false);
+    IaChamados::agendar($pdo, $id);
     $r = IaChamados::processar($pdo, $id);
     // Google instável (503) devolve pra fila -- simula o cron tentando de novo.
     for ($i = 0; $i < 2 && $r && $r['status'] === 'pendente'; $i++) {

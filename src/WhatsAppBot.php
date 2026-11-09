@@ -683,10 +683,8 @@ class WhatsAppBot
             'aberto_por_setor_responsavel_id' => $conversa['setor_responsavel_id'],
         ], $cliente);
 
-        // Webhook já respondeu 200 pra Meta antes de chegar aqui (ver
-        // webhook_whatsapp.php), então pode analisar na hora.
-        IaChamados::agendar($pdo, $chamadoId, false);
-        IaChamados::processar($pdo, $chamadoId);
+        // Análise da IA vai pra fila do cron (ver IaChamados::agendar()).
+        IaChamados::agendar($pdo, $chamadoId);
     }
 
     // --- Identificação por telefone -----------------------------------------

@@ -87,8 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'criar_c
 
         Notificacoes::novoChamado($pdo, $chamado, $cliente);
 
-        // Análise da IA (base de chamados -> TDN/User Function) roda DEPOIS
-        // que a página já respondeu -- o cliente não espera por ela.
+        // Análise da IA (base de chamados -> TDN/User Function) vai pra fila
+        // do cron -- o cliente não espera por ela.
         IaChamados::agendar($pdo, $chamadoId);
 
         flash_set('sucesso', 'Chamado aberto com sucesso! Nossa equipe já foi avisada.');

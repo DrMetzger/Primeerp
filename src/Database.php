@@ -28,6 +28,14 @@ class Database
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                     PDO::ATTR_EMULATE_PREPARES => false,
                 ]);
+                // O MySQL da Hostinger derruba conexão ociosa muito rápido
+                // ("MySQL server has gone away") -- a IA espera o Google por
+                // 25s+ entre uma query e outra e a conexão morria no meio.
+                try {
+                    self::$instance->exec('SET SESSION wait_timeout = 600, SESSION interactive_timeout = 600');
+                } catch (PDOException $e) {
+                    error_log('Não foi possível ajustar o wait_timeout do MySQL: ' . $e->getMessage());
+                }
             } catch (PDOException $e) {
                 error_log('Falha na conexão com o banco: ' . $e->getMessage());
                 http_response_code(500);
