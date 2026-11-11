@@ -39,23 +39,32 @@ jobs:
           echo "pacote: $(du -h /tmp/primehub-app.tar.gz | cut -f1)"
           [ -f deploy/vm/IMPORTAR_BANCO ] && echo "IMPORTAR_BANCO=1" >> "$GITHUB_ENV" || echo "IMPORTAR_BANCO=0" >> "$GITHUB_ENV"
 
-      - name: Pedir a exportação do banco na Hostinger (cron de lá gera o arquivo)
+      - name: Exportar o banco na Hostinger (em pedaços, sem depender do cron)
         if: env.IMPORTAR_BANCO == '1'
         run: |
-          H="${FTP_HOST#ftp://}"; H="${H%/}"; echo "FTP_H=$H" >> "$GITHUB_ENV"
+          H="${FTP_HOST#ftp://}"; H="${H%/}"
           printf 'user = "%s:%s"\n' "$FTP_USR" "$FTP_PSW" > ~/.ftp && chmod 600 ~/.ftp
-          curl -sS -K ~/.ftp -Q "DELE AdminPrime/config/migracao/PRONTO" "ftp://$H/" >/dev/null 2>&1 || true
-          : > EXPORTAR
-          curl -sS --fail -K ~/.ftp --ftp-create-dirs -T EXPORTAR "ftp://$H/AdminPrime/config/migracao/EXPORTAR"
-          echo "pedido enviado; esperando o cron da Hostinger (roda a cada 5 min)..."
-          for i in $(seq 1 75); do
-            if curl -sS --fail -K ~/.ftp "ftp://$H/AdminPrime/config/migracao/PRONTO" -o PRONTO 2>/dev/null; then break; fi
-            sleep 16
+          URL=https://www.primeerp.com.br/AdminPrime/exportar_banco_migracao.php
+          # O deploy FTP desse mesmo push pode ainda estar subindo o arquivo.
+          for i in $(seq 1 40); do
+            c=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL" || true)
+            [ "$c" = 403 ] && break; sleep 10
           done
-          [ -s PRONTO ] || { echo "ERRO: a Hostinger não gerou o arquivo em 20 min -- o cron do cron_ia_chamados.php está rodando?"; exit 1; }
-          if jq -e '.erro' PRONTO >/dev/null; then echo "ERRO na exportação: $(jq -r .erro PRONTO | head -c 300)"; exit 1; fi
-          echo "exportado: $(jq -r .linhas PRONTO) linhas, $(( $(jq -r .bytes PRONTO) / 1024 )) KB em $(jq -r .segundos PRONTO)s"
-          echo "DUMP_SHA256=$(jq -r .sha256 PRONTO)" >> "$GITHUB_ENV"
+          for f in PRONTO estado.json primehub.sql.gz; do curl -sS -K ~/.ftp -Q "DELE AdminPrime/config/migracao/$f" "ftp://$H/" >/dev/null 2>&1 || true; done
+          # Token de uso único: só quem tem o FTP consegue criar.
+          TOKEN=$(openssl rand -hex 32); echo "::add-mask::$TOKEN"
+          printf '%s' "$TOKEN" > TOKEN
+          curl -sS --fail -K ~/.ftp --ftp-create-dirs -T TOKEN "ftp://$H/AdminPrime/config/migracao/TOKEN"; rm -f TOKEN
+          for i in $(seq 1 400); do
+            r=$(curl -sS -X POST --max-time 60 -d "token=$TOKEN" "$URL" || echo '{"ok":false,"erro":"sem resposta"}')
+            if ! echo "$r" | jq -e '.ok' >/dev/null 2>&1; then echo "ERRO: $(echo "$r" | head -c 300)"; exit 1; fi
+            if echo "$r" | jq -e '.pronto' >/dev/null; then
+              echo "exportado: $(echo "$r" | jq -r .linhas) linhas, $(( $(echo "$r" | jq -r .bytes) / 1024 )) KB em $(echo "$r" | jq -r .segundos)s"
+              echo "DUMP_SHA256=$(echo "$r" | jq -r .sha256)" >> "$GITHUB_ENV"; exit 0
+            fi
+            [ $((i % 10)) = 0 ] && echo "... tabela $(echo "$r" | jq -r .tabela), $(echo "$r" | jq -r .linhas) linhas"
+          done
+          echo "ERRO: exportação não terminou"; exit 1
 
       - name: Instalar na VM
         run: |
@@ -72,7 +81,7 @@ jobs:
         if: always() && env.IMPORTAR_BANCO == '1'
         run: |
           H="${FTP_HOST#ftp://}"; H="${H%/}"
-          for f in primehub.sql.gz primehub.sql.gz.parcial PRONTO EXPORTAR; do
+          for f in primehub.sql.gz primehub.sql.gz.parcial PRONTO EXPORTAR TOKEN estado.json; do
             curl -sS -K ~/.ftp -Q "DELE AdminPrime/config/migracao/$f" "ftp://$H/" >/dev/null 2>&1 || true
           done
           rm -f ~/.ftp PRONTO
