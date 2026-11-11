@@ -1,0 +1,34 @@
+# Só LÊ informações da VM (sistema, memória, disco, o que já está
+# instalado/rodando) antes da migração. Não altera nada. Não imprime
+# nenhuma senha (o log do Actions é público).
+name: VM - reconhecimento
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-reconhecimento.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ler informações da VM
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'bash -s' <<'REMOTO'
+          echo "== sistema"; . /etc/os-release; echo "$PRETTY_NAME | kernel $(uname -r) | usuário $(whoami) | sudo: $(sudo -n true 2>/dev/null && echo sim || echo não)"
+          echo "== cpu/memória/disco"; nproc; free -h | sed -n 1,2p; df -h / | tail -1
+          echo "== portas abertas (processo)"; (sudo -n ss -ltnp 2>/dev/null || ss -ltn) | awk 'NR>1{print $4, $6}' | sed -E 's/users:\(\("([^"]+)".*/\1/' | sort -u
+          echo "== instalado"; for c in nginx apache2 caddy php mysql mariadb docker node git certbot ufw; do printf '%s: ' $c; command -v $c >/dev/null && ($c --version 2>&1 || $c -v 2>&1) | head -1 || echo '-'; done
+          echo "== serviços ativos relevantes"; systemctl list-units --type=service --state=running --no-legend 2>/dev/null | awk '{print $1}' | grep -Ei 'nginx|apache|caddy|php|mysql|maria|docker|traefik|coolify|easypanel|cloudpanel' || echo nenhum
+          echo "== containers"; (sudo -n docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null || echo '-')
+          echo "== firewall"; (sudo -n ufw status 2>/dev/null | head -5 || echo '-')
+          REMOTO
