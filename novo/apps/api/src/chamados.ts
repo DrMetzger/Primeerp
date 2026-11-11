@@ -5,7 +5,7 @@ import { consulta, primeira } from './db';
 
 const STATUS: StatusChamado[] = ['aberto', 'aguardando_equipe', 'aguardando_cliente', 'fechado'];
 
-export async function listarChamados(usuario: UsuarioLogado, filtros: { status?: string; busca?: string; pagina?: number }): Promise<ListaChamados> {
+export async function listarChamados(usuario: UsuarioLogado, filtros: { status?: string; busca?: string; pagina?: number; clienteId?: number }): Promise<ListaChamados> {
   const escopo = usuario.tipo === 'equipe' ? await filtroEscopoEquipe(usuario) : filtroEscopoCliente(usuario);
   const condicoes = [escopo.sql];
   const params: unknown[] = [...escopo.params];
@@ -15,6 +15,10 @@ export async function listarChamados(usuario: UsuarioLogado, filtros: { status?:
   } else if (filtros.status && (STATUS as string[]).includes(filtros.status)) {
     condicoes.push('ch.status = ?');
     params.push(filtros.status);
+  }
+  if (filtros.clienteId && usuario.tipo === 'equipe') {
+    condicoes.push('ch.cliente_id = ?');
+    params.push(filtros.clienteId);
   }
   if (filtros.busca?.trim()) {
     const termo = `%${filtros.busca.trim()}%`;

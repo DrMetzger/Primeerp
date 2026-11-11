@@ -649,6 +649,20 @@ if ($tipoRelatorio !== '' && isset(CATALOGO_RELATORIOS[$tipoRelatorio])) {
 $clientesParaFiltro = $pdo->query("SELECT id, nome FROM clientes WHERE status = 'ativo' ORDER BY nome ASC")->fetchAll();
 $usuariosParaFiltro = $pdo->query("SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome ASC")->fetchAll();
 
+// Sistema novo (TypeScript): mesmos relatórios em JSON, pra tela nova
+// desenhar (PDF/Excel continuam saindo daqui mesmo, formato=pdf/xlsx).
+if ($formato === 'json') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'catalogo' => CATALOGO_RELATORIOS,
+        'clientes' => $clientesParaFiltro,
+        'usuarios' => $usuariosParaFiltro,
+        'relatorio' => $relatorio ?? null,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $tituloPagina = 'Relatórios';
 require __DIR__ . '/templates/header.php';
 ?>

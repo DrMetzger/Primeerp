@@ -18,9 +18,9 @@ interface ItemMenu { rotulo: string; icone: LucideIcon; href?: string; classico?
 const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Dashboard', icone: LayoutDashboard, href: '/painel' },
   { rotulo: 'Chamados', icone: LifeBuoy, href: '/painel/chamados' },
-  { rotulo: 'Clientes', icone: Users, classico: '/clientes.php' },
+  { rotulo: 'Clientes', icone: Users, href: '/painel/clientes' },
   { rotulo: 'Agenda', icone: CalendarDays, classico: '/agenda.php' },
-  { rotulo: 'Relatórios', icone: BarChart3, classico: '/relatorios.php' },
+  { rotulo: 'Relatórios', icone: BarChart3, href: '/painel/relatorios', somenteAdmin: true },
   { rotulo: 'Fontes ADVPL', icone: Code2, classico: '/fontes.php' },
   { rotulo: 'Usuários', icone: UsersRound, classico: '/usuarios.php', somenteAdmin: true },
   { rotulo: 'Configurações', icone: Settings, classico: '/configuracoes.php', somenteAdmin: true },
@@ -87,7 +87,8 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
       </div>
       <ul className="flex-1 space-y-1 overflow-y-auto px-3">
         {itens.map((item) => {
-          const ativo = item.href !== undefined && (item.href === caminho || (item.href !== '/painel' && caminho.startsWith(item.href)));
+          const ativo = item.href !== undefined && (item.href === caminho || (item.href !== '/painel' && item.href !== '/cliente' && caminho.startsWith(item.href))
+            || (item.href === '/painel/clientes' && caminho === '/painel/cliente') || (item.href === '/painel/chamados' && caminho === '/painel/chamado') || (item.href === '/cliente' && caminho === '/cliente/chamado'));
           const Icone = item.icone;
           return (
             <li key={item.rotulo}>

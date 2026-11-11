@@ -93,6 +93,8 @@ export interface ChamadoResumo {
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   cliente: string | null;
   clienteId: number | null;
+  /** Caminho do logo da empresa (ex.: assets/avatars/logo-3.png). */
+  clienteLogo: string | null;
   responsavel: string | null;
   criadoEm: string;
   atualizadoEm: string;
@@ -130,4 +132,75 @@ export interface ListaChamados {
 
 export interface LinkClassico {
   url: string;
+}
+
+export interface ClienteResumo {
+  id: number;
+  nome: string;
+  status: 'ativo' | 'pausado' | 'inativo' | string;
+  logo: string | null;
+  contatoNome: string | null;
+  contatoEmail: string | null;
+  pendentes: number;
+  urgentes: number;
+  totalChamados: number;
+  documentos: number;
+  kpis: number;
+  treinamentos: number;
+}
+
+export interface Pessoa {
+  id: number;
+  nome: string;
+  email: string | null;
+  telefone: string | null;
+  foto: string | null;
+  setor: string | null;
+  portalAtivo: boolean;
+}
+
+export interface Documento {
+  id: number;
+  titulo: string;
+  categoria: string | null;
+  setor: string | null;
+  arquivo: string;
+  tamanho: number;
+  criadoEm: string;
+}
+
+export interface Treinamento {
+  id: number;
+  titulo: string;
+  tipo: string | null;
+  status: string;
+  setor: string | null;
+  inicio: string | null;
+  link: string | null;
+}
+
+export interface ClienteDetalhe {
+  cliente: ClienteResumo & { cnpj: string | null; contatoTelefone: string | null; observacoes: string | null; responsavelInterno: string | null; responsavelInternoId: number | null; contatoDocumento: string | null; criadoEm: string };
+  setores: { id: number; nome: string; ativo: boolean; pendentes: number }[];
+  pessoas: Pessoa[];
+  documentos: Documento[];
+  treinamentos: Treinamento[];
+  equipe: { id: number; nome: string; foto: string | null }[];
+}
+
+export interface Anexo { id: number; nome: string; tamanho: number }
+
+export interface MensagemChamado {
+  id: number;
+  autorTipo: 'cliente' | 'equipe';
+  autorNome: string;
+  mensagem: string;
+  criadoEm: string;
+  anexos: Anexo[];
+}
+
+export interface ChamadoDetalhe {
+  chamado: ChamadoResumo & { descricao: string; categoria: string | null; setor: string | null; responsavelId: number | null; origem: string | null };
+  mensagens: MensagemChamado[];
+  ia: { status: string; resposta: string | null; fonte: string | null; statusSugerido: string | null } | null;
 }

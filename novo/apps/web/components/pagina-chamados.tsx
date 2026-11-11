@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { Casca } from './casca';
 import { ListaChamados } from './chamados';
 import { EsqueletoLista } from './esqueleto';
-import { abrirClassico, api } from '@/lib/api';
+import { api } from '@/lib/api';
+import { NovoChamado } from './novo-chamado';
 
 const FILTROS = [
   { valor: 'pendentes', rotulo: 'Pendentes' },
@@ -20,6 +21,7 @@ export function PaginaChamados({ visao }: { visao: 'equipe' | 'cliente' }) {
   const [status, setStatus] = useState('pendentes');
   const [busca, setBusca] = useState('');
   const [dados, setDados] = useState<Lista | null>(null);
+  const [novo, setNovo] = useState(false);
 
   useEffect(() => {
     setDados(null);
@@ -30,14 +32,15 @@ export function PaginaChamados({ visao }: { visao: 'equipe' | 'cliente' }) {
     return () => clearTimeout(t);
   }, [status, busca]);
 
-  const acoes = visao === 'cliente' ? (
-    <button type="button" onClick={() => void abrirClassico('/portal/chamados.php')} className="gradiente-marca toque inline-flex items-center gap-2 rounded-xl px-4 font-semibold text-white shadow">
-      <Plus size={20} aria-hidden="true" /> <span className="hidden sm:inline">Abrir chamado</span>
+  const acoes = (
+    <button type="button" onClick={() => setNovo(true)} className="gradiente-marca toque inline-flex items-center gap-2 rounded-xl px-4 font-semibold text-white shadow">
+      <Plus size={20} aria-hidden="true" /> <span className="hidden sm:inline">{visao === 'equipe' ? 'Novo chamado' : 'Abrir chamado'}</span>
     </button>
-  ) : undefined;
+  );
 
   return (
     <Casca tipo={visao} titulo={visao === 'equipe' ? 'Chamados' : 'Meus chamados'} acoes={acoes}>
+      {novo && <NovoChamado visao={visao} aoFechar={() => setNovo(false)} />}
       <div className="mb-4 space-y-3">
         <label className="relative block">
           <span className="sr-only">Buscar chamado</span>

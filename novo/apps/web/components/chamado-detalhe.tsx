@@ -1,0 +1,284 @@
+'use client';
+
+import { rotuloStatus, type ChamadoDetalhe, type ClienteDetalhe } from '@primehub/shared';
+import { ArrowLeft, Bot, CheckCircle2, Download, Lock, Paperclip, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { acaoPhp, api } from '@/lib/api';
+import { Casca } from './casca';
+import { SeloStatus } from './chamados';
+import { Esqueleto } from './esqueleto';
+import { BotaoPrimario, BotaoSecundario, CLASSE_ENTRADA, Painel, dataBR, tamanhoArquivo } from './ui/basico';
+import { LogoEmpresa } from './ui/logo-empresa';
+
+type Visao = 'equipe' | 'cliente';
+interface PassoIa { texto?: string; rotulo?: string; mensagem?: string }
+interface EstadoIa { ok: boolean; terminou?: boolean; sucesso?: boolean; passos?: (PassoIa | string)[]; resposta?: string; fonte?: string; status_sugerido?: string; erro?: string }
+
+const STATUS_APOS: { valor: string; rotulo: string }[] = [
+  { valor: 'aguardando_cliente', rotulo: 'Aguardando cliente' },
+  { valor: 'aguardando_equipe', rotulo: 'Aguardando nós' },
+  { valor: 'fechado', rotulo: 'Encerrar chamado' },
+];
+
+function textoPasso(p: PassoIa | string): string {
+  return typeof p === 'string' ? p : p.texto ?? p.rotulo ?? p.mensagem ?? '';
+}
+
+/** Conversa do chamado + resposta (com anexos), igual pra equipe e cliente. */
+export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
+  const [id, setId] = useState(0);
+  const [dados, setDados] = useState<ChamadoDetalhe | null>(null);
+  const [equipe, setEquipe] = useState<ClienteDetalhe['equipe']>([]);
+  const [erro, setErro] = useState('');
+  const [mensagem, setMensagem] = useState('');
+  const [anexos, setAnexos] = useState<File[]>([]);
+  const [statusApos, setStatusApos] = useState('aguardando_cliente');
+  const [notificar, setNotificar] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  const [aviso, setAviso] = useState('');
+  const [ia, setIa] = useState<{ rodando: boolean; passos: string[]; erro: string }>({ rodando: false, passos: [], erro: '' });
+  const fimConversa = useRef<HTMLDivElement>(null);
+
+  const carregar = useCallback(async (cid: number) => {
+    try {
+      const d = await api<ChamadoDetalhe>(`/api/chamados/${cid}`);
+      setDados(d);
+      if (d.ia?.statusSugerido) setStatusApos(d.ia.statusSugerido);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Não consegui abrir esse chamado.');
+    }
+  }, []);
+
+  useEffect(() => {
+    const cid = Number(new URLSearchParams(location.search).get('id') ?? 0);
+    setId(cid);
+    if (!cid) { setErro('Chamado não informado.'); return; }
+    void carregar(cid);
+  }, [carregar]);
+
+  // Lista da equipe (pra trocar responsável) vem do detalhe do cliente.
+  useEffect(() => {
+    if (visao !== 'equipe' || !dados?.chamado.clienteId) return;
+    api<ClienteDetalhe>(`/api/clientes/${dados.chamado.clienteId}`).then((c) => setEquipe(c.equipe)).catch(() => undefined);
+  }, [visao, dados?.chamado.clienteId]);
+
+  useEffect(() => { fimConversa.current?.scrollIntoView({ block: 'end' }); }, [dados?.mensagens.length]);
+
+  async function responder() {
+    if (!mensagem.trim() && !anexos.length) return;
+    setEnviando(true); setAviso('');
+    try {
+      const campos: Record<string, string> = { acao: 'responder_chamado', chamado_id: String(id), mensagem };
+      if (visao === 'equipe') { campos.status_apos_resposta = statusApos; campos.notificar_cliente = notificar ? '1' : '0'; }
+      const r = await acaoPhp('api_acoes.php', campos, anexos);
+      setMensagem(''); setAnexos([]);
+      setAviso(r.avisos?.length ? `Resposta enviada, mas: ${r.avisos.join(' ')}` : 'Resposta enviada.');
+      await carregar(id);
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : 'Não deu pra enviar agora.');
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  async function trocarResponsavel(valor: string) {
+    try {
+      await acaoPhp('api_acoes.php', { acao: 'atribuir_responsavel', chamado_id: String(id), responsavel_id: valor });
+      await carregar(id);
+    } catch (e) { setAviso(e instanceof Error ? e.message : 'Não deu pra trocar agora.'); }
+  }
+
+  async function encerrarOuReabrir() {
+    if (!dados) return;
+    const fechado = dados.chamado.status === 'fechado';
+    try {
+      if (visao === 'cliente') await acaoPhp('api_acoes.php', { acao: fechado ? 'reabrir_chamado' : 'encerrar_chamado', chamado_id: String(id) });
+      else await acaoPhp('api_acoes.php', { acao: 'responder_chamado', chamado_id: String(id), mensagem: '', status_apos_resposta: fechado ? 'aguardando_equipe' : 'fechado', notificar_cliente: '0' });
+      await carregar(id);
+    } catch (e) { setAviso(e instanceof Error ? e.message : 'Não deu certo agora.'); }
+  }
+
+  /** Pede a sugestão da IA: só preenche o campo, NUNCA envia pro cliente. */
+  async function sugerirComIa() {
+    setIa({ rodando: true, passos: ['Começando a análise…'], erro: '' });
+    try {
+      await acaoPhp<EstadoIa>('ia_sugerir_resposta.php', { acao: 'iniciar', chamado_id: String(id) });
+      let anteriorFalhou = false;
+      for (let i = 0; i < 40; i++) {
+        let estado: EstadoIa;
+        try {
+          estado = await acaoPhp<EstadoIa>('ia_sugerir_resposta.php', { acao: 'passo', chamado_id: String(id), anterior_falhou: anteriorFalhou ? '1' : '0' });
+          anteriorFalhou = false;
+        } catch { anteriorFalhou = true; continue; }
+        setIa((v) => ({ ...v, passos: (estado.passos ?? []).map(textoPasso).filter(Boolean) }));
+        if (estado.terminou) {
+          if (estado.sucesso && estado.resposta) {
+            setMensagem(estado.resposta);
+            if (estado.status_sugerido) setStatusApos(estado.status_sugerido);
+            setIa({ rodando: false, passos: [`Pronto — ${estado.fonte ?? 'confira antes de enviar'}.`], erro: '' });
+          } else {
+            setIa({ rodando: false, passos: [], erro: estado.erro ?? 'Dessa vez não achei uma boa resposta. Vale responder do seu jeito.' });
+          }
+          return;
+        }
+      }
+      setIa({ rodando: false, passos: [], erro: 'A análise demorou demais. Tente de novo em instantes.' });
+    } catch (e) {
+      setIa({ rodando: false, passos: [], erro: e instanceof Error ? e.message : 'Não consegui analisar agora.' });
+    }
+  }
+
+  const voltar = visao === 'equipe' ? '/painel/chamados' : '/cliente';
+  const acoes = (
+    <a href={voltar} className="toque inline-flex items-center gap-2 rounded-xl border border-borda bg-superficie px-3 text-sm font-semibold text-texto">
+      <ArrowLeft size={18} aria-hidden="true" /> <span className="hidden sm:inline">Voltar</span>
+    </a>
+  );
+
+  return (
+    <Casca tipo={visao} titulo={dados ? `Chamado #${dados.chamado.id}` : 'Chamado'} acoes={acoes}>
+      {erro && <Painel><p className="text-center text-suave">{erro}</p></Painel>}
+      {!erro && !dados && (
+        <div role="status" aria-label="Carregando o chamado" className="space-y-4">
+          <Esqueleto className="h-32" /><Esqueleto className="h-24" /><Esqueleto className="h-24" /><Esqueleto className="h-48" />
+        </div>
+      )}
+      {dados && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+          <div className="min-w-0 space-y-4">
+            <Painel>
+              <div className="flex items-start gap-3">
+                {visao === 'equipe' && <LogoEmpresa nome={dados.chamado.cliente} logo={dados.chamado.clienteLogo} tamanho="m" />}
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg font-bold leading-snug text-texto">{dados.chamado.titulo}</h2>
+                  <p className="mt-1 text-sm text-suave">
+                    {visao === 'equipe' && dados.chamado.clienteId ? <a className="font-semibold text-primaria underline-offset-2 hover:underline" href={`/painel/cliente?id=${dados.chamado.clienteId}`}>{dados.chamado.cliente}</a> : null}
+                    {visao === 'equipe' ? ' · ' : ''}Aberto em {dataBR(dados.chamado.criadoEm, true)}
+                    {dados.chamado.setor ? ` · ${dados.chamado.setor}` : ''}{dados.chamado.categoria ? ` · ${dados.chamado.categoria}` : ''}
+                  </p>
+                </div>
+                <SeloStatus status={dados.chamado.status} />
+              </div>
+            </Painel>
+
+            <ol className="space-y-3" aria-label="Conversa do chamado">
+              {dados.mensagens.map((m) => {
+                const nosso = m.autorTipo === 'equipe';
+                const minha = (visao === 'equipe') === nosso;
+                return (
+                  <li key={m.id} className={`flex ${minha ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[92%] rounded-3xl border p-4 shadow-sm sm:max-w-[80%] ${minha ? 'rounded-br-md border-primaria/30 bg-primaria/10' : 'rounded-bl-md border-borda bg-superficie'}`}>
+                      <p className="mb-1 text-xs font-semibold text-suave">{m.autorNome} · {dataBR(m.criadoEm, true)}</p>
+                      <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-texto">{m.mensagem}</div>
+                      {m.anexos.length > 0 && (
+                        <ul className="mt-3 flex flex-wrap gap-2">
+                          {m.anexos.map((a) => (
+                            <li key={a.id}>
+                              <a href={`/download_anexo_chamado.php?id=${a.id}`} className="toque inline-flex items-center gap-2 rounded-xl border border-borda bg-fundo px-3 text-sm text-texto hover:border-primaria">
+                                <Download size={16} aria-hidden="true" /> <span className="max-w-48 truncate">{a.nome}</span> <span className="text-xs text-suave">{tamanhoArquivo(a.tamanho)}</span>
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            <div ref={fimConversa} />
+
+            <Painel titulo={dados.chamado.status === 'fechado' ? 'Chamado encerrado — responder reabre' : 'Responder'}>
+              {visao === 'equipe' && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <BotaoSecundario onClick={() => void sugerirComIa()} disabled={ia.rodando}>
+                    <Sparkles size={18} aria-hidden="true" /> {ia.rodando ? 'Analisando…' : 'Sugerir resposta com IA'}
+                  </BotaoSecundario>
+                  <span className="text-xs text-suave">A sugestão só preenche o campo. Você confere antes de enviar.</span>
+                </div>
+              )}
+              {(ia.passos.length > 0 || ia.erro) && (
+                <div className="mb-3 rounded-2xl border border-borda bg-fundo p-3 text-sm" aria-live="polite">
+                  {ia.passos.slice(-4).map((p, i) => <p key={i} className="flex items-start gap-2 text-suave"><Bot size={16} className="mt-0.5 shrink-0 text-destaque" aria-hidden="true" />{p}</p>)}
+                  {ia.erro && <p className="text-suave">{ia.erro}</p>}
+                </div>
+              )}
+              {visao === 'equipe' && dados.ia?.resposta && !mensagem && !ia.rodando && (
+                <button type="button" onClick={() => setMensagem(dados.ia?.resposta ?? '')} className="toque mb-3 flex w-full items-start gap-2 rounded-2xl border border-destaque/40 bg-destaque/10 p-3 text-left text-sm text-texto">
+                  <Sparkles size={18} className="mt-0.5 shrink-0 text-destaque" aria-hidden="true" />
+                  <span><b>A IA já deixou uma sugestão pronta</b> ({dados.ia.status}). Toque para usar no campo e revisar.</span>
+                </button>
+              )}
+              <label className="block">
+                <span className="sr-only">Mensagem</span>
+                <textarea value={mensagem} onChange={(e) => setMensagem(e.target.value)} rows={6} placeholder="Escreva a resposta…"
+                  className="w-full rounded-2xl border border-borda bg-fundo p-3 text-base leading-relaxed text-texto outline-none focus:border-primaria" />
+              </label>
+              {anexos.length > 0 && (
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {anexos.map((a, i) => (
+                    <li key={`${a.name}-${i}`} className="inline-flex items-center gap-2 rounded-xl border border-borda bg-fundo px-3 py-2 text-sm text-texto">
+                      <Paperclip size={14} aria-hidden="true" /> <span className="max-w-40 truncate">{a.name}</span>
+                      <button type="button" aria-label={`Tirar ${a.name}`} onClick={() => setAnexos((l) => l.filter((_, j) => j !== i))} className="text-suave hover:text-perigo"><X size={16} /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <label className="toque inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-borda bg-superficie px-4 font-semibold text-texto hover:bg-superficie-alta">
+                  <Paperclip size={18} aria-hidden="true" /> Anexar
+                  <input type="file" multiple className="sr-only" onChange={(e) => { const f = Array.from(e.target.files ?? []); setAnexos((l) => [...l, ...f]); e.target.value = ''; }} />
+                </label>
+                {visao === 'equipe' && (
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-texto">
+                      <span className="shrink-0">Depois:</span>
+                      <select value={statusApos} onChange={(e) => setStatusApos(e.target.value)} className={`${CLASSE_ENTRADA} sm:w-52`}>
+                        {STATUS_APOS.map((s) => <option key={s.valor} value={s.valor}>{s.rotulo}</option>)}
+                      </select>
+                    </label>
+                    <label className="toque flex items-center gap-2 text-sm text-texto">
+                      <input type="checkbox" checked={notificar} onChange={(e) => setNotificar(e.target.checked)} className="h-5 w-5 accent-[var(--primaria)]" />
+                      Avisar o cliente
+                    </label>
+                  </>
+                )}
+                <BotaoPrimario onClick={() => void responder()} disabled={enviando || (!mensagem.trim() && !anexos.length)} className="sm:ml-auto">
+                  <Send size={18} aria-hidden="true" /> {enviando ? 'Enviando…' : 'Enviar resposta'}
+                </BotaoPrimario>
+              </div>
+              {aviso && <p className="mt-3 text-sm text-suave" role="status">{aviso}</p>}
+            </Painel>
+          </div>
+
+          <aside className="space-y-4">
+            <Painel titulo="Detalhes">
+              <dl className="space-y-3 text-sm">
+                <div><dt className="text-suave">Situação</dt><dd className="font-semibold text-texto">{rotuloStatus[dados.chamado.status]}</dd></div>
+                <div><dt className="text-suave">Prioridade</dt><dd className="font-semibold capitalize text-texto">{dados.chamado.prioridade === 'media' ? 'Média' : dados.chamado.prioridade}</dd></div>
+                <div><dt className="text-suave">Atualizado</dt><dd className="text-texto">{dataBR(dados.chamado.atualizadoEm, true)}</dd></div>
+                <div>
+                  <dt className="text-suave">Responsável</dt>
+                  <dd>
+                    {visao === 'equipe' ? (
+                      <select value={dados.chamado.responsavelId ?? ''} onChange={(e) => void trocarResponsavel(e.target.value)} className={`${CLASSE_ENTRADA} mt-1`} aria-label="Responsável pelo chamado">
+                        <option value="">Ninguém ainda</option>
+                        {equipe.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                      </select>
+                    ) : <span className="text-texto">{dados.chamado.responsavel ?? 'Nossa equipe'}</span>}
+                  </dd>
+                </div>
+              </dl>
+              <BotaoSecundario onClick={() => void encerrarOuReabrir()} className="mt-4 w-full">
+                {dados.chamado.status === 'fechado' ? <><RotateCcw size={18} aria-hidden="true" /> Reabrir chamado</> : <><CheckCircle2 size={18} aria-hidden="true" /> Encerrar chamado</>}
+              </BotaoSecundario>
+            </Painel>
+            {visao === 'equipe' && (
+              <p className="flex items-start gap-2 px-2 text-xs text-suave"><Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />As respostas saem no seu nome, com aviso por e-mail e WhatsApp quando marcado.</p>
+            )}
+          </aside>
+        </div>
+      )}
+    </Casca>
+  );
+}

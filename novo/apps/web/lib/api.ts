@@ -30,3 +30,25 @@ export async function abrirClassico(destino: string, novaAba = false): Promise<v
   if (novaAba) window.open(url, '_blank', 'noopener');
   else location.href = url;
 }
+
+/**
+ * Ações que reaproveitam as regras do PHP (avisos por e-mail/WhatsApp,
+ * anexos, fila da IA). O login vai pelo mesmo cookie do sistema novo.
+ */
+export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: string[] }>(
+  arquivo: string, campos: Record<string, string>, anexos: File[] = [],
+): Promise<T> {
+  const corpo = new FormData();
+  for (const [k, v] of Object.entries(campos)) corpo.append(k, v);
+  for (const a of anexos) corpo.append('anexos[]', a);
+  const r = await fetch(`/${arquivo}`, { method: 'POST', body: corpo, credentials: 'same-origin', headers: { 'X-PrimeHub': '1' } });
+  const dados = (await r.json().catch(() => ({}))) as T & { erro?: string };
+  if (!r.ok || dados.erro) throw new ErroApi(dados.erro ?? 'Não deu certo agora. Tente de novo em instantes.', r.status);
+  return dados;
+}
+
+/** Endereço público de um arquivo do sistema (logo, foto, avatar). */
+export function arquivoPublico(caminho: string | null | undefined): string | null {
+  if (!caminho) return null;
+  return /^https?:/.test(caminho) ? caminho : `/${caminho.replace(/^\//, '')}`;
+}

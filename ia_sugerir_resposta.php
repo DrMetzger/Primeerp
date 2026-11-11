@@ -32,7 +32,10 @@ function responder_json(array $dados, int $codigo = 200): void
 if (!Auth::check()) {
     responder_json(['ok' => false, 'erro' => 'Sessão expirada, faça login de novo.'], 401);
 }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'] ?? '')) {
+// Sistema novo (Prime Hub) manda o cabeçalho X-PrimeHub no lugar do token
+// do formulário -- outro site não consegue mandar cabeçalho próprio.
+$vemDoSistemaNovo = ($_SERVER['HTTP_X_PRIMEHUB'] ?? '') === '1';
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || (!$vemDoSistemaNovo && !hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'] ?? ''))) {
     responder_json(['ok' => false, 'erro' => 'Sessão expirada, recarregue a página.'], 419);
 }
 

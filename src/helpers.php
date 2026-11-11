@@ -1901,3 +1901,49 @@ function identificar_dispositivo(?string $userAgent): string
 
     return $so . ' · ' . $navegador;
 }
+
+/**
+ * Sistema novo (TypeScript) -> PHP: se a pessoa entrou pelo login novo
+ * (cookie ph_token ou cabeçalho Authorization: Bearer, um JWT HS256
+ * assinado com ADMINPRIME_JWT_SECRET), abre a sessão PHP correspondente
+ * sozinha. Assim as ações que o sistema novo reaproveita daqui (responder
+ * chamado com notificações, anexos, IA, exportar relatórios) funcionam sem
+ * pedir login de novo. Sem o segredo configurado (ex.: Hostinger), não faz nada.
+ */
+function sessao_pelo_login_novo(\PDO $pdo): void
+{
+    $segredo = (string) getenv('ADMINPRIME_JWT_SECRET');
+    if ($segredo === '' || !empty($_SESSION['usuario_id']) || !empty($_SESSION['portal_cliente_id'])) {
+        return;
+    }
+    $token = $_COOKIE['ph_token'] ?? '';
+    if ($token === '' && preg_match('/^Bearer\s+(\S+)$/', $_SERVER['HTTP_AUTHORIZATION'] ?? '', $m)) {
+        $token = $m[1];
+    }
+    $partes = explode('.', $token);
+    if (count($partes) !== 3) {
+        return;
+    }
+    $b64 = static fn (string $s) => base64_decode(strtr($s, '-_', '+/') . str_repeat('=', (4 - strlen($s) % 4) % 4), true);
+    $esperada = rtrim(strtr(base64_encode(hash_hmac('sha256', $partes[0] . '.' . $partes[1], $segredo, true)), '+/', '-_'), '=');
+    if (!hash_equals($esperada, $partes[2])) {
+        return;
+    }
+    $dados = json_decode((string) $b64($partes[1]), true);
+    $u = is_array($dados) ? ($dados['u'] ?? null) : null;
+    if (!is_array($u) || ($dados['exp'] ?? 0) < time()) {
+        return;
+    }
+    if (($u['tipo'] ?? '') === 'equipe') {
+        $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE id = ? AND ativo = 1 LIMIT 1');
+        $stmt->execute([(int) $u['id']]);
+        if ($usuario = $stmt->fetch()) {
+            $_SESSION['usuario_id'] = $usuario['id'];
+            $_SESSION['usuario_nome'] = $usuario['nome'];
+            $_SESSION['usuario_perfil'] = $usuario['perfil'];
+            $_SESSION['usuario_foto'] = $usuario['foto_perfil'] ?? null;
+        }
+    } elseif (($u['tipo'] ?? '') === 'cliente') {
+        \AdminPrime\ClienteAuth::iniciarSessaoPorId($pdo, (string) ($u['perfil'] ?? 'master'), (int) $u['id']);
+    }
+}

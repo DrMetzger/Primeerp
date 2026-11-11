@@ -8,6 +8,7 @@ import type { UsuarioLogado } from '@primehub/shared';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
+import { detalharChamado, detalharCliente, listarClientes } from './clientes';
 import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
@@ -84,7 +85,20 @@ app.get('/api/chamados', exigirLogin(), async (c) => {
     pagina: Number.isFinite(pagina) ? pagina : 1,
     ...(status ? { status } : {}),
     ...(busca ? { busca } : {}),
+    ...(Number(c.req.query('cliente')) > 0 ? { clienteId: Number(c.req.query('cliente')) } : {}),
   }));
+});
+
+app.get('/api/clientes', exigirLogin('equipe'), async (c) => c.json(await listarClientes(c.get('usuario'), c.req.query('busca'))));
+
+app.get('/api/clientes/:id', exigirLogin('equipe'), async (c) => {
+  const d = await detalharCliente(c.get('usuario'), Number(c.req.param('id')));
+  return d ? c.json(d) : c.json({ erro: 'Cliente não encontrado.' }, 404);
+});
+
+app.get('/api/chamados/:id', exigirLogin(), async (c) => {
+  const d = await detalharChamado(c.get('usuario'), Number(c.req.param('id')));
+  return d ? c.json(d) : c.json({ erro: 'Chamado não encontrado.' }, 404);
 });
 
 app.post('/api/classico', exigirLogin(), async (c) => {
