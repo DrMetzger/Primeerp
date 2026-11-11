@@ -151,8 +151,67 @@ function csrf_field(): string
     return '<input type="hidden" name="csrf_token" value="' . e(csrf_token()) . '">';
 }
 
+/**
+ * Pedido vindo do sistema novo (site/app Prime Hub): manda o cabeçalho
+ * X-PrimeHub -- outro site não consegue mandar cabeçalho próprio sem
+ * permissão (CORS), então ele faz o papel do token do formulário.
+ */
+function requisicao_do_sistema_novo(): bool
+{
+    return ($_SERVER['HTTP_X_PRIMEHUB'] ?? '') === '1';
+}
+
+/**
+ * Faz as ações (POST) das telas de sempre responderem JSON pro sistema
+ * novo: em vez do redirecionamento com mensagem "flash", devolve
+ * {ok, mensagens}. Assim o sistema novo usa EXATAMENTE as mesmas regras.
+ */
+function responder_json_ao_sistema_novo(): void
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !requisicao_do_sistema_novo()) {
+        return;
+    }
+    ob_start();
+    register_shutdown_function(static function (): void {
+        $saida = ob_get_clean();
+        $redirecionou = false;
+        foreach (headers_list() as $h) {
+            if (stripos($h, 'Location:') === 0) {
+                $redirecionou = true;
+            }
+        }
+        $tipo = '';
+        foreach (headers_list() as $h) {
+            if (stripos($h, 'Content-Type:') === 0) {
+                $tipo = $h;
+            }
+        }
+        // Resposta que já é JSON (ações "ajax") ou arquivo: passa direto.
+        if (!$redirecionou && ($tipo !== '' && stripos($tipo, 'text/html') === false)) {
+            echo $saida;
+            return;
+        }
+        if (headers_sent()) {
+            echo $saida;
+            return;
+        }
+        $flash = $_SESSION['flash'] ?? [];
+        unset($_SESSION['flash']);
+        $codigo = http_response_code();
+        header_remove('Location');
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        $erro = $flash['erro'] ?? ($codigo >= 400 ? trim(strip_tags((string) $saida)) : null);
+        http_response_code($erro && $codigo < 400 ? 422 : ($codigo >= 300 && $codigo < 400 ? 200 : $codigo));
+        echo json_encode(['ok' => !$erro, 'mensagens' => $flash, 'erro' => $erro ?: null], JSON_UNESCAPED_UNICODE);
+    });
+}
+
 function csrf_verify(): void
 {
+    if (requisicao_do_sistema_novo()) {
+        return;
+    }
     $token = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
         http_response_code(419);

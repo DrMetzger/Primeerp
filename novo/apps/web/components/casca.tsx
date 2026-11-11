@@ -2,36 +2,35 @@
 
 import type { UsuarioLogado } from '@primehub/shared';
 import {
-  BarChart3, Bot, CalendarDays, ChevronRight, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
+  BarChart3, Bot, CalendarDays, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
   Settings, UserCircle, Users, UsersRound, Video, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { type ReactNode, useEffect, useState } from 'react';
-import { abrirClassico } from '@/lib/api';
 import { Assistente, chamarAssistente } from './assistente/assistente';
 import { sair, usuarioSalvo } from '@/lib/sessao';
 import { TemaBotao } from './tema-botao';
 
-/** Item do menu: rota nova (href) ou tela clássica do PHP (classico). */
-interface ItemMenu { rotulo: string; icone: LucideIcon; href?: string; classico?: string; somenteAdmin?: boolean }
+/** Item do menu: tudo é tela do sistema novo. */
+interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; somenteAdmin?: boolean }
 
 const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Dashboard', icone: LayoutDashboard, href: '/painel' },
   { rotulo: 'Chamados', icone: LifeBuoy, href: '/painel/chamados' },
   { rotulo: 'Clientes', icone: Users, href: '/painel/clientes' },
-  { rotulo: 'Agenda', icone: CalendarDays, classico: '/agenda.php' },
+  { rotulo: 'Agenda', icone: CalendarDays, href: '/painel/agenda', somenteAdmin: true },
   { rotulo: 'Relatórios', icone: BarChart3, href: '/painel/relatorios', somenteAdmin: true },
-  { rotulo: 'Fontes ADVPL', icone: Code2, classico: '/fontes.php' },
-  { rotulo: 'Usuários', icone: UsersRound, classico: '/usuarios.php', somenteAdmin: true },
-  { rotulo: 'Configurações', icone: Settings, classico: '/configuracoes.php', somenteAdmin: true },
+  { rotulo: 'Fontes ADVPL', icone: Code2, href: '/painel/fontes', somenteAdmin: true },
+  { rotulo: 'Usuários', icone: UsersRound, href: '/painel/usuarios', somenteAdmin: true },
+  { rotulo: 'Configurações', icone: Settings, href: '/painel/configuracoes', somenteAdmin: true },
 ];
 
 const MENU_CLIENTE: ItemMenu[] = [
   { rotulo: 'Meus chamados', icone: LifeBuoy, href: '/cliente' },
-  { rotulo: 'Calendário', icone: CalendarDays, classico: '/portal/calendario.php' },
-  { rotulo: 'Videoaulas', icone: Video, classico: '/portal/videoaulas.php' },
-  { rotulo: 'Fontes ADVPL', icone: Code2, classico: '/portal/fontes_advpl.php' },
-  { rotulo: 'Minha equipe', icone: UsersRound, classico: '/portal/equipe.php' },
+  { rotulo: 'Calendário', icone: CalendarDays, href: '/cliente/calendario' },
+  { rotulo: 'Videoaulas', icone: Video, href: '/cliente/videoaulas' },
+  { rotulo: 'Fontes ADVPL', icone: Code2, href: '/cliente/fontes' },
+  { rotulo: 'Minha equipe', icone: UsersRound, href: '/cliente/equipe' },
 ];
 
 const ADMIN = ['admin', 'diretor', 'ceo'];
@@ -69,11 +68,9 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
 
   const itens = (tipo === 'equipe' ? MENU_EQUIPE : MENU_CLIENTE).filter((i) => !i.somenteAdmin || ADMIN.includes(usuario?.perfil ?? ''));
 
-  async function irPara(item: ItemMenu) {
-    if (item.href) { location.href = item.href; return; }
-    if (!item.classico) return;
+  function irPara(item: ItemMenu) {
     setAbrindo(item.rotulo);
-    try { await abrirClassico(item.classico); } catch { setAbrindo(null); }
+    location.href = item.href;
   }
 
   const menu = (
@@ -87,16 +84,16 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
       </div>
       <ul className="flex-1 space-y-1 overflow-y-auto px-3">
         {itens.map((item) => {
-          const ativo = item.href !== undefined && (item.href === caminho || (item.href !== '/painel' && item.href !== '/cliente' && caminho.startsWith(item.href))
+          const ativo = (item.href === caminho || (item.href !== '/painel' && item.href !== '/cliente' && caminho.startsWith(item.href))
             || (item.href === '/painel/clientes' && caminho === '/painel/cliente') || (item.href === '/painel/chamados' && caminho === '/painel/chamado') || (item.href === '/cliente' && caminho === '/cliente/chamado'));
           const Icone = item.icone;
           return (
             <li key={item.rotulo}>
-              <button type="button" onClick={() => void irPara(item)} aria-current={ativo ? 'page' : undefined}
+              <button type="button" onClick={() => irPara(item)} aria-current={ativo ? 'page' : undefined}
                 className={`toque group flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium transition ${ativo ? 'gradiente-marca text-white shadow-md' : 'text-suave hover:bg-superficie-alta hover:text-texto'}`}>
                 <Icone size={20} aria-hidden="true" />
                 <span className="flex-1">{item.rotulo}</span>
-                {abrindo === item.rotulo ? <span className="text-xs">abrindo…</span> : item.classico ? <ChevronRight size={16} className="opacity-40" aria-hidden="true" /> : null}
+                {abrindo === item.rotulo && !ativo ? <span className="text-xs">abrindo…</span> : null}
               </button>
             </li>
           );
@@ -120,7 +117,7 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
             </div>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => void irPara({ rotulo: 'Perfil', icone: UserCircle, classico: tipo === 'equipe' ? '/perfil.php' : '/portal/perfil.php' })}
+            <button type="button" onClick={() => irPara({ rotulo: 'Perfil', icone: UserCircle, href: tipo === 'equipe' ? '/painel/perfil' : '/cliente/perfil' })}
               className="toque flex items-center justify-center gap-2 rounded-xl border border-borda text-sm text-texto hover:bg-superficie-alta">
               <UserCircle size={18} aria-hidden="true" /> Perfil
             </button>

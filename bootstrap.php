@@ -34,3 +34,4 @@ require_once __DIR__ . '/src/helpers.php';
 
 // Login do sistema novo vale aqui também (ver sessao_pelo_login_novo()).
 sessao_pelo_login_novo($pdo);
+responder_json_ao_sistema_novo();

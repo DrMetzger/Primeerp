@@ -58,3 +58,40 @@ export function tamanhoArquivo(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** Janela por cima da tela: no celular sobe de baixo, no PC fica no meio. Esc fecha. */
+export function Modal({ titulo, aoFechar, children, largura = 'max-w-2xl' }: { titulo: string; aoFechar: () => void; children: ReactNode; largura?: string }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label={titulo}
+      onKeyDown={(e) => { if (e.key === 'Escape') aoFechar(); }}>
+      <button type="button" aria-label="Fechar" className="absolute inset-0 bg-black/55" onClick={aoFechar} />
+      <div className={`relative max-h-[92dvh] w-full ${largura} overflow-y-auto rounded-t-3xl border border-borda bg-superficie p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl`}>
+        <div className="mb-4 flex items-center gap-3">
+          <h2 className="flex-1 text-lg font-bold text-texto">{titulo}</h2>
+          <button type="button" onClick={aoFechar} aria-label="Fechar" className="toque flex items-center justify-center rounded-xl text-2xl leading-none text-suave">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export const CLASSE_AREA = 'w-full rounded-xl border border-borda bg-fundo p-3 text-base text-texto outline-none focus:border-primaria';
+
+/** Botão de escolher arquivo (grande, bom no dedo). */
+export function EscolherArquivo({ rotulo, aceita, multiplo = false, aoEscolher, nomes = [] }: { rotulo: string; aceita?: string; multiplo?: boolean; aoEscolher: (f: File[]) => void; nomes?: string[] }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="toque inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-primaria/60 bg-primaria/5 px-4 font-semibold text-texto hover:bg-primaria/10">
+        📎 {rotulo}
+        <input type="file" className="sr-only" {...(aceita ? { accept: aceita } : {})} multiple={multiplo} onChange={(e) => { aoEscolher(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+      </label>
+      {nomes.length > 0 && <p className="text-sm text-suave">{nomes.join(', ')}</p>}
+    </div>
+  );
+}
+
+export function Aviso({ texto, erro = false }: { texto: string; erro?: boolean }) {
+  if (!texto) return null;
+  return <p role={erro ? 'alert' : 'status'} className={`rounded-xl px-3 py-2 text-sm ${erro ? 'bg-perigo/10 text-perigo' : 'bg-sucesso/10 text-sucesso'}`}>{texto}</p>;
+}

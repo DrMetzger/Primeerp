@@ -204,3 +204,21 @@ export interface ChamadoDetalhe {
   mensagens: MensagemChamado[];
   ia: { status: string; resposta: string | null; fonte: string | null; statusSugerido: string | null } | null;
 }
+
+export interface TarefaAgenda {
+  id: number; titulo: string; data: string; dataFim: string | null; horaInicio: string | null; duracaoMinutos: number | null;
+  status: 'pendente' | 'em_andamento' | 'concluida'; notas: string | null;
+  clienteId: number | null; cliente: string | null; clienteLogo: string | null;
+  chamadoId: number | null; chamado: string | null; responsavelId: number | null; responsavel: string | null;
+}
+export interface EventoCliente { id: number; titulo: string; tipo: string | null; status: string; inicio: string | null; fim: string | null; link: string | null; cliente: string | null; clienteLogo: string | null; setor: string | null }
+export interface Agenda { tarefas: TarefaAgenda[]; eventos: EventoCliente[]; clientes: { id: number; nome: string }[]; equipe: { id: number; nome: string }[] }
+
+export interface FonteArquivo { id: number; titulo: string; categoria: string | null; descricao: string | null; arquivo: string; tamanho: number; setor: string | null; setorId: number | null; criadoEm: string; autor: string | null }
+
+export interface UsuarioEquipe { id: number; nome: string; email: string; telefone: string | null; documento: string | null; perfil: string; foto: string | null; ativo: boolean; restrito: boolean; sensiveis: boolean; ultimoLogin: string | null }
+
+export interface Perfil { nome: string; email: string; telefone: string | null; documento: string | null; foto: string | null; tipo: TipoLogin }
+
+export interface PessoaPortal { id: number; nome: string; email: string | null; telefone: string | null; foto: string | null; master: boolean; portalAtivo: boolean; setores: string[] }
+export interface EquipePortal { setores: { id: number; nome: string; ativo: boolean }[]; pessoas: PessoaPortal[]; podeGerenciar: boolean }

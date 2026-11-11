@@ -414,6 +414,11 @@ class ClienteAuth
         }
 
         http_response_code(503);
+        if (function_exists('requisicao_do_sistema_novo') && requisicao_do_sistema_novo()) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'foraDoHorario' => true, 'erro' => 'O portal funciona em horário comercial, das ' . sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO) . ' às ' . sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM) . '. Volte nesse horário.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         $inicio = sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_INICIO);
         $fim = sprintf('%02d:00', PORTAL_CLIENTE_HORARIO_FIM);
         echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'

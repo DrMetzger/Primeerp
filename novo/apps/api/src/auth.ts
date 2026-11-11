@@ -56,21 +56,35 @@ export async function emitirSessao(usuario: UsuarioLogado): Promise<Sessao> {
 
 export type Variaveis = { usuario: UsuarioLogado };
 
+/** Mesma regra do portal antigo: cliente só usa das 09:00 às 17:59 (horário de Brasília), salvo liberação. */
+export async function clienteForaDoHorario(clienteId: number | null): Promise<boolean> {
+  const hora = Number(new Intl.DateTimeFormat('pt-BR', { hour: 'numeric', hourCycle: 'h23', timeZone: 'America/Sao_Paulo' }).format(new Date()));
+  if (hora >= 9 && hora < 18) return false;
+  const l = await primeira<{ f: number }>('SELECT acesso_fora_horario f FROM clientes WHERE id = ?', [clienteId]).catch(() => null);
+  return !l?.f;
+}
+export const MSG_FORA_HORARIO = 'O portal funciona em horário comercial, das 09:00 às 18:00. Volte nesse horário para abrir ou acompanhar seus chamados.';
+
 export function exigirLogin(tipo?: TipoLogin): MiddlewareHandler<{ Variables: Variaveis }> {
   return async (c, next) => {
     const cabecalho = c.req.header('authorization') ?? '';
     const token = cabecalho.startsWith('Bearer ') ? cabecalho.slice(7) : (c.req.header('cookie')?.match(/(?:^|;\s*)ph_token=([^;]+)/)?.[1] ?? '');
+    let usuario: UsuarioLogado | undefined;
     try {
       const { payload } = await jwtVerify(token, config.jwtSegredo);
-      const usuario = (payload as { u?: UsuarioLogado }).u;
-      if (!usuario || (tipo && usuario.tipo !== tipo)) {
-        return c.json({ erro: 'Acesso negado.' }, 403);
-      }
-      c.set('usuario', usuario);
-      await next();
+      usuario = (payload as { u?: UsuarioLogado }).u;
     } catch {
       return c.json({ erro: 'Sessão expirada. Entre de novo.' }, 401);
     }
+    if (!usuario || (tipo && usuario.tipo !== tipo)) {
+      return c.json({ erro: 'Acesso negado.' }, 403);
+    }
+    if (usuario.tipo === 'cliente' && await clienteForaDoHorario(usuario.clienteId)) {
+      return c.json({ erro: MSG_FORA_HORARIO, foraDoHorario: true }, 503);
+    }
+    c.set('usuario', usuario);
+    // Fora do try: erro numa tela NÃO pode virar "sessão expirada".
+    await next();
   };
 }
 

@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { emitirSessao, exigirLogin, verificarCredenciais, type Variaveis } from './auth';
+import { emitirSessao, exigirLogin, verificarCredenciais, type Variaveis, clienteForaDoHorario, MSG_FORA_HORARIO } from './auth';
 import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositivo } from './dois-fatores';
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
@@ -9,6 +9,7 @@ import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
 import { detalharChamado, detalharCliente, listarClientes } from './clientes';
+import { lerPerfil, listarFontesGlobais, listarUsuarios, montarAgenda, portalCalendario, portalEquipe, portalFontes, portalVideoaulas } from './modulos';
 import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
@@ -35,6 +36,7 @@ app.post('/api/login', async (c) => {
   const { dispositivo, ...credenciais } = dados.data;
   const usuario = await verificarCredenciais(credenciais);
   if (!usuario) return c.json({ erro: 'E-mail ou senha incorretos.' }, 401);
+  if (usuario.tipo === 'cliente' && await clienteForaDoHorario(usuario.clienteId)) return c.json({ erro: MSG_FORA_HORARIO, foraDoHorario: true }, 503);
   // Aparelho já lembrado: entra direto. Senão: código no e-mail.
   if (await dispositivoConfiavel(usuario, dispositivo)) return c.json(await emitirSessao(usuario));
   try {
@@ -100,6 +102,19 @@ app.get('/api/chamados/:id', exigirLogin(), async (c) => {
   const d = await detalharChamado(c.get('usuario'), Number(c.req.param('id')));
   return d ? c.json(d) : c.json({ erro: 'Chamado não encontrado.' }, 404);
 });
+
+const ADMIN = ['admin', 'diretor', 'ceo'];
+app.get('/api/agenda', exigirLogin('equipe'), async (c) => c.json(await montarAgenda(c.req.query('de') ?? '', c.req.query('ate') ?? '')));
+app.get('/api/fontes', exigirLogin('equipe'), async (c) => c.json(await listarFontesGlobais()));
+app.get('/api/usuarios', exigirLogin('equipe'), async (c) => {
+  if (!ADMIN.includes(c.get('usuario').perfil ?? '')) return c.json({ erro: 'Só admin, diretoria e CEO.' }, 403);
+  return c.json(await listarUsuarios());
+});
+app.get('/api/perfil', exigirLogin(), async (c) => c.json(await lerPerfil(c.get('usuario'))));
+app.get('/api/portal/calendario', exigirLogin('cliente'), async (c) => c.json(await portalCalendario(c.get('usuario'))));
+app.get('/api/portal/videoaulas', exigirLogin('cliente'), async (c) => c.json(await portalVideoaulas(c.get('usuario'))));
+app.get('/api/portal/fontes', exigirLogin('cliente'), async (c) => c.json(await portalFontes(c.get('usuario'))));
+app.get('/api/portal/equipe', exigirLogin('cliente'), async (c) => c.json(await portalEquipe(c.get('usuario'))));
 
 app.post('/api/classico', exigirLogin(), async (c) => {
   const corpo = z.object({ destino: z.string().max(300) }).safeParse(await c.req.json().catch(() => null));

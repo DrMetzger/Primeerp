@@ -1,13 +1,18 @@
 import { corStatus, rotuloStatus, type ChamadoDetalhe, type ClienteDetalhe, type ClienteResumo, type ListaChamados } from '@primehub/shared';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type ComponentType, type ReactNode, useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
-import { acaoPhp, api, arquivoPublico, relatorioJson } from './api';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
+import { acaoPhp, api, arquivoPublico, linkArquivo, relatorioJson } from './api';
 import { Esqueleto } from './Esqueleto';
 import { useTema } from './tema';
 import { Cartao, T } from './ui';
 
 // ---------------------------------------------------------------- Peças
+
+/** Baixa/abre um arquivo no navegador do celular, já com acesso. */
+export async function abrirArquivo(destino: string): Promise<void> {
+  try { await Linking.openURL(await linkArquivo(destino)); } catch { /* sem internet: nada a fazer */ }
+}
 
 export function LogoEmpresa({ nome, logo, tamanho = 40 }: { nome: string | null; logo: string | null; tamanho?: number }) {
   const [falhou, setFalhou] = useState(false);
@@ -27,7 +32,7 @@ export function LogoEmpresa({ nome, logo, tamanho = 40 }: { nome: string | null;
   );
 }
 
-function BotaoGradiente({ titulo, aoTocar, desativado }: { titulo: string; aoTocar: () => void; desativado?: boolean }) {
+export function BotaoGradiente({ titulo, aoTocar, desativado }: { titulo: string; aoTocar: () => void; desativado?: boolean }) {
   return (
     <Pressable onPress={aoTocar} disabled={desativado} accessibilityRole="button" style={{ borderRadius: 16, overflow: 'hidden', opacity: desativado ? 0.6 : 1 }}>
       <LinearGradient colors={['#1E3FD8', '#0FB5C9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 }}>
@@ -37,7 +42,7 @@ function BotaoGradiente({ titulo, aoTocar, desativado }: { titulo: string; aoToc
   );
 }
 
-function BotaoContorno({ titulo, aoTocar, desativado }: { titulo: string; aoTocar: () => void; desativado?: boolean }) {
+export function BotaoContorno({ titulo, aoTocar, desativado }: { titulo: string; aoTocar: () => void; desativado?: boolean }) {
   const { tema } = useTema();
   return (
     <Pressable onPress={aoTocar} disabled={desativado} accessibilityRole="button"
@@ -48,7 +53,7 @@ function BotaoContorno({ titulo, aoTocar, desativado }: { titulo: string; aoToca
 }
 
 /** Escolha em "pílulas" (no dedo é melhor que lista suspensa). */
-function Escolha<V extends string>({ rotulo, opcoes, valor, aoMudar }: { rotulo: string; opcoes: { valor: V; rotulo: string }[]; valor: V; aoMudar: (v: V) => void }) {
+export function Escolha<V extends string>({ rotulo, opcoes, valor, aoMudar }: { rotulo: string; opcoes: { valor: V; rotulo: string }[]; valor: V; aoMudar: (v: V) => void }) {
   const { tema } = useTema();
   return (
     <View style={{ gap: 6 }}>
@@ -68,7 +73,7 @@ function Escolha<V extends string>({ rotulo, opcoes, valor, aoMudar }: { rotulo:
   );
 }
 
-function Entrada({ rotulo, valor, aoMudar, linhas = 1, dica }: { rotulo: string; valor: string; aoMudar: (v: string) => void; linhas?: number; dica?: string }) {
+export function Entrada({ rotulo, valor, aoMudar, linhas = 1, dica }: { rotulo: string; valor: string; aoMudar: (v: string) => void; linhas?: number; dica?: string }) {
   const { tema } = useTema();
   return (
     <View style={{ gap: 6 }}>
@@ -80,13 +85,13 @@ function Entrada({ rotulo, valor, aoMudar, linhas = 1, dica }: { rotulo: string;
   );
 }
 
-const dataBR = (v: string | null | undefined, hora = false) => {
+export const dataBR = (v: string | null | undefined, hora = false) => {
   if (!v) return '—';
   const d = new Date(v.replace(' ', 'T'));
   return Number.isNaN(d.getTime()) ? v : hora ? d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : d.toLocaleDateString('pt-BR');
 };
 
-function Vazio({ children }: { children: ReactNode }) {
+export function Vazio({ children }: { children: ReactNode }) {
   const { tema } = useTema();
   return <T style={{ color: tema.textoSuave, textAlign: 'center', marginVertical: 30 }}>{children}</T>;
 }
@@ -198,7 +203,11 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
               backgroundColor: minha ? tema.superficieAlta : tema.superficie, borderWidth: 1, borderColor: minha ? tema.primaria : tema.borda }}>
               <T style={{ color: tema.textoSuave, fontSize: 12, fontWeight: '700' }}>{m.autorNome} · {dataBR(m.criadoEm, true)}</T>
               <T selectable style={{ fontSize: 15, lineHeight: 22 }}>{m.mensagem}</T>
-              {m.anexos.map((a) => <T key={a.id} style={{ color: tema.textoSuave, fontSize: 13 }}>📎 {a.nome}</T>)}
+              {m.anexos.map((a) => (
+                <Pressable key={a.id} onPress={() => void abrirArquivo(`/download_anexo_chamado.php?id=${a.id}`)} accessibilityRole="link" style={{ minHeight: 40, justifyContent: 'center' }}>
+                  <T style={{ color: tema.primaria, fontSize: 14, fontWeight: '700' }}>📎 {a.nome}</T>
+                </Pressable>
+              ))}
             </View>
           );
         })}

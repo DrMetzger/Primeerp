@@ -3,17 +3,22 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useState } from 'react';
 import { BackHandler, FlatList, Image, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api, URL_SERVIDOR } from './api';
+import { aoFicarForaDoHorario, api } from './api';
 import { AssistenteApp } from './AssistenteApp';
 import { Esqueleto, EsqueletoPainel } from './Esqueleto';
 import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
-import { TelaWeb } from './TelaWeb';
+import { FotoPessoa, TelaAgenda, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
 import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
 import { Cartao, T } from './ui';
 
 type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
-type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'clientes' } | { tipo: 'relatorios' } | { tipo: 'novoChamado'; clienteId?: number };
+type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'novoChamado'; clienteId?: number }
+  | { tipo: 'clientes' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
+const TITULOS_TELA: Record<string, string> = {
+  clientes: 'Clientes', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
+  perfil: 'Meu perfil', calendario: 'Calendário', videoaulas: 'Videoaulas', fontesCliente: 'Fontes ADVPL', equipeCliente: 'Minha equipe',
+};
 const ADMIN = ['admin', 'diretor', 'ceo'];
 
 // ---------------------------------------------------------------- Painel
@@ -265,7 +270,9 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   const insets = useSafeAreaInsets();
   const equipe = usuario.tipo === 'equipe';
   const [aba, setAba] = useState<Aba>(equipe ? 'painel' : 'chamados');
-  const [web, setWeb] = useState<{ url: string; titulo: string } | null>(null);
+  const [foto, setFoto] = useState<string | null>(usuario.foto);
+  const [foraDoHorario, setForaDoHorario] = useState(false);
+  useEffect(() => { aoFicarForaDoHorario(() => setForaDoHorario(true)); return () => aoFicarForaDoHorario(null); }, []);
   const [pilha, setPilha] = useState<Tela[]>([]);
   const ir = (t: Tela) => setPilha((p) => [...p, t]);
   const voltar = useCallback(() => setPilha((p) => p.slice(0, -1)), []);
@@ -279,30 +286,22 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
     return () => sub.remove();
   }, [pilha.length, voltar]);
 
-  async function abrirClassico(destino: string, titulo: string) {
-    const { url } = await api<{ url: string }>('/api/classico', { method: 'POST', body: JSON.stringify({ destino }) });
-    setWeb({ url, titulo });
-  }
   const abrirChamado = (c: ChamadoResumo) => ir({ tipo: 'chamado', id: c.id });
 
-  if (web) return <TelaWeb url={web.url} titulo={web.titulo} aoFechar={() => setWeb(null)} />;
-
-  const modulo = (icone: string, rotulo: string, destino: string): ItemMenu => ({ icone, rotulo, acao: () => void abrirClassico(destino, rotulo) });
+  const modulo = (icone: string, rotulo: string, tipo: Exclude<Tela, { id: number }>['tipo']): ItemMenu => ({ icone, rotulo, acao: () => ir({ tipo } as Tela) });
+  const admin = ADMIN.includes(usuario.perfil ?? '');
   const itensMenu: ItemMenu[] = equipe ? [
-    { icone: '👥', rotulo: 'Clientes', acao: () => ir({ tipo: 'clientes' }) },
-    modulo('📅', 'Agenda', '/agenda.php'),
-    ...(ADMIN.includes(usuario.perfil ?? '') ? [{ icone: '📈', rotulo: 'Relatórios', acao: () => ir({ tipo: 'relatorios' }) }] : []),
-    modulo('💻', 'Fontes ADVPL', '/fontes.php'),
-    ...(ADMIN.includes(usuario.perfil ?? '') ? [modulo('🧑‍💼', 'Usuários', '/usuarios.php'), modulo('⚙️', 'Configurações', '/configuracoes.php')] : []),
-    modulo('👤', 'Meu perfil', '/perfil.php'),
+    modulo('👥', 'Clientes', 'clientes'),
+    ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), modulo('⚙️', 'Configurações', 'configuracoes')] : []),
+    modulo('👤', 'Meu perfil', 'perfil'),
     { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
     { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
   ] : [
-    modulo('📅', 'Calendário', '/portal/calendario.php'),
-    modulo('🎬', 'Videoaulas', '/portal/videoaulas.php'),
-    modulo('💻', 'Fontes ADVPL', '/portal/fontes_advpl.php'),
-    modulo('👥', 'Minha equipe', '/portal/equipe.php'),
-    modulo('👤', 'Meu perfil', '/portal/perfil.php'),
+    modulo('📅', 'Calendário', 'calendario'),
+    modulo('🎬', 'Videoaulas', 'videoaulas'),
+    modulo('💻', 'Fontes ADVPL', 'fontesCliente'),
+    modulo('👥', 'Minha equipe', 'equipeCliente'),
+    modulo('👤', 'Meu perfil', 'perfil'),
     { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
     { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
   ];
@@ -316,8 +315,24 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   const titulos: Record<Aba, string> = { painel: 'Dashboard', chamados: equipe ? 'Chamados' : 'Meus chamados', assistente: 'Assistente PrimeERP', menu: 'Menu' };
   const atual = pilha[pilha.length - 1];
   const tituloAtual = !atual ? titulos[aba] : atual.tipo === 'chamado' ? `Chamado #${atual.id}` : atual.tipo === 'cliente' ? 'Cliente'
-    : atual.tipo === 'clientes' ? 'Clientes' : atual.tipo === 'relatorios' ? 'Relatórios' : equipe ? 'Novo chamado' : 'Abrir chamado';
+    : atual.tipo === 'novoChamado' ? (equipe ? 'Novo chamado' : 'Abrir chamado') : TITULOS_TELA[atual.tipo] ?? '';
   const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
+
+  if (foraDoHorario && !equipe) {
+    return (
+      <FundoCircuito>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16, paddingTop: insets.top + 24 }}>
+          <T style={{ fontSize: 56 }}>⏰</T>
+          <T style={{ fontSize: 24, fontWeight: '800', textAlign: 'center' }}>Voltamos já, já!</T>
+          <T style={{ color: tema.textoSuave, fontSize: 16, textAlign: 'center', lineHeight: 23 }}>O portal funciona em horário comercial, das 09:00 às 18:00. Volte nesse horário para abrir ou acompanhar seus chamados.</T>
+          <Pressable onPress={() => { setForaDoHorario(false); setPilha([]); }} accessibilityRole="button" style={{ minHeight: 52, borderRadius: 16, paddingHorizontal: 24, justifyContent: 'center', backgroundColor: tema.primaria }}>
+            <T style={{ color: tema.primariaTexto, fontWeight: '800' }}>Tentar de novo</T>
+          </Pressable>
+          <Pressable onPress={aoSair} accessibilityRole="button" style={{ minHeight: 48, justifyContent: 'center' }}><T style={{ color: tema.textoSuave, textDecorationLine: 'underline' }}>Sair</T></Pressable>
+        </View>
+      </FundoCircuito>
+    );
+  }
 
   return (
     <FundoCircuito>
@@ -333,13 +348,13 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
           <T style={{ fontSize: 21, fontWeight: '800' }} accessibilityRole="header" numberOfLines={1}>{tituloAtual}</T>
           <T style={{ color: tema.textoSuave, fontSize: 13 }} numberOfLines={1}>{usuario.nome}{usuario.empresa ? ` · ${usuario.empresa}` : ' · Central da equipe'}</T>
         </View>
-        {usuario.foto ? (
-          <Image source={{ uri: `${URL_SERVIDOR}/${usuario.foto.replace(/^\//, '')}` }} style={{ width: 40, height: 40, borderRadius: 20 }} accessibilityLabel="Sua foto" />
-        ) : (
-          <LinearGradient colors={['#1E3FD8', '#0FB5C9']} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
-            <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>{iniciais}</T>
-          </LinearGradient>
-        )}
+        <Pressable onPress={() => ir({ tipo: 'perfil' })} accessibilityRole="button" accessibilityLabel="Meu perfil">
+          {foto ? <FotoPessoa caminho={foto} tamanho={40} nome={usuario.nome} /> : (
+            <LinearGradient colors={['#1E3FD8', '#0FB5C9']} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
+              <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>{iniciais}</T>
+            </LinearGradient>
+          )}
+        </Pressable>
       </View>
       {atual && (
         <View style={{ flex: 1 }}>
@@ -347,6 +362,15 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
           {atual.tipo === 'cliente' && <TelaCliente key={atual.id} id={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} aoNovoChamado={() => ir({ tipo: 'novoChamado', clienteId: atual.id })} />}
           {atual.tipo === 'clientes' && <TelaClientes aoAbrir={(id) => ir({ tipo: 'cliente', id })} />}
           {atual.tipo === 'relatorios' && <TelaRelatorios />}
+          {atual.tipo === 'agenda' && <TelaAgenda aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
+          {atual.tipo === 'fontes' && <TelaFontes />}
+          {atual.tipo === 'usuarios' && <TelaUsuarios />}
+          {atual.tipo === 'configuracoes' && <TelaConfiguracoes />}
+          {atual.tipo === 'perfil' && <TelaPerfil equipe={equipe} aoMudarFoto={setFoto} />}
+          {atual.tipo === 'calendario' && <TelaCalendario />}
+          {atual.tipo === 'videoaulas' && <TelaVideoaulas />}
+          {atual.tipo === 'fontesCliente' && <TelaFontesCliente />}
+          {atual.tipo === 'equipeCliente' && <TelaEquipeCliente />}
           {atual.tipo === 'novoChamado' && <TelaNovoChamado equipe={equipe} {...(atual.clienteId ? { clienteInicial: atual.clienteId } : {})}
             aoCriar={(id) => setPilha((p) => [...p.slice(0, -1), ...(id ? [{ tipo: 'chamado' as const, id }] : [])])} />}
         </View>

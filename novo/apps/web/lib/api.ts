@@ -19,8 +19,9 @@ export async function api<T>(caminho: string, opcoes: RequestInit = {}): Promise
     location.href = tipo === 'cliente' ? '/portal' : '/login';
     throw new ErroApi('Sessão expirada', 401);
   }
-  const corpo = (await resposta.json().catch(() => ({}))) as T & { erro?: string };
-  if (!resposta.ok) throw new ErroApi(corpo.erro ?? 'Erro inesperado', resposta.status);
+  const corpo = (await resposta.json().catch(() => ({}))) as T & { erro?: string; foraDoHorario?: boolean };
+  if (corpo.foraDoHorario) { location.href = '/fora-do-horario'; throw new ErroApi(corpo.erro ?? 'Fora do horário', 503); }
+  if (!resposta.ok) throw new ErroApi(corpo.erro ?? 'Não deu certo agora. Tente de novo em instantes.', resposta.status);
   return corpo;
 }
 
@@ -51,4 +52,29 @@ export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: st
 export function arquivoPublico(caminho: string | null | undefined): string | null {
   if (!caminho) return null;
   return /^https?:/.test(caminho) ? caminho : `/${caminho.replace(/^\//, '')}`;
+}
+
+/**
+ * Manda uma ação pra qualquer tela de sempre (agenda.php, usuarios.php…):
+ * o PHP responde {ok, mensagens, erro} em vez de redirecionar.
+ */
+export async function enviarAcao(arquivo: string, campos: Record<string, string>, arquivos: Record<string, File | File[] | null | undefined> = {}): Promise<{ ok: boolean; mensagens: Record<string, string>; erro: string | null }> {
+  const corpo = new FormData();
+  for (const [k, v] of Object.entries(campos)) corpo.append(k, v);
+  for (const [k, v] of Object.entries(arquivos)) {
+    if (!v) continue;
+    if (Array.isArray(v)) v.forEach((f) => corpo.append(k, f));
+    else corpo.append(k, v);
+  }
+  const r = await fetch(`/${arquivo}`, { method: 'POST', body: corpo, credentials: 'same-origin', headers: { 'X-PrimeHub': '1' } });
+  const d = (await r.json().catch(() => null)) as { ok: boolean; mensagens?: Record<string, string>; erro?: string | null } | null;
+  if (!d) throw new ErroApi('Não deu certo agora. Tente de novo em instantes.', r.status);
+  if (!r.ok || d.erro) throw new ErroApi(d.erro ?? 'Não deu certo agora.', r.status);
+  return { ok: true, mensagens: d.mensagens ?? {}, erro: null };
+}
+
+export async function lerJsonPhp<T>(caminho: string): Promise<T> {
+  const r = await fetch(caminho, { credentials: 'same-origin' });
+  if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) throw new ErroApi('Essa área é só para admin, diretoria e CEO.', r.status);
+  return (await r.json()) as T;
 }

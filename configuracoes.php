@@ -81,6 +81,24 @@ foreach ($camposConfiguracao as $chave => $padrao) {
     $valores[$chave] = Configuracoes::get($pdo, $chave, $padrao) ?? '';
 }
 
+// Sistema novo (TypeScript): os mesmos valores em JSON pra tela nova.
+if (($_GET['formato'] ?? '') === 'json') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'valores' => $valores,
+        'autorIa' => (int) (\AdminPrime\IaChamados::autorResposta($pdo)['id'] ?? 0),
+        'usuarios' => $pdo->query('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome')->fetchAll(),
+        'timbrado' => [
+            'cabecalho' => arquivo_publico_existe($timbrado['cabecalho_caminho'] ?? null) ? $timbrado['cabecalho_caminho'] : null,
+            'rodape' => arquivo_publico_existe($timbrado['rodape_caminho'] ?? null) ? $timbrado['rodape_caminho'] : null,
+            'cabecalhoAltura' => (float) ($timbrado['cabecalho_altura_mm'] ?? 28),
+            'rodapeAltura' => (float) ($timbrado['rodape_altura_mm'] ?? 16),
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $tituloPagina = 'Configurações';
 require __DIR__ . '/templates/header.php';
 ?>

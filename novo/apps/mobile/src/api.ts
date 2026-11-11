@@ -39,9 +39,20 @@ export async function api<T>(caminho: string, opcoes: RequestInit = {}): Promise
     ...opcoes,
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(opcoes.headers ?? {}) },
   });
-  const corpo = (await r.json().catch(() => ({}))) as T & { erro?: string };
+  const corpo = (await r.json().catch(() => ({}))) as T & { erro?: string; foraDoHorario?: boolean };
+  if (corpo.foraDoHorario) ouvinteHorario?.();
   if (!r.ok) throw new ErroApi(corpo.erro ?? 'Não foi possível falar com o servidor.', r.status);
   return corpo;
+}
+
+/** Portal do cliente fora do horário comercial: a tela principal mostra o aviso. */
+let ouvinteHorario: (() => void) | null = null;
+export function aoFicarForaDoHorario(f: (() => void) | null): void { ouvinteHorario = f; }
+
+/** Abre um arquivo (anexo, fonte, vídeo) no navegador do celular, já com acesso. */
+export async function linkArquivo(destino: string): Promise<string> {
+  const { url } = await api<{ url: string }>('/api/classico', { method: 'POST', body: JSON.stringify({ destino }) });
+  return `${URL_SERVIDOR}${url}`;
 }
 
 /** Ações que reaproveitam as regras do PHP (avisos, anexos, fila da IA). */
@@ -52,7 +63,8 @@ export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: st
     method: 'POST', body: corpo,
     headers: { 'X-PrimeHub': '1', ...(token ? { authorization: `Bearer ${token}` } : {}) },
   });
-  const dados = (await r.json().catch(() => ({}))) as T & { erro?: string };
+  const dados = (await r.json().catch(() => ({}))) as T & { erro?: string; foraDoHorario?: boolean };
+  if (dados.foraDoHorario) ouvinteHorario?.();
   if (!r.ok || dados.erro) throw new ErroApi(dados.erro ?? 'Não deu certo agora. Tente de novo em instantes.', r.status);
   return dados;
 }
@@ -69,4 +81,11 @@ export async function relatorioJson<T>(params: Record<string, string>): Promise<
 export function arquivoPublico(caminho: string | null | undefined): string | null {
   if (!caminho) return null;
   return /^https?:/.test(caminho) ? caminho : `${URL_SERVIDOR}/${caminho.replace(/^\//, '')}`;
+}
+
+/** JSON de uma tela do PHP (ex.: configuracoes.php?formato=json), com o mesmo login. */
+export async function lerJsonPhp<T>(caminho: string): Promise<T> {
+  const r = await fetch(`${URL_SERVIDOR}${caminho}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) throw new ErroApi('Essa área é só para admin, diretoria e CEO.', r.status);
+  return (await r.json()) as T;
 }
