@@ -11,7 +11,7 @@ import { Inicio } from './src/Inicio';
 import { Login } from './src/Login';
 import { ProvedorTema, useTema } from './src/tema';
 import { Botao, T } from './src/ui';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -62,6 +62,18 @@ function Fluxo() {
   useEffect(() => {
     void SplashScreen.hideAsync();
     void iniciar();
+  }, []);
+
+  // Sempre que o app volta pra tela (estava em segundo plano), confere a
+  // versão de novo: saiu versão nova enquanto estava aberto -> bloqueia e atualiza.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (situacao) => {
+      if (situacao !== 'active') return;
+      void api<VersaoApp>('/api/app/versao').then((versao) => {
+        if (Number(Application.nativeBuildVersion ?? 0) < versao.versaoMinima) setEstado({ tela: 'atualizar', versao });
+      }).catch(() => undefined);
+    });
+    return () => sub.remove();
   }, []);
 
   const barra = estado.tela === 'abrindo' || estado.tela === 'atualizar' ? 'light' : nome === 'escuro' ? 'light' : 'dark';
