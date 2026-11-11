@@ -11,13 +11,13 @@ const config: ExpoConfig = {
   scheme: 'primehub',
   version: versao,
   orientation: 'default',
-  icon: './assets/icone-p.png',
+  icon: './assets/icone-app.png',
   userInterfaceStyle: 'automatic',
   backgroundColor: '#070B1C',
   android: {
     package: 'br.com.primeerp.primehub',
     versionCode: versaoCodigo,
-    adaptiveIcon: { foregroundImage: './assets/icone-p.png', backgroundColor: '#070B1C' },
+    adaptiveIcon: { foregroundImage: './assets/icone-frente.png', backgroundImage: './assets/icone-fundo.png', backgroundColor: '#0B1B6F' },
     permissions: ['INTERNET', 'REQUEST_INSTALL_PACKAGES'],
   },
   plugins: [

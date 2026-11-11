@@ -24,8 +24,15 @@ function instrucoes(usuario: UsuarioLogado): string {
     ? `Você conversa com ${usuario.nome}, da EQUIPE da PrimeERP (perfil ${usuario.perfil ?? 'colaborador'}). No Prime Hub a equipe tem: Dashboard (KPIs de atendimento), Chamados (lista com filtros; abrir um chamado leva à tela do cliente, onde se responde, anexa arquivos e usa o botão "Sugerir resposta com IA"), Clientes, Agenda, Relatórios, Fontes ADVPL, Usuários e Configurações (só administradores; inclui a IA dos chamados).`
     : `Você conversa com ${usuario.nome}, CLIENTE da PrimeERP (empresa ${usuario.empresa ?? ''}). No Prime Hub o cliente tem: Meus chamados (acompanhar e abrir chamado pelo botão "Abrir chamado", com anexos), Calendário de treinamentos, Videoaulas, Fontes ADVPL e Minha equipe.`;
   return `Você é o assistente virtual do Prime Hub, a central de atendimento da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP). ${quem}
-Ajude a usar o sistema e tire dúvidas rápidas de Protheus. Responda em português do Brasil, de forma simpática, natural e CURTA (no máximo 4 frases ou 5 passos curtos). Texto puro, sem markdown, sem asteriscos.
-Se a dúvida for um problema técnico que precisa de análise (erro no Protheus, ajuste de fonte, nota rejeitada etc.), oriente a abrir um chamado com prints, porque a equipe analisa. Nunca invente telas, botões, rotinas ou parâmetros que você não tem certeza que existem. Não peça senha nem dados sensíveis.`;
+
+SEU JEITO: simpático, educado e descolado na medida certa, como um colega de trabalho gente boa. Pode usar um toque de humor leve e um emoji de vez em quando, mas sempre com respeito. Nunca seja seco, nunca diga que "não pode responder" de forma ríspida e nunca deixe a pessoa sem resposta.
+
+O QUE VOCÊ FAZ: ajuda a usar o Prime Hub e tira dúvidas rápidas de Protheus/ERP.
+- Pergunta fora do assunto ou brincadeira (ex.: "como faço pra não trabalhar hoje?"): responda com bom humor e gentileza, em uma ou duas frases, e traga a conversa de volta pro que você pode ajudar. Ex.: "Haha, essa eu não consigo resolver 😄 mas posso deixar seu dia mais leve: quer que eu te mostre os chamados que estão esperando você?"
+- Problema técnico que precisa de análise (erro no Protheus, ajuste de fonte, nota rejeitada etc.): explique o que der e oriente a abrir um chamado com prints, porque a equipe analisa.
+- Nunca invente telas, botões, rotinas ou parâmetros que você não tem certeza que existem. Não peça senha nem dados sensíveis.
+
+FORMATO: português do Brasil, texto puro (sem markdown, sem asteriscos), curto: no máximo 4 frases ou 5 passos curtos.`;
 }
 
 export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string): Promise<{ texto: string } | { erro: string }> {
@@ -44,7 +51,10 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
     parts: [{ text: m.texto.slice(0, 2000) }],
   }));
 
-  for (const modelo of MODELOS) {
+  // Gemini sobrecarregado (503/429) acontece: tenta de novo com espera curta
+  // e troca de modelo. A pessoa nunca vê mensagem de erro técnica.
+  for (const [tentativa, modelo] of [MODELOS[0], MODELOS[0], MODELOS[1], MODELOS[1]].entries()) {
+    if (tentativa > 0) await new Promise((r) => setTimeout(r, 900 * tentativa));
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
         method: 'POST',
@@ -52,17 +62,24 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: instrucoes(usuario) }] },
           contents,
-          generationConfig: { maxOutputTokens: 400, temperature: 0.5 },
+          // Folga de tokens: modelos que "pensam" gastam parte disso antes de responder.
+          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
         }),
         signal: AbortSignal.timeout(25_000),
       });
-      if (!r.ok) continue; // 503/429: tenta o modelo reserva
-      const dados = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-      const texto = (dados.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').replace(/\*\*/g, '').trim();
+      if (!r.ok) {
+        console.error(`assistente: Gemini ${modelo} respondeu HTTP ${r.status}`);
+        continue;
+      }
+      const dados = (await r.json()) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+      const partes = dados.candidates?.[0]?.content?.parts ?? [];
+      const texto = partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').trim();
       if (texto) return { texto };
-    } catch {
-      // rede/tempo: tenta o próximo modelo
+      console.error(`assistente: Gemini ${modelo} sem texto (motivo: ${dados.candidates?.[0]?.finishReason ?? '?'})`);
+    } catch (e) {
+      console.error(`assistente: falha chamando ${modelo}:`, e instanceof Error ? e.message : e);
     }
   }
-  return { erro: 'Não consegui pensar direito agora. Tenta de novo em alguns segundos?' };
+  // Último caso: resposta educada, nunca "erro".
+  return { texto: `Opa, ${usuario.nome.split(' ')[0]}! Me enrolei aqui por um instante 😅 Pode me mandar a pergunta de novo? Se for algo urgente, é só abrir um chamado que a equipe te atende.` };
 }

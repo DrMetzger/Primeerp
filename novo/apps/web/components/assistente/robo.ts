@@ -246,24 +246,17 @@ export class Robo {
         break;
       }
       case 'escrever':
-        pose.olhos = 'pensando';
-        pose.boca = 'neutra';
-        pose.objeto = 'tablet';
-        pose.bracoD = 'relaxado';
-        pose.anguloD = -32;
-        pose.bracoE = 'caneta';
-        pose.anguloE = -38 + Math.sin(t * 11) * 5;
-        pose.inclinacao = 6;
-        break;
       case 'anotar':
+        // Segura a prancheta/tablet na frente da barriga com uma mão e
+        // escreve com a caneta na outra (mão da caneta "rabiscando").
         pose.olhos = 'pensando';
         pose.boca = 'neutra';
-        pose.objeto = 'prancheta';
+        pose.objeto = this.acao?.nome === 'escrever' ? 'tablet' : 'prancheta';
         pose.bracoD = 'relaxado';
-        pose.anguloD = -30;
+        pose.anguloD = -16;
         pose.bracoE = 'caneta';
-        pose.anguloE = -42 + Math.sin(t * 13) * 4 + Math.sin(t * 2) * 6;
-        pose.inclinacao = 7;
+        pose.anguloE = -36 + Math.sin(t * 12) * 3 + Math.sin(t * 2.3) * 4;
+        pose.inclinacao = 8;
         break;
       case 'pensar':
         pose.olhos = 'pensando';
@@ -359,10 +352,11 @@ export class Robo {
     } else {
       this.trocar(p.objeto, 'objeto', pose.objeto);
       p.objeto.style.display = 'block';
-      p.objeto.style.left = pose.objeto === 'tablet' ? '300px' : '310px';
-      p.objeto.style.top = '520px';
-      p.objeto.style.width = pose.objeto === 'tablet' ? '160px' : '150px';
-      p.objeto.style.transform = `rotate(${pose.objeto === 'tablet' ? -8 : -10}deg)`;
+      // Na frente da barriga, levemente inclinado na direção da caneta.
+      p.objeto.style.left = pose.objeto === 'tablet' ? '282px' : '290px';
+      p.objeto.style.top = pose.objeto === 'tablet' ? '668px' : '650px';
+      p.objeto.style.width = pose.objeto === 'tablet' ? '170px' : '160px';
+      p.objeto.style.transform = 'rotate(-6deg)';
     }
 
     // Jato pulsando + brilho quando está pensando/comemorando.

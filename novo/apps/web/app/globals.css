@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./textura.css";
 
 /* Cores vêm de packages/shared (tema.ts), injetadas como variáveis no
    <html data-tema="claro|escuro"> -- ver app/layout.tsx. */
@@ -24,13 +25,53 @@
 html { background: var(--fundo); color: var(--texto); -webkit-tap-highlight-color: transparent; }
 body { min-height: 100dvh; }
 
-/* Fundo com brilho da marca (azul + turquesa), discreto. */
+/* Fundo da marca: brilhos azul/turquesa + placa de circuito (textura.css)
+   com uma luz que percorre as trilhas devagar. */
+html[data-tema="claro"] { --textura-atual: var(--textura-claro); --textura-forca: .09; --textura-luz: .35; }
+html[data-tema="escuro"] { --textura-atual: var(--textura-escuro); --textura-forca: .11; --textura-luz: .5; }
+
 .fundo-marca {
+  position: relative;
+  isolation: isolate;
   background:
     radial-gradient(1200px 600px at 10% -10%, color-mix(in oklab, var(--primaria) 18%, transparent), transparent 60%),
     radial-gradient(900px 500px at 110% 10%, color-mix(in oklab, var(--destaque) 16%, transparent), transparent 60%),
+    radial-gradient(800px 600px at 50% 120%, color-mix(in oklab, var(--primaria) 12%, transparent), transparent 60%),
     var(--fundo);
 }
+.fundo-marca::before,
+.fundo-marca::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: var(--textura-atual);
+  mask-image: var(--textura-atual);
+  -webkit-mask-size: 480px 480px;
+  mask-size: 480px 480px;
+}
+/* As trilhas em si. */
+.fundo-marca::before { background: var(--texto); opacity: var(--textura-forca); }
+/* A "energia" passando pelas trilhas. */
+.fundo-marca::after {
+  background: radial-gradient(420px 420px at var(--luz-x, 30%) var(--luz-y, 30%), var(--destaque), transparent 70%);
+  opacity: var(--textura-luz);
+  animation: energia 18s ease-in-out infinite alternate;
+}
+@property --luz-x { syntax: "<percentage>"; inherits: false; initial-value: 20%; }
+@property --luz-y { syntax: "<percentage>"; inherits: false; initial-value: 25%; }
+@keyframes energia {
+  0% { --luz-x: 15%; --luz-y: 20%; }
+  35% { --luz-x: 80%; --luz-y: 35%; }
+  70% { --luz-x: 45%; --luz-y: 85%; }
+  100% { --luz-x: 90%; --luz-y: 75%; }
+}
+@media (prefers-reduced-motion: reduce) { .fundo-marca::after { animation: none; } }
+
+/* Logo certo pra cada tema. */
+html[data-tema="escuro"] .so-claro { display: none !important; }
+html[data-tema="claro"] .so-escuro { display: none !important; }
 
 .gradiente-marca { background-image: linear-gradient(135deg, #1E3FD8, #0FB5C9); }
 
@@ -48,6 +89,7 @@ body { min-height: 100dvh; }
 
 @media (prefers-reduced-motion: reduce) {
   .esqueleto::after { animation: none; }
+  .fundo-marca::after { animation: none; }
   * { scroll-behavior: auto !important; }
 }
 

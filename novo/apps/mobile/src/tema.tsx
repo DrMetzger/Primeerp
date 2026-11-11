@@ -1,5 +1,5 @@
 import { temas, type NomeTema, type Tema } from '@primehub/shared';
-import * as SecureStore from 'expo-secure-store';
+import { armazenamento } from './armazenamento';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
@@ -12,13 +12,13 @@ export function ProvedorTema({ children }: { children: ReactNode }) {
   const sistema = useColorScheme();
   const [escolha, setEscolha] = useState<NomeTema | null>(null);
   useEffect(() => {
-    void SecureStore.getItemAsync('ph_tema').then((t) => { if (t === 'claro' || t === 'escuro') setEscolha(t); });
+    void armazenamento.ler('ph_tema').then((t) => { if (t === 'claro' || t === 'escuro') setEscolha(t); });
   }, []);
   const nome: NomeTema = escolha ?? (sistema === 'light' ? 'claro' : 'escuro');
   const alternar = () => {
     const novo: NomeTema = nome === 'escuro' ? 'claro' : 'escuro';
     setEscolha(novo);
-    void SecureStore.setItemAsync('ph_tema', novo);
+    void armazenamento.gravar('ph_tema', novo);
   };
   return <Contexto.Provider value={{ tema: temas[nome], nome, alternar }}>{children}</Contexto.Provider>;
 }

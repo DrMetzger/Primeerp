@@ -15,7 +15,8 @@ interface LinhaUsuario { id: number; nome: string; email: string; senha_hash: st
 interface LinhaCliente { id: number; nome: string; contato_nome: string | null; contato_email: string; senha_hash: string; foto_perfil: string | null }
 interface LinhaSetorResp { id: number; nome: string; email: string; senha_hash: string; cliente_id: number; empresa_nome: string; foto_perfil: string | null }
 
-export async function login(pedido: PedidoLogin): Promise<Sessao | null> {
+/** Confere e-mail/senha (mesmas senhas do PHP). Não abre sessão ainda (falta o código). */
+export async function verificarCredenciais(pedido: PedidoLogin): Promise<UsuarioLogado | null> {
   const email = pedido.email.trim().toLowerCase();
   let usuario: UsuarioLogado | null = null;
 
@@ -40,7 +41,10 @@ export async function login(pedido: PedidoLogin): Promise<Sessao | null> {
     }
   }
 
-  if (!usuario) return null;
+  return usuario;
+}
+
+export async function emitirSessao(usuario: UsuarioLogado): Promise<Sessao> {
   const token = await new SignJWT({ u: usuario })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(`${usuario.tipo}:${usuario.id}`)

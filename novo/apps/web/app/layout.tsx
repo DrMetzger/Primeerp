@@ -9,7 +9,7 @@ const fonte = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--fonte', displ
 export const metadata: Metadata = {
   title: { default: 'Prime Hub · PrimeERP', template: '%s · Prime Hub' },
   description: 'Central de atendimento PrimeERP Soluções em Tecnologia',
-  icons: { icon: '/marca/primeerp-p.png' },
+  icons: { icon: '/marca/icone-256.png', apple: '/marca/icone-256.png' },
 };
 
 export const viewport: Viewport = {

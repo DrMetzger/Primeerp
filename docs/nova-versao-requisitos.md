@@ -3,6 +3,31 @@
 Vem depois da migração do sistema atual pra VM (`suporte.primeerp.com.br`).
 Substitui o PHP aos poucos, sem parar o atendimento.
 
+## Escopo: TUDO que existe hoje, refeito no sistema novo (site + APK)
+Nenhuma tela pode mandar pra versão clássica (PHP) quando estiver pronta.
+Ordem de entrega (cada item sai completo no site E no APK):
+
+- [ ] **Login** (equipe e cliente, verificação em duas etapas, olho na senha) — base pronta
+- [ ] **Dashboard** com KPIs reais — base pronta
+- [ ] **Clientes**: lista, **novo cliente** (cadastro completo, logo/avatar), página do
+      cliente com todas as abas (visão geral, demandas, KPIs, documentos, treinamentos,
+      chamados, setores, acessos, fontes, implantação)
+- [ ] **Chamados**: lista, **novo chamado**, responder com anexos, status, responsável,
+      **análise com IA** (botão e automática), passo a passo
+- [ ] **Agendas**: agenda da equipe e **agenda do cliente** (treinamentos/reuniões)
+- [ ] **Fontes ADVPL**: lista e **upload de fontes**
+- [ ] **Relatórios** e exportações (PDF/Excel)
+- [ ] **Formulários e cadastros** (usuários, setores, responsáveis, acessos)
+- [ ] **Configurações** (IA, e-mail, WhatsApp, timbrado) e **avatares**
+- [ ] **Portal do cliente**: abertura de chamado, acompanhar, calendário, videoaulas,
+      fontes, minha equipe, perfil
+- [ ] **Chat do cliente com a IA** e **robô da PrimeERP** em todas as telas
+- [ ] **Cron** (respostas automáticas da IA, lembretes) rodando no sistema novo
+
+## Regra de trabalho (pedido do Kleber)
+- **Toda mudança, melhoria ou novidade vale SEMPRE para os dois: site e APK.**
+  Nada é entregue só em um deles.
+
 ## Plataformas
 - **Navegador** (desktop e celular) e **app Android (APK)**. Sem app desktop.
 - O APK cria o atalho na tela inicial ao instalar.
@@ -30,6 +55,18 @@ Substitui o PHP aos poucos, sem parar o atendimento.
 - Texto que respeita o tamanho de fonte escolhido no Android, contraste
   adequado nos dois temas, leitura por leitor de tela (TalkBack).
 - Funciona da tela mais estreita (360dp) até tablet, retrato e paisagem.
+
+## Acesso
+- Login com **verificação em duas etapas**: depois da senha, código de 6
+  números no e-mail (10 min, 5 tentativas); "lembrar este aparelho" por 30 dias.
+- Seletor **"Sou cliente / Sou da equipe"** no topo do login (cliente e equipe
+  são acessos diferentes, cada um com o próprio cadastro).
+- **Botão de olho (mostrar/esconder) obrigatório em todo campo de senha.**
+
+## Textura
+- Fundo com **placa de circuito** (trilhas, vias e chips) nos dois temas, com
+  uma luz percorrendo as trilhas no site; nada de fundo branco ou azul liso.
+- Logo com texto claro no tema escuro.
 
 ## Carregamento e abertura
 - **Skeleton** em todo carregamento (site e APK): blocos animados no formato

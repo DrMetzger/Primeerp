@@ -1,6 +1,6 @@
 import type { Sessao, UsuarioLogado } from '@primehub/shared';
 import Constants from 'expo-constants';
-import * as SecureStore from 'expo-secure-store';
+import { armazenamento } from './armazenamento';
 
 export const URL_SERVIDOR: string = (Constants.expoConfig?.extra as { urlServidor?: string } | undefined)?.urlServidor ?? 'https://suporte.primeerp.com.br';
 
@@ -11,21 +11,27 @@ export class ErroApi extends Error {
 }
 
 export async function carregarSessao(): Promise<UsuarioLogado | null> {
-  token = await SecureStore.getItemAsync('ph_token');
-  const usuario = await SecureStore.getItemAsync('ph_usuario');
+  token = await armazenamento.ler('ph_token');
+  const usuario = await armazenamento.ler('ph_usuario');
   return token && usuario ? (JSON.parse(usuario) as UsuarioLogado) : null;
+}
+
+/** Token de "lembrar este aparelho" (verificação em duas etapas). */
+export async function dispositivoSalvo(): Promise<string | null> {
+  return armazenamento.ler('ph_dispositivo');
 }
 
 export async function guardarSessao(sessao: Sessao): Promise<void> {
   token = sessao.token;
-  await SecureStore.setItemAsync('ph_token', sessao.token);
-  await SecureStore.setItemAsync('ph_usuario', JSON.stringify(sessao.usuario));
+  if (sessao.dispositivo) await armazenamento.gravar('ph_dispositivo', sessao.dispositivo);
+  await armazenamento.gravar('ph_token', sessao.token);
+  await armazenamento.gravar('ph_usuario', JSON.stringify(sessao.usuario));
 }
 
 export async function encerrarSessao(): Promise<void> {
   token = null;
-  await SecureStore.deleteItemAsync('ph_token');
-  await SecureStore.deleteItemAsync('ph_usuario');
+  await armazenamento.apagar('ph_token');
+  await armazenamento.apagar('ph_usuario');
 }
 
 export async function api<T>(caminho: string, opcoes: RequestInit = {}): Promise<T> {

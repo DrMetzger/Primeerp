@@ -1,14 +1,120 @@
-import { corStatus, rotuloStatus, type ChamadoResumo, type Dashboard, type ListaChamados, type UsuarioLogado } from '@primehub/shared';
+import { corStatus, rotuloStatus, type ChamadoResumo, type Dashboard, type ItemRanking, type Kpi, type ListaChamados, type StatusChamado, type UsuarioLogado } from '@primehub/shared';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { FlatList, Image, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api } from './api';
+import { api, URL_SERVIDOR } from './api';
+import { AssistenteApp } from './AssistenteApp';
 import { Esqueleto, EsqueletoPainel } from './Esqueleto';
+import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
 import { TelaWeb } from './TelaWeb';
-import { Botao, Cartao, T } from './ui';
+import { Cartao, T } from './ui';
 
-type Aba = 'painel' | 'chamados' | 'conta';
+type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
+const ADMIN = ['admin', 'diretor', 'ceo'];
+
+// ---------------------------------------------------------------- Painel
+
+function CartaoKpi({ kpi, destaque }: { kpi: Kpi; destaque?: boolean }) {
+  const { tema } = useTema();
+  const v = kpi.variacao;
+  const bom = v === null || v === 0 ? null : (v > 0) === kpi.subirEhBom;
+  const conteudo = (
+    <>
+      <T style={{ fontSize: 13, color: destaque ? 'rgba(255,255,255,.88)' : tema.textoSuave }} numberOfLines={2}>{kpi.rotulo}</T>
+      <T style={{ fontSize: 30, fontWeight: '800', marginTop: 6, color: destaque ? '#FFFFFF' : tema.texto }}>
+        {kpi.valor.toLocaleString('pt-BR')}{kpi.sufixo ? <T style={{ fontSize: 17, fontWeight: '700', color: destaque ? '#FFFFFF' : tema.textoSuave }}>{kpi.sufixo}</T> : null}
+      </T>
+      {v !== null && (
+        <T style={{ fontSize: 12, fontWeight: '700', marginTop: 2, color: destaque ? '#FFFFFF' : bom === null ? tema.textoSuave : bom ? tema.sucesso : tema.perigo }}>
+          {v > 0 ? '↗ +' : v < 0 ? '↘ ' : ''}{v}% vs. 30 dias antes
+        </T>
+      )}
+    </>
+  );
+  const estilo = { flexBasis: '47%' as const, flexGrow: 1, borderRadius: 20, padding: 14, minHeight: 112 };
+  return destaque ? (
+    <LinearGradient colors={['#1E3FD8', '#0FB5C9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={estilo}>{conteudo}</LinearGradient>
+  ) : (
+    <View style={[estilo, { backgroundColor: tema.superficie, borderWidth: 1, borderColor: tema.borda }]}>{conteudo}</View>
+  );
+}
+
+function Grafico({ dados }: { dados: Dashboard }) {
+  const { tema } = useTema();
+  const [foco, setFoco] = useState<number | null>(null);
+  const maximo = Math.max(1, ...dados.semanas.flatMap((s) => [s.abertos, s.fechados]));
+  const atual = foco === null ? null : dados.semanas[foco];
+  const rotulo = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  return (
+    <Cartao>
+      <T style={{ fontWeight: '700', fontSize: 17 }}>Abertos x fechados por semana</T>
+      <View style={{ flexDirection: 'row', gap: 16, marginVertical: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: tema.grafico1 }} /><T style={{ fontSize: 14 }}>Abertos</T></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: tema.grafico2 }} /><T style={{ fontSize: 14 }}>Fechados</T></View>
+      </View>
+      <T style={{ fontSize: 14, color: tema.textoSuave, minHeight: 20 }}>
+        {atual ? `Semana de ${rotulo(atual.semana)}: ${atual.abertos} abertos · ${atual.fechados} fechados` : 'Toque numa semana para ver os números'}
+      </T>
+      <View style={{ height: 160, flexDirection: 'row', alignItems: 'flex-end', gap: 3, borderBottomWidth: 1, borderColor: tema.borda, marginTop: 6 }}>
+        {dados.semanas.map((s, i) => (
+          <Pressable key={s.semana} onPress={() => setFoco(i)} accessibilityLabel={`Semana de ${rotulo(s.semana)}: ${s.abertos} abertos, ${s.fechados} fechados`}
+            style={{ flex: 1, height: '100%', flexDirection: 'row', alignItems: 'flex-end', gap: 2, borderRadius: 6, backgroundColor: foco === i ? tema.superficieAlta : 'transparent' }}>
+            <View style={{ flex: 1, height: `${(s.abertos / maximo) * 100}%`, minHeight: s.abertos ? 3 : 0, backgroundColor: tema.grafico1, borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
+            <View style={{ flex: 1, height: `${(s.fechados / maximo) * 100}%`, minHeight: s.fechados ? 3 : 0, backgroundColor: tema.grafico2, borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
+          </Pressable>
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+        <T style={{ fontSize: 12, color: tema.textoSuave }}>{rotulo(dados.semanas[0]?.semana ?? '')}</T>
+        <T style={{ fontSize: 12, color: tema.textoSuave }}>{rotulo(dados.semanas[dados.semanas.length - 1]?.semana ?? '')}</T>
+      </View>
+    </Cartao>
+  );
+}
+
+function Situacao({ porStatus }: { porStatus: Record<StatusChamado, number> }) {
+  const { tema } = useTema();
+  const ordem: StatusChamado[] = ['aguardando_equipe', 'aberto', 'aguardando_cliente', 'fechado'];
+  const total = Math.max(1, ordem.reduce((t, s) => t + porStatus[s], 0));
+  return (
+    <Cartao style={{ gap: 10 }}>
+      <T style={{ fontWeight: '700', fontSize: 17 }}>Situação agora</T>
+      <View style={{ flexDirection: 'row', height: 14, borderRadius: 99, overflow: 'hidden', gap: 2 }}>
+        {ordem.filter((s) => porStatus[s] > 0).map((s) => <View key={s} style={{ flex: porStatus[s] / total, backgroundColor: tema[corStatus[s]] }} />)}
+      </View>
+      {ordem.map((s) => (
+        <View key={s} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: tema.superficieAlta, borderRadius: 12, paddingHorizontal: 12, minHeight: 44 }}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: tema[corStatus[s]] }} />
+          <T style={{ flex: 1, color: tema.textoSuave, fontSize: 15 }}>{rotuloStatus[s]}{s === 'fechado' ? ' (30d)' : ''}</T>
+          <T style={{ fontWeight: '800', fontSize: 17 }}>{porStatus[s]}</T>
+        </View>
+      ))}
+    </Cartao>
+  );
+}
+
+function Ranking({ titulo, itens, vazio }: { titulo: string; itens: ItemRanking[]; vazio: string }) {
+  const { tema } = useTema();
+  const maximo = Math.max(1, ...itens.map((i) => i.valor));
+  return (
+    <Cartao style={{ gap: 10 }}>
+      <T style={{ fontWeight: '700', fontSize: 17 }}>{titulo}</T>
+      {!itens.length ? <T style={{ color: tema.textoSuave }}>{vazio}</T> : itens.map((i) => (
+        <View key={`${i.id}-${i.nome}`} style={{ gap: 4 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+            <T style={{ flex: 1, fontSize: 15, fontWeight: '600' }} numberOfLines={1}>{i.nome}</T>
+            <T style={{ fontWeight: '800', fontSize: 15 }}>{i.valor}</T>
+          </View>
+          <View style={{ height: 8, borderRadius: 99, backgroundColor: tema.superficieAlta }}>
+            <View style={{ height: 8, borderRadius: 99, width: `${(i.valor / maximo) * 100}%`, backgroundColor: tema.grafico1 }} />
+          </View>
+        </View>
+      ))}
+    </Cartao>
+  );
+}
 
 function CartaoChamado({ c, aoAbrir, equipe }: { c: ChamadoResumo; aoAbrir: () => void; equipe: boolean }) {
   const { tema } = useTema();
@@ -40,77 +146,112 @@ function Painel({ aoAbrirChamado }: { aoAbrirChamado: (c: ChamadoResumo) => void
   const [dados, setDados] = useState<Dashboard | null>(null);
   const [atualizando, setAtualizando] = useState(false);
   const carregar = useCallback(() => api<Dashboard>('/api/dashboard').then(setDados).finally(() => setAtualizando(false)), []);
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => { void carregar(); const id = setInterval(() => void carregar(), 60_000); return () => clearInterval(id); }, [carregar]);
 
   if (!dados) return <View style={{ padding: 16 }}><EsqueletoPainel /></View>;
   const k = dados.kpis;
-  const cartoes = [k.pendentesNossos, k.urgentesPendentes, k.abertos30d, k.fechados30d, k.primeiraRespostaHoras, k.resolucaoHoras];
-  const maximo = Math.max(1, ...dados.semanas.flatMap((s) => [s.abertos, s.fechados]));
-
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} />}>
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} colors={[tema.primaria]} />}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-        {cartoes.map((kpi, i) => (
-          <Cartao key={kpi.rotulo} style={{ flexBasis: '47%', flexGrow: 1, backgroundColor: i === 0 ? tema.primaria : tema.superficie }}>
-            <T style={{ fontSize: 14, color: i === 0 ? tema.primariaTexto : tema.textoSuave }}>{kpi.rotulo}</T>
-            <T style={{ fontSize: 30, fontWeight: '800', marginTop: 4, color: i === 0 ? tema.primariaTexto : tema.texto }}>{kpi.valor}{kpi.sufixo ?? ''}</T>
-          </Cartao>
-        ))}
+        <CartaoKpi kpi={k.pendentesNossos} destaque />
+        <CartaoKpi kpi={k.urgentesPendentes} />
+        <CartaoKpi kpi={k.abertos30d} />
+        <CartaoKpi kpi={k.fechados30d} />
+        <CartaoKpi kpi={k.primeiraRespostaHoras} />
+        <CartaoKpi kpi={k.resolucaoHoras} />
       </View>
-      <Cartao>
-        <T style={{ fontWeight: '700', marginBottom: 4 }}>Abertos x fechados por semana</T>
-        <View style={{ flexDirection: 'row', gap: 14, marginBottom: 10 }}>
-          <T style={{ fontSize: 14, color: tema.textoSuave }}><T style={{ color: tema.grafico1 }}>■</T> Abertos</T>
-          <T style={{ fontSize: 14, color: tema.textoSuave }}><T style={{ color: tema.grafico2 }}>■</T> Fechados</T>
-        </View>
-        <View accessible accessibilityLabel={`Últimas 12 semanas: ${dados.semanas.map((s) => `${s.abertos} abertos e ${s.fechados} fechados`).join('; ')}`}
-          style={{ height: 140, flexDirection: 'row', alignItems: 'flex-end', gap: 4, borderBottomWidth: 1, borderColor: tema.borda }}>
-          {dados.semanas.map((s) => (
-            <View key={s.semana} style={{ flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: '100%' }}>
-              <View style={{ flex: 1, height: `${(s.abertos / maximo) * 100}%`, backgroundColor: tema.grafico1, borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
-              <View style={{ flex: 1, height: `${(s.fechados / maximo) * 100}%`, backgroundColor: tema.grafico2, borderTopLeftRadius: 4, borderTopRightRadius: 4 }} />
+      <Grafico dados={dados} />
+      <Situacao porStatus={dados.porStatus} />
+      <T style={{ fontWeight: '800', fontSize: 18, marginTop: 4 }}>Esperando resposta nossa há mais tempo</T>
+      {dados.maisAntigos.length === 0 ? <T style={{ color: tema.textoSuave }}>Nada pendente. 🎉</T>
+        : dados.maisAntigos.map((c) => <CartaoChamado key={c.id} c={c} equipe aoAbrir={() => aoAbrirChamado(c)} />)}
+      <Ranking titulo="Clientes que mais abriram (30 dias)" itens={dados.porCliente} vazio="Nenhum chamado nos últimos 30 dias." />
+      <Ranking titulo="Pendências por responsável" itens={dados.porResponsavel} vazio="Nenhuma pendência. 🎉" />
+      <Cartao style={{ gap: 10 }}>
+        <T style={{ fontWeight: '700', fontSize: 17 }}>Assistente (30 dias)</T>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {([['Análises', dados.ia.analises30d], ['Respondidas', dados.ia.respondidasSozinha30d], ['Sugestões', dados.ia.sugestoes30d]] as const).map(([r, v]) => (
+            <View key={r} style={{ flex: 1, alignItems: 'center', backgroundColor: tema.superficieAlta, borderRadius: 14, paddingVertical: 10 }}>
+              <T style={{ fontSize: 12, color: tema.textoSuave }}>{r}</T>
+              <T style={{ fontSize: 22, fontWeight: '800' }}>{v}</T>
             </View>
           ))}
         </View>
       </Cartao>
-      <T style={{ fontWeight: '700', fontSize: 18 }}>Esperando resposta nossa</T>
-      {dados.maisAntigos.length === 0 ? <T style={{ color: tema.textoSuave }}>Nada pendente. 🎉</T>
-        : dados.maisAntigos.map((c) => <CartaoChamado key={c.id} c={c} equipe aoAbrir={() => aoAbrirChamado(c)} />)}
+      <T style={{ textAlign: 'center', color: tema.textoSuave, fontSize: 12 }}>Atualizado às {new Date(dados.geradoEm).toLocaleTimeString('pt-BR')} · puxe para atualizar</T>
     </ScrollView>
   );
 }
 
+// ---------------------------------------------------------------- Chamados
+
 function Chamados({ equipe, aoAbrirChamado, aoNovo }: { equipe: boolean; aoAbrirChamado: (c: ChamadoResumo) => void; aoNovo: () => void }) {
   const { tema } = useTema();
   const [status, setStatus] = useState('pendentes');
+  const [busca, setBusca] = useState('');
   const [dados, setDados] = useState<ListaChamados | null>(null);
   const [atualizando, setAtualizando] = useState(false);
-  const carregar = useCallback(() => api<ListaChamados>(`/api/chamados?status=${status}`).then(setDados).finally(() => setAtualizando(false)), [status]);
-  useEffect(() => { setDados(null); void carregar(); }, [carregar]);
+  const carregar = useCallback(() => api<ListaChamados>(`/api/chamados?status=${status}&busca=${encodeURIComponent(busca)}`).then(setDados).finally(() => setAtualizando(false)), [status, busca]);
+  useEffect(() => { setDados(null); const t = setTimeout(() => void carregar(), busca ? 350 : 0); return () => clearTimeout(t); }, [carregar, busca]);
 
-  const filtros = [['pendentes', 'Pendentes'], ['aguardando_equipe', 'Aguardando nós'], ['aguardando_cliente', 'Aguardando cliente'], ['fechado', 'Fechados']] as const;
+  const filtros = [['pendentes', 'Pendentes'], ['aguardando_equipe', 'Aguardando nós'], ['aguardando_cliente', 'Aguardando cliente'], ['fechado', 'Fechados'], ['', 'Todos']] as const;
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, padding: 16, paddingBottom: 8 }} style={{ flexGrow: 0 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, gap: 10 }}>
+        <TextInput value={busca} onChangeText={setBusca} placeholder="🔍  Buscar por número, título ou cliente" placeholderTextColor={tema.textoSuave} maxFontSizeMultiplier={1.5}
+          accessibilityLabel="Buscar chamado" style={{ minHeight: 50, borderRadius: 16, borderWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie, color: tema.texto, paddingHorizontal: 16, fontSize: 16 }} />
+        {!equipe && (
+          <Pressable onPress={aoNovo} accessibilityRole="button" style={{ borderRadius: 16, overflow: 'hidden' }}>
+            <LinearGradient colors={['#1E3FD8', '#0FB5C9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
+              <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 17 }}>＋ Abrir chamado</T>
+            </LinearGradient>
+          </Pressable>
+        )}
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 10 }} style={{ flexGrow: 0 }}>
         {filtros.map(([v, r]) => (
-          <Pressable key={v} onPress={() => setStatus(v)} accessibilityRole="tab" accessibilityState={{ selected: status === v }}
-            style={{ minHeight: 44, borderRadius: 99, paddingHorizontal: 16, justifyContent: 'center', backgroundColor: status === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: tema.borda }}>
+          <Pressable key={r} onPress={() => setStatus(v)} accessibilityRole="tab" accessibilityState={{ selected: status === v }}
+            style={{ minHeight: 44, borderRadius: 99, paddingHorizontal: 16, justifyContent: 'center', backgroundColor: status === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: status === v ? tema.primaria : tema.borda }}>
             <T style={{ fontWeight: '700', fontSize: 14, color: status === v ? tema.primariaTexto : tema.textoSuave }}>{r}</T>
           </Pressable>
         ))}
       </ScrollView>
-      {!equipe && <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}><Botao titulo="+ Abrir chamado" primario onPress={aoNovo} /></View>}
       {!dados ? (
-        <View style={{ padding: 16, gap: 10 }}>{[0, 1, 2, 3, 4].map((i) => <Esqueleto key={i} altura={96} />)}</View>
+        <View style={{ padding: 16, gap: 10 }}>{[0, 1, 2, 3, 4].map((i) => <Esqueleto key={i} altura={110} />)}</View>
       ) : (
-        <FlatList data={dados.itens} keyExtractor={(c) => String(c.id)} contentContainerStyle={{ padding: 16, paddingTop: 4 }}
-          refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} />}
+        <FlatList data={dados.itens} keyExtractor={(c) => String(c.id)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
+          ListHeaderComponent={<T style={{ color: tema.textoSuave, fontSize: 14, marginBottom: 8 }}>{dados.total} chamado(s)</T>}
+          refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} colors={[tema.primaria]} />}
           ListEmptyComponent={<T style={{ color: tema.textoSuave, textAlign: 'center', marginTop: 40 }}>Nenhum chamado por aqui.</T>}
           renderItem={({ item }) => <CartaoChamado c={item} equipe={equipe} aoAbrir={() => aoAbrirChamado(item)} />} />
       )}
     </View>
   );
 }
+
+// ---------------------------------------------------------------- Menu
+
+interface ItemMenu { icone: string; rotulo: string; destino?: string; acao?: () => void; perigo?: boolean }
+
+function Menu({ itens }: { itens: ItemMenu[] }) {
+  const { tema } = useTema();
+  return (
+    <ScrollView contentContainerStyle={{ padding: 16, flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+      {itens.map((i) => (
+        <Pressable key={i.rotulo} onPress={i.acao} accessibilityRole="button" accessibilityLabel={i.rotulo}
+          style={({ pressed }) => ({ flexBasis: '47%', flexGrow: 1, minHeight: 104, borderRadius: 20, padding: 14, gap: 8, justifyContent: 'center',
+            backgroundColor: tema.superficie, borderWidth: 1, borderColor: i.perigo ? tema.perigo : tema.borda, opacity: pressed ? 0.8 : 1 })}>
+          <View style={{ width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: i.perigo ? 'transparent' : tema.superficieAlta }}>
+            <T style={{ fontSize: 24 }}>{i.icone}</T>
+          </View>
+          <T style={{ fontWeight: '700', fontSize: 16, color: i.perigo ? tema.perigo : tema.texto }}>{i.rotulo}</T>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
+// ---------------------------------------------------------------- Tela principal
 
 export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: () => void }) {
   const { tema, alternar, nome } = useTema();
@@ -127,36 +268,70 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
 
   if (web) return <TelaWeb url={web.url} titulo={web.titulo} aoFechar={() => setWeb(null)} />;
 
-  const abas: [Aba, string, string][] = equipe ? [['painel', '📊', 'Painel'], ['chamados', '🎧', 'Chamados'], ['conta', '👤', 'Conta']] : [['chamados', '🎧', 'Chamados'], ['conta', '👤', 'Conta']];
+  const modulo = (icone: string, rotulo: string, destino: string): ItemMenu => ({ icone, rotulo, acao: () => void abrirClassico(destino, rotulo) });
+  const itensMenu: ItemMenu[] = equipe ? [
+    modulo('👥', 'Clientes', '/clientes.php'),
+    modulo('📅', 'Agenda', '/agenda.php'),
+    modulo('📈', 'Relatórios', '/relatorios.php'),
+    modulo('💻', 'Fontes ADVPL', '/fontes.php'),
+    ...(ADMIN.includes(usuario.perfil ?? '') ? [modulo('🧑‍💼', 'Usuários', '/usuarios.php'), modulo('⚙️', 'Configurações', '/configuracoes.php')] : []),
+    modulo('👤', 'Meu perfil', '/perfil.php'),
+    { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
+    { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
+  ] : [
+    modulo('📅', 'Calendário', '/portal/calendario.php'),
+    modulo('🎬', 'Videoaulas', '/portal/videoaulas.php'),
+    modulo('💻', 'Fontes ADVPL', '/portal/fontes_advpl.php'),
+    modulo('👥', 'Minha equipe', '/portal/equipe.php'),
+    modulo('👤', 'Meu perfil', '/portal/perfil.php'),
+    { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
+    { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
+  ];
+
+  const abas: [Aba, string, string][] = [
+    ...(equipe ? [['painel', '📊', 'Painel'] as [Aba, string, string]] : []),
+    ['chamados', '🎧', 'Chamados'],
+    ['assistente', '🤖', 'Assistente'],
+    ['menu', '☰', 'Menu'],
+  ];
+  const titulos: Record<Aba, string> = { painel: 'Dashboard', chamados: equipe ? 'Chamados' : 'Meus chamados', assistente: 'Assistente PrimeERP', menu: 'Menu' };
+  const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
 
   return (
-    <View style={{ flex: 1, backgroundColor: tema.fundo }}>
-      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 10, borderBottomWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie }}>
-        <T style={{ fontSize: 22, fontWeight: '800' }} accessibilityRole="header">{aba === 'painel' ? 'Painel' : aba === 'chamados' ? (equipe ? 'Chamados' : 'Meus chamados') : 'Minha conta'}</T>
-        <T style={{ color: tema.textoSuave, fontSize: 14 }} numberOfLines={1}>{usuario.nome}{usuario.empresa ? ` · ${usuario.empresa}` : ''}</T>
+    <FundoCircuito>
+      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderColor: tema.borda,
+        backgroundColor: nome === 'escuro' ? 'rgba(15,22,49,0.92)' : 'rgba(255,255,255,0.94)', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Image source={require('../assets/icone-p.png')} style={{ width: 30, height: 36 }} resizeMode="contain" />
+        <View style={{ flex: 1 }}>
+          <T style={{ fontSize: 21, fontWeight: '800' }} accessibilityRole="header" numberOfLines={1}>{titulos[aba]}</T>
+          <T style={{ color: tema.textoSuave, fontSize: 13 }} numberOfLines={1}>{usuario.nome}{usuario.empresa ? ` · ${usuario.empresa}` : ' · Central da equipe'}</T>
+        </View>
+        {usuario.foto ? (
+          <Image source={{ uri: `${URL_SERVIDOR}/${usuario.foto.replace(/^\//, '')}` }} style={{ width: 40, height: 40, borderRadius: 20 }} accessibilityLabel="Sua foto" />
+        ) : (
+          <LinearGradient colors={['#1E3FD8', '#0FB5C9']} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}>
+            <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>{iniciais}</T>
+          </LinearGradient>
+        )}
       </View>
       <View style={{ flex: 1 }}>
         {aba === 'painel' && <Painel aoAbrirChamado={abrirChamado} />}
         {aba === 'chamados' && <Chamados equipe={equipe} aoAbrirChamado={abrirChamado} aoNovo={() => void abrirClassico('/portal/chamados.php', 'Abrir chamado')} />}
-        {aba === 'conta' && (
-          <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-            <Botao titulo={nome === 'escuro' ? '☀️  Usar tema claro' : '🌙  Usar tema escuro'} onPress={alternar} />
-            <Botao titulo="Meu perfil" onPress={() => void abrirClassico(equipe ? '/perfil.php' : '/portal/perfil.php', 'Meu perfil')} />
-            {equipe && <Botao titulo="Clientes" onPress={() => void abrirClassico('/clientes.php', 'Clientes')} />}
-            {equipe && <Botao titulo="Agenda" onPress={() => void abrirClassico('/agenda.php', 'Agenda')} />}
-            <Botao titulo="Sair" onPress={aoSair} style={{ backgroundColor: 'transparent', borderWidth: 1, borderColor: tema.perigo }} />
-          </ScrollView>
-        )}
+        {aba === 'assistente' && <AssistenteApp usuario={usuario} />}
+        {aba === 'menu' && <Menu itens={itensMenu} />}
       </View>
-      <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie, paddingBottom: insets.bottom }}>
+      <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: tema.borda,
+        backgroundColor: nome === 'escuro' ? 'rgba(15,22,49,0.96)' : 'rgba(255,255,255,0.97)', paddingBottom: insets.bottom }}>
         {abas.map(([id, icone, rotulo]) => (
           <Pressable key={id} onPress={() => setAba(id)} accessibilityRole="tab" accessibilityState={{ selected: aba === id }} accessibilityLabel={rotulo}
-            style={{ flex: 1, minHeight: 60, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-            <T style={{ fontSize: 22, opacity: aba === id ? 1 : 0.55 }}>{icone}</T>
-            <T style={{ fontSize: 13, fontWeight: '700', color: aba === id ? tema.primaria : tema.textoSuave }}>{rotulo}</T>
+            style={{ flex: 1, minHeight: 62, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+            <View style={{ paddingHorizontal: 16, paddingVertical: 3, borderRadius: 99, backgroundColor: aba === id ? tema.superficieAlta : 'transparent' }}>
+              <T style={{ fontSize: 21, opacity: aba === id ? 1 : 0.6 }}>{icone}</T>
+            </View>
+            <T style={{ fontSize: 12, fontWeight: '700', color: aba === id ? tema.primaria : tema.textoSuave }}>{rotulo}</T>
           </Pressable>
         ))}
       </View>
-    </View>
+    </FundoCircuito>
   );
 }

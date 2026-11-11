@@ -79,7 +79,7 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
   const menu = (
     <nav aria-label="Menu principal" className="flex h-full flex-col">
       <div className="flex items-center gap-3 px-5 pb-6 pt-[max(1.25rem,env(safe-area-inset-top))]">
-        <img src="/marca/primeerp-p.png" alt="" className="h-9 w-auto" />
+        <img src="/marca/primeerp-p.png" alt="" className="h-9 w-auto drop-shadow-[0_0_10px_rgba(47,211,229,.45)]" />
         <div>
           <p className="text-lg font-bold leading-tight text-texto">Prime Hub</p>
           <p className="text-xs text-suave">{tipo === 'equipe' ? 'Central da equipe' : usuario?.empresa ?? 'Central do cliente'}</p>

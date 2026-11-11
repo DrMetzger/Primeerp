@@ -8,11 +8,32 @@ export interface PedidoLogin {
   tipo: TipoLogin;
   email: string;
   senha: string;
+  /** Token de "lembrar este aparelho" (pula o código por 30 dias). */
+  dispositivo?: string;
 }
 
 export interface Sessao {
   token: string;
   usuario: UsuarioLogado;
+  /** Quando a pessoa marcou "lembrar este aparelho". */
+  dispositivo?: string;
+}
+
+/** Verificação em duas etapas: senha certa -> código enviado por e-mail. */
+export interface DesafioCodigo {
+  etapa: 'codigo';
+  desafio: string;
+  /** E-mail mascarado pra onde o código foi (ex.: k***s@primeerp.com.br). */
+  destino: string;
+}
+
+export type RespostaLogin = Sessao | DesafioCodigo;
+
+export interface PedidoCodigo {
+  desafio: string;
+  codigo: string;
+  lembrar: boolean;
+  aparelho: string;
 }
 
 export interface UsuarioLogado {

@@ -1,7 +1,10 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { exigirLogin, login, type Variaveis } from './auth';
+import { emitirSessao, exigirLogin, verificarCredenciais, type Variaveis } from './auth';
+import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositivo } from './dois-fatores';
+import { primeira } from './db';
+import type { UsuarioLogado } from '@primehub/shared';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -22,14 +25,51 @@ const esquemaLogin = z.object({
   tipo: z.enum(['equipe', 'cliente']),
   email: z.string().email().max(200),
   senha: z.string().min(1).max(200),
+  dispositivo: z.string().max(100).optional(),
 });
 
 app.post('/api/login', async (c) => {
   const dados = esquemaLogin.safeParse(await c.req.json().catch(() => null));
   if (!dados.success) return c.json({ erro: 'Preencha e-mail e senha.' }, 400);
-  const sessao = await login(dados.data);
-  if (!sessao) return c.json({ erro: 'E-mail ou senha incorretos.' }, 401);
+  const { dispositivo, ...credenciais } = dados.data;
+  const usuario = await verificarCredenciais(credenciais);
+  if (!usuario) return c.json({ erro: 'E-mail ou senha incorretos.' }, 401);
+  // Aparelho já lembrado: entra direto. Senão: código no e-mail.
+  if (await dispositivoConfiavel(usuario, dispositivo)) return c.json(await emitirSessao(usuario));
+  try {
+    return c.json({ etapa: 'codigo', ...(await iniciarDesafio(usuario)) });
+  } catch (e) {
+    return c.json({ erro: e instanceof Error ? e.message : 'Não foi possível enviar o código.' }, 503);
+  }
+});
+
+const esquemaCodigo = z.object({
+  desafio: z.string().regex(/^[0-9a-f]{32}$/),
+  codigo: z.string().min(6).max(12),
+  lembrar: z.boolean().default(false),
+  aparelho: z.string().max(200).default(''),
+});
+
+app.post('/api/login/codigo', async (c) => {
+  const dados = esquemaCodigo.safeParse(await c.req.json().catch(() => null));
+  if (!dados.success) return c.json({ erro: 'Digite os 6 números do código.' }, 400);
+  const r = await conferirCodigo(dados.data.desafio, dados.data.codigo);
+  if ('erro' in r) return c.json(r, 401);
+  const sessao = await emitirSessao(r.usuario);
+  if (dados.data.lembrar) sessao.dispositivo = await lembrarDispositivo(r.usuario, dados.data.aparelho || (c.req.header('user-agent') ?? ''));
   return c.json(sessao);
+});
+
+app.post('/api/login/reenviar', async (c) => {
+  const corpo = z.object({ desafio: z.string().regex(/^[0-9a-f]{32}$/) }).safeParse(await c.req.json().catch(() => null));
+  if (!corpo.success) return c.json({ erro: 'Entre de novo.' }, 400);
+  const linha = await primeira<{ usuario_json: string }>('SELECT usuario_json FROM login_2fa WHERE id = ? AND usado_em IS NULL AND criado_em > NOW() - INTERVAL 30 MINUTE', [corpo.data.desafio]);
+  if (!linha) return c.json({ erro: 'Entre de novo.' }, 400);
+  try {
+    return c.json({ etapa: 'codigo', ...(await iniciarDesafio(JSON.parse(linha.usuario_json) as UsuarioLogado)) });
+  } catch (e) {
+    return c.json({ erro: e instanceof Error ? e.message : 'Não foi possível reenviar.' }, 503);
+  }
 });
 
 app.get('/api/eu', exigirLogin(), (c) => c.json(c.get('usuario')));
