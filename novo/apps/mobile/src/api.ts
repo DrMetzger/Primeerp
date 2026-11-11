@@ -43,3 +43,30 @@ export async function api<T>(caminho: string, opcoes: RequestInit = {}): Promise
   if (!r.ok) throw new ErroApi(corpo.erro ?? 'Não foi possível falar com o servidor.', r.status);
   return corpo;
 }
+
+/** Ações que reaproveitam as regras do PHP (avisos, anexos, fila da IA). */
+export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: string[] }>(arquivo: string, campos: Record<string, string>): Promise<T> {
+  const corpo = new FormData();
+  for (const [k, v] of Object.entries(campos)) corpo.append(k, v);
+  const r = await fetch(`${URL_SERVIDOR}/${arquivo}`, {
+    method: 'POST', body: corpo,
+    headers: { 'X-PrimeHub': '1', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  const dados = (await r.json().catch(() => ({}))) as T & { erro?: string };
+  if (!r.ok || dados.erro) throw new ErroApi(dados.erro ?? 'Não deu certo agora. Tente de novo em instantes.', r.status);
+  return dados;
+}
+
+/** Relatórios (JSON do PHP), com o mesmo login. */
+export async function relatorioJson<T>(params: Record<string, string>): Promise<T> {
+  const r = await fetch(`${URL_SERVIDOR}/relatorios.php?${new URLSearchParams({ ...params, formato: 'json' })}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) throw new ErroApi('Relatórios são só para admin, diretoria e CEO.', r.status);
+  return (await r.json()) as T;
+}
+
+export function arquivoPublico(caminho: string | null | undefined): string | null {
+  if (!caminho) return null;
+  return /^https?:/.test(caminho) ? caminho : `${URL_SERVIDOR}/${caminho.replace(/^\//, '')}`;
+}

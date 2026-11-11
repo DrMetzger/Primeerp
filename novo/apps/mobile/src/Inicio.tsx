@@ -1,7 +1,7 @@
 import { corStatus, rotuloStatus, type ChamadoResumo, type Dashboard, type ItemRanking, type Kpi, type ListaChamados, type StatusChamado, type UsuarioLogado } from '@primehub/shared';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Image, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
+import { BackHandler, FlatList, Image, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, URL_SERVIDOR } from './api';
 import { AssistenteApp } from './AssistenteApp';
@@ -9,9 +9,11 @@ import { Esqueleto, EsqueletoPainel } from './Esqueleto';
 import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
 import { TelaWeb } from './TelaWeb';
+import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
 import { Cartao, T } from './ui';
 
 type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
+type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'clientes' } | { tipo: 'relatorios' } | { tipo: 'novoChamado'; clienteId?: number };
 const ADMIN = ['admin', 'diretor', 'ceo'];
 
 // ---------------------------------------------------------------- Painel
@@ -131,10 +133,15 @@ function CartaoChamado({ c, aoAbrir, equipe }: { c: ChamadoResumo; aoAbrir: () =
           </View>
           {(c.prioridade === 'urgente' || c.prioridade === 'alta') && <T style={{ color: tema.perigo, fontWeight: '700', fontSize: 13 }}>🔥 {c.prioridade === 'urgente' ? 'Urgente' : 'Alta'}</T>}
         </View>
-        <T style={{ fontWeight: '700', fontSize: 17 }} numberOfLines={3}>{c.titulo}</T>
-        <T style={{ color: tema.textoSuave, fontSize: 14 }} numberOfLines={1}>
-          {equipe ? `${c.cliente ?? 'Sem cliente'}${c.responsavel ? ` · ${c.responsavel}` : ''}` : `Aberto em ${c.criadoEm.slice(8, 10)}/${c.criadoEm.slice(5, 7)}/${c.criadoEm.slice(0, 4)}`}
-        </T>
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+          {equipe && <LogoEmpresa nome={c.cliente} logo={c.clienteLogo} tamanho={42} />}
+          <View style={{ flex: 1, gap: 2 }}>
+            <T style={{ fontWeight: '700', fontSize: 17 }} numberOfLines={3}>{c.titulo}</T>
+            <T style={{ color: tema.textoSuave, fontSize: 14 }} numberOfLines={1}>
+              {equipe ? `${c.cliente ?? 'Sem cliente'}${c.responsavel ? ` · ${c.responsavel}` : ''}` : `Aberto em ${c.criadoEm.slice(8, 10)}/${c.criadoEm.slice(5, 7)}/${c.criadoEm.slice(0, 4)}`}
+            </T>
+          </View>
+        </View>
         {equipe && c.horasEsperando !== null && <T style={{ color: tema.textoSuave, fontSize: 14 }}>⏱ esperando há {c.horasEsperando < 24 ? `${c.horasEsperando}h` : `${Math.floor(c.horasEsperando / 24)}d`}</T>}
       </Cartao>
     </Pressable>
@@ -200,10 +207,10 @@ function Chamados({ equipe, aoAbrirChamado, aoNovo }: { equipe: boolean; aoAbrir
       <View style={{ paddingHorizontal: 16, paddingTop: 12, gap: 10 }}>
         <TextInput value={busca} onChangeText={setBusca} placeholder="🔍  Buscar por número, título ou cliente" placeholderTextColor={tema.textoSuave} maxFontSizeMultiplier={1.5}
           accessibilityLabel="Buscar chamado" style={{ minHeight: 50, borderRadius: 16, borderWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie, color: tema.texto, paddingHorizontal: 16, fontSize: 16 }} />
-        {!equipe && (
+        {(
           <Pressable onPress={aoNovo} accessibilityRole="button" style={{ borderRadius: 16, overflow: 'hidden' }}>
             <LinearGradient colors={['#1E3FD8', '#0FB5C9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center' }}>
-              <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 17 }}>＋ Abrir chamado</T>
+              <T style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 17 }}>{equipe ? '＋ Novo chamado' : '＋ Abrir chamado'}</T>
             </LinearGradient>
           </Pressable>
         )}
@@ -259,20 +266,32 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   const equipe = usuario.tipo === 'equipe';
   const [aba, setAba] = useState<Aba>(equipe ? 'painel' : 'chamados');
   const [web, setWeb] = useState<{ url: string; titulo: string } | null>(null);
+  const [pilha, setPilha] = useState<Tela[]>([]);
+  const ir = (t: Tela) => setPilha((p) => [...p, t]);
+  const voltar = useCallback(() => setPilha((p) => p.slice(0, -1)), []);
+
+  // Botão "voltar" do Android volta uma tela em vez de fechar o app.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (pilha.length) { voltar(); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [pilha.length, voltar]);
 
   async function abrirClassico(destino: string, titulo: string) {
     const { url } = await api<{ url: string }>('/api/classico', { method: 'POST', body: JSON.stringify({ destino }) });
     setWeb({ url, titulo });
   }
-  const abrirChamado = (c: ChamadoResumo) => void abrirClassico(equipe ? `/cliente.php?id=${c.clienteId ?? 0}#chamados` : `/portal/chamado.php?id=${c.id}`, `Chamado #${c.id}`);
+  const abrirChamado = (c: ChamadoResumo) => ir({ tipo: 'chamado', id: c.id });
 
   if (web) return <TelaWeb url={web.url} titulo={web.titulo} aoFechar={() => setWeb(null)} />;
 
   const modulo = (icone: string, rotulo: string, destino: string): ItemMenu => ({ icone, rotulo, acao: () => void abrirClassico(destino, rotulo) });
   const itensMenu: ItemMenu[] = equipe ? [
-    modulo('👥', 'Clientes', '/clientes.php'),
+    { icone: '👥', rotulo: 'Clientes', acao: () => ir({ tipo: 'clientes' }) },
     modulo('📅', 'Agenda', '/agenda.php'),
-    modulo('📈', 'Relatórios', '/relatorios.php'),
+    ...(ADMIN.includes(usuario.perfil ?? '') ? [{ icone: '📈', rotulo: 'Relatórios', acao: () => ir({ tipo: 'relatorios' }) }] : []),
     modulo('💻', 'Fontes ADVPL', '/fontes.php'),
     ...(ADMIN.includes(usuario.perfil ?? '') ? [modulo('🧑‍💼', 'Usuários', '/usuarios.php'), modulo('⚙️', 'Configurações', '/configuracoes.php')] : []),
     modulo('👤', 'Meu perfil', '/perfil.php'),
@@ -295,15 +314,23 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
     ['menu', '☰', 'Menu'],
   ];
   const titulos: Record<Aba, string> = { painel: 'Dashboard', chamados: equipe ? 'Chamados' : 'Meus chamados', assistente: 'Assistente PrimeERP', menu: 'Menu' };
+  const atual = pilha[pilha.length - 1];
+  const tituloAtual = !atual ? titulos[aba] : atual.tipo === 'chamado' ? `Chamado #${atual.id}` : atual.tipo === 'cliente' ? 'Cliente'
+    : atual.tipo === 'clientes' ? 'Clientes' : atual.tipo === 'relatorios' ? 'Relatórios' : equipe ? 'Novo chamado' : 'Abrir chamado';
   const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
 
   return (
     <FundoCircuito>
       <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderColor: tema.borda,
         backgroundColor: nome === 'escuro' ? 'rgba(15,22,49,0.92)' : 'rgba(255,255,255,0.94)', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Image source={require('../assets/icone-p.png')} style={{ width: 30, height: 36 }} resizeMode="contain" />
+        {atual ? (
+          <Pressable onPress={voltar} accessibilityRole="button" accessibilityLabel="Voltar" hitSlop={8}
+            style={{ width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: tema.superficieAlta }}>
+            <T style={{ fontSize: 22, fontWeight: '800' }}>←</T>
+          </Pressable>
+        ) : <Image source={require('../assets/icone-p.png')} style={{ width: 30, height: 36 }} resizeMode="contain" />}
         <View style={{ flex: 1 }}>
-          <T style={{ fontSize: 21, fontWeight: '800' }} accessibilityRole="header" numberOfLines={1}>{titulos[aba]}</T>
+          <T style={{ fontSize: 21, fontWeight: '800' }} accessibilityRole="header" numberOfLines={1}>{tituloAtual}</T>
           <T style={{ color: tema.textoSuave, fontSize: 13 }} numberOfLines={1}>{usuario.nome}{usuario.empresa ? ` · ${usuario.empresa}` : ' · Central da equipe'}</T>
         </View>
         {usuario.foto ? (
@@ -314,16 +341,26 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
           </LinearGradient>
         )}
       </View>
-      <View style={{ flex: 1 }}>
+      {atual && (
+        <View style={{ flex: 1 }}>
+          {atual.tipo === 'chamado' && <TelaChamado key={atual.id} id={atual.id} equipe={equipe} aoAbrirCliente={(id) => ir({ tipo: 'cliente', id })} />}
+          {atual.tipo === 'cliente' && <TelaCliente key={atual.id} id={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} aoNovoChamado={() => ir({ tipo: 'novoChamado', clienteId: atual.id })} />}
+          {atual.tipo === 'clientes' && <TelaClientes aoAbrir={(id) => ir({ tipo: 'cliente', id })} />}
+          {atual.tipo === 'relatorios' && <TelaRelatorios />}
+          {atual.tipo === 'novoChamado' && <TelaNovoChamado equipe={equipe} {...(atual.clienteId ? { clienteInicial: atual.clienteId } : {})}
+            aoCriar={(id) => setPilha((p) => [...p.slice(0, -1), ...(id ? [{ tipo: 'chamado' as const, id }] : [])])} />}
+        </View>
+      )}
+      <View style={{ flex: 1, display: atual ? 'none' : 'flex' }}>
         {aba === 'painel' && <Painel aoAbrirChamado={abrirChamado} />}
-        {aba === 'chamados' && <Chamados equipe={equipe} aoAbrirChamado={abrirChamado} aoNovo={() => void abrirClassico('/portal/chamados.php', 'Abrir chamado')} />}
+        {aba === 'chamados' && <Chamados equipe={equipe} aoAbrirChamado={abrirChamado} aoNovo={() => ir({ tipo: 'novoChamado' })} />}
         {aba === 'assistente' && <AssistenteApp usuario={usuario} />}
         {aba === 'menu' && <Menu itens={itensMenu} />}
       </View>
       <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: tema.borda,
         backgroundColor: nome === 'escuro' ? 'rgba(15,22,49,0.96)' : 'rgba(255,255,255,0.97)', paddingBottom: insets.bottom }}>
         {abas.map(([id, icone, rotulo]) => (
-          <Pressable key={id} onPress={() => setAba(id)} accessibilityRole="tab" accessibilityState={{ selected: aba === id }} accessibilityLabel={rotulo}
+          <Pressable key={id} onPress={() => { setPilha([]); setAba(id); }} accessibilityRole="tab" accessibilityState={{ selected: aba === id }} accessibilityLabel={rotulo}
             style={{ flex: 1, minHeight: 62, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
             <View style={{ paddingHorizontal: 16, paddingVertical: 3, borderRadius: 99, backgroundColor: aba === id ? tema.superficieAlta : 'transparent' }}>
               <T style={{ fontSize: 21, opacity: aba === id ? 1 : 0.6 }}>{icone}</T>

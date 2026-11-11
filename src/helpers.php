@@ -1917,7 +1917,15 @@ function sessao_pelo_login_novo(\PDO $pdo): void
         return;
     }
     $token = $_COOKIE['ph_token'] ?? '';
-    if ($token === '' && preg_match('/^Bearer\s+(\S+)$/', $_SERVER['HTTP_AUTHORIZATION'] ?? '', $m)) {
+    $cabecalhoAuth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if ($cabecalhoAuth === '' && function_exists('getallheaders')) {
+        foreach (getallheaders() as $nomeCab => $valorCab) {
+            if (strcasecmp($nomeCab, 'Authorization') === 0) {
+                $cabecalhoAuth = $valorCab;
+            }
+        }
+    }
+    if ($token === '' && preg_match('/^Bearer\s+(\S+)$/', $cabecalhoAuth, $m)) {
         $token = $m[1];
     }
     $partes = explode('.', $token);
