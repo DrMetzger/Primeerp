@@ -71,6 +71,7 @@ export interface ChamadoResumo {
   status: StatusChamado;
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   cliente: string | null;
+  clienteId: number | null;
   responsavel: string | null;
   criadoEm: string;
   atualizadoEm: string;

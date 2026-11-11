@@ -13,7 +13,7 @@ function kpi(rotulo: string, valor: number, anterior: number | null, subirEhBom:
 
 /** Linha de chamado + horas esperando resposta nossa (última msg do cliente sem resposta). */
 export const SQL_CHAMADO_RESUMO = `
-  SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome AS cliente, u.nome AS responsavel,
+  SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome AS cliente, ch.cliente_id AS clienteId, u.nome AS responsavel,
          ch.criado_em AS criadoEm, ch.atualizado_em AS atualizadoEm,
          CASE WHEN ch.status IN ('aberto','aguardando_equipe') THEN
            TIMESTAMPDIFF(HOUR, COALESCE((SELECT MAX(r.criado_em) FROM chamado_respostas r WHERE r.chamado_id = ch.id AND r.autor_tipo = 'cliente'), ch.criado_em), NOW())

@@ -1,0 +1,159 @@
+'use client';
+
+import type { UsuarioLogado } from '@primehub/shared';
+import {
+  BarChart3, CalendarDays, ChevronRight, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
+  Settings, UserCircle, Users, UsersRound, Video, X, type LucideIcon,
+} from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { type ReactNode, useEffect, useState } from 'react';
+import { abrirClassico } from '@/lib/api';
+import { sair, usuarioSalvo } from '@/lib/sessao';
+import { TemaBotao } from './tema-botao';
+
+/** Item do menu: rota nova (href) ou tela clássica do PHP (classico). */
+interface ItemMenu { rotulo: string; icone: LucideIcon; href?: string; classico?: string; somenteAdmin?: boolean }
+
+const MENU_EQUIPE: ItemMenu[] = [
+  { rotulo: 'Dashboard', icone: LayoutDashboard, href: '/painel' },
+  { rotulo: 'Chamados', icone: LifeBuoy, href: '/painel/chamados' },
+  { rotulo: 'Clientes', icone: Users, classico: '/clientes.php' },
+  { rotulo: 'Agenda', icone: CalendarDays, classico: '/agenda.php' },
+  { rotulo: 'Relatórios', icone: BarChart3, classico: '/relatorios.php' },
+  { rotulo: 'Fontes ADVPL', icone: Code2, classico: '/fontes.php' },
+  { rotulo: 'Usuários', icone: UsersRound, classico: '/usuarios.php', somenteAdmin: true },
+  { rotulo: 'Configurações', icone: Settings, classico: '/configuracoes.php', somenteAdmin: true },
+];
+
+const MENU_CLIENTE: ItemMenu[] = [
+  { rotulo: 'Meus chamados', icone: LifeBuoy, href: '/cliente' },
+  { rotulo: 'Calendário', icone: CalendarDays, classico: '/portal/calendario.php' },
+  { rotulo: 'Videoaulas', icone: Video, classico: '/portal/videoaulas.php' },
+  { rotulo: 'Fontes ADVPL', icone: Code2, classico: '/portal/fontes_advpl.php' },
+  { rotulo: 'Minha equipe', icone: UsersRound, classico: '/portal/equipe.php' },
+];
+
+const ADMIN = ['admin', 'diretor', 'ceo'];
+
+function Avatar({ usuario }: { usuario: UsuarioLogado }) {
+  const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
+  return usuario.foto
+    ? <img src={`/${usuario.foto.replace(/^\//, '')}`} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-borda" />
+    : <span aria-hidden="true" className="gradiente-marca flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white">{iniciais}</span>;
+}
+
+export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cliente'; titulo: string; children: ReactNode; acoes?: ReactNode }) {
+  const caminho = usePathname();
+  const [usuario, setUsuario] = useState<UsuarioLogado | null>(null);
+  const [aberto, setAberto] = useState(false);
+  const [abrindo, setAbrindo] = useState<string | null>(null);
+
+  useEffect(() => {
+    const u = usuarioSalvo();
+    if (!u || u.tipo !== tipo) {
+      location.replace(tipo === 'equipe' ? '/login' : '/portal');
+      return;
+    }
+    setUsuario(u);
+  }, [tipo]);
+
+  // Gaveta aberta no celular: Esc fecha e a página atrás não rola.
+  useEffect(() => {
+    if (!aberto) return;
+    const fechar = (e: KeyboardEvent) => { if (e.key === 'Escape') setAberto(false); };
+    document.addEventListener('keydown', fechar);
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', fechar); document.body.style.overflow = ''; };
+  }, [aberto]);
+
+  const itens = (tipo === 'equipe' ? MENU_EQUIPE : MENU_CLIENTE).filter((i) => !i.somenteAdmin || ADMIN.includes(usuario?.perfil ?? ''));
+
+  async function irPara(item: ItemMenu) {
+    if (item.href) { location.href = item.href; return; }
+    if (!item.classico) return;
+    setAbrindo(item.rotulo);
+    try { await abrirClassico(item.classico); } catch { setAbrindo(null); }
+  }
+
+  const menu = (
+    <nav aria-label="Menu principal" className="flex h-full flex-col">
+      <div className="flex items-center gap-3 px-5 pb-6 pt-[max(1.25rem,env(safe-area-inset-top))]">
+        <img src="/marca/primeerp-p.png" alt="" className="h-9 w-auto" />
+        <div>
+          <p className="text-lg font-bold leading-tight text-texto">Prime Hub</p>
+          <p className="text-xs text-suave">{tipo === 'equipe' ? 'Central da equipe' : usuario?.empresa ?? 'Central do cliente'}</p>
+        </div>
+      </div>
+      <ul className="flex-1 space-y-1 overflow-y-auto px-3">
+        {itens.map((item) => {
+          const ativo = item.href !== undefined && (item.href === caminho || (item.href !== '/painel' && caminho.startsWith(item.href)));
+          const Icone = item.icone;
+          return (
+            <li key={item.rotulo}>
+              <button type="button" onClick={() => void irPara(item)} aria-current={ativo ? 'page' : undefined}
+                className={`toque group flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium transition ${ativo ? 'gradiente-marca text-white shadow-md' : 'text-suave hover:bg-superficie-alta hover:text-texto'}`}>
+                <Icone size={20} aria-hidden="true" />
+                <span className="flex-1">{item.rotulo}</span>
+                {abrindo === item.rotulo ? <span className="text-xs">abrindo…</span> : item.classico ? <ChevronRight size={16} className="opacity-40" aria-hidden="true" /> : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {usuario && (
+        <div className="border-t border-borda p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="flex items-center gap-3 rounded-xl p-2">
+            <Avatar usuario={usuario} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-texto">{usuario.nome}</p>
+              <p className="truncate text-xs text-suave">{usuario.email}</p>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => void irPara({ rotulo: 'Perfil', icone: UserCircle, classico: tipo === 'equipe' ? '/perfil.php' : '/portal/perfil.php' })}
+              className="toque flex items-center justify-center gap-2 rounded-xl border border-borda text-sm text-texto hover:bg-superficie-alta">
+              <UserCircle size={18} aria-hidden="true" /> Perfil
+            </button>
+            <button type="button" onClick={sair} className="toque flex items-center justify-center gap-2 rounded-xl border border-borda text-sm text-perigo hover:bg-perigo/10">
+              <LogOut size={18} aria-hidden="true" /> Sair
+            </button>
+          </div>
+        </div>
+      )}
+    </nav>
+  );
+
+  return (
+    <div className="fundo-marca min-h-dvh">
+      {/* Menu lateral fixo no computador */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-borda bg-superficie/85 backdrop-blur-xl lg:block">{menu}</aside>
+
+      {/* Gaveta no celular */}
+      {aberto && (
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <button type="button" aria-label="Fechar menu" className="absolute inset-0 bg-black/50" onClick={() => setAberto(false)} />
+          <aside className="absolute inset-y-0 left-0 w-[85vw] max-w-80 bg-superficie shadow-2xl">
+            <button type="button" onClick={() => setAberto(false)} aria-label="Fechar menu" className="toque absolute right-2 top-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-center text-suave">
+              <X size={22} />
+            </button>
+            {menu}
+          </aside>
+        </div>
+      )}
+
+      <div className="lg:pl-72">
+        <header className="sticky top-0 z-20 border-b border-borda bg-fundo/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+          <div className="flex items-center gap-3 px-4 py-3 sm:px-6">
+            <button type="button" onClick={() => setAberto(true)} className="toque flex items-center justify-center rounded-xl text-texto lg:hidden" aria-label="Abrir menu">
+              <Menu size={24} />
+            </button>
+            <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-texto">{titulo}</h1>
+            {acoes}
+            <TemaBotao />
+          </div>
+        </header>
+        <main className="mx-auto max-w-7xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6 sm:px-6">{children}</main>
+      </div>
+    </div>
+  );
+}

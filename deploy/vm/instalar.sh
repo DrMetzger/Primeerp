@@ -19,12 +19,16 @@ if [ ! -f .env ]; then
   umask 077
   printf 'DB_PASS=%s\nDB_ROOT_PASS=%s\nSEM_NOTIFICACOES=1\nPRIMEHUB_CRON=0\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
 fi
+# Segredos do sistema novo (login da API e ponte com o PHP), gerados uma vez.
+grep -q '^JWT_SECRET=' .env || echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+grep -q '^SSO_SECRET=' .env || echo "SSO_SECRET=$(openssl rand -hex 32)" >> .env
 chmod 600 .env
 set -a; . ./.env; set +a
+mkdir -p dados/downloads
 
 echo "== 2/6 containers"
 docker compose version --short
-docker compose build --pull -q web
+docker compose build --pull -q web api next
 docker compose up -d
 for i in $(seq 1 60); do docker inspect -f '{{.State.Health.Status}}' primehub-db 2>/dev/null | grep -q healthy && break; sleep 2; done
 docker inspect -f 'banco: {{.State.Health.Status}}' primehub-db
@@ -49,39 +53,53 @@ if [ "${IMPORTAR_BANCO:-0}" = "1" ]; then
 fi
 
 echo "== 5/6 Caddy do vanguard: suporte.primeerp.com.br -> Prime Hub"
-BLOCO='
-# Prime Hub (adicionado pela migração, ver /opt/primehub)
+# Sistema novo (site + /api) e telas clássicas (*.php, arquivos) no mesmo endereço.
+BLOCO='# >>> Prime Hub (gerenciado por /opt/primehub -- não editar à mão)
 suporte.primeerp.com.br {
 	encode gzip
-	reverse_proxy primehub-web:80
-}'
+	@classico path *.php /assets/* /uploads/* /vendor/*
+	handle /api/* {
+		reverse_proxy primehub-api:3000
+	}
+	handle /downloads/* {
+		reverse_proxy primehub-api:3000
+	}
+	handle @classico {
+		reverse_proxy primehub-web:80
+	}
+	handle {
+		reverse_proxy primehub-next:3000
+	}
+}
+# <<< Prime Hub'
+# Remove o bloco anterior (formato antigo ou novo) e põe o atual.
+tirar_bloco() { awk '/^# (>>> )?Prime Hub/{s=1;next} s==1{if(/^}/)s=2;next} s==2&&/^# <<< Prime Hub/{s=0;next} {s=0;print}' "$1"; }
 docker cp vanguard-web-1:/etc/caddy/Caddyfile migracao/Caddyfile.atual
-if ! grep -q 'suporte.primeerp.com.br' migracao/Caddyfile.atual; then
-  [ -f migracao/Caddyfile.original ] || cp migracao/Caddyfile.atual migracao/Caddyfile.original
-  { cat migracao/Caddyfile.atual; echo "$BLOCO"; } > migracao/Caddyfile.novo
+[ -f migracao/Caddyfile.original ] || tirar_bloco migracao/Caddyfile.atual > migracao/Caddyfile.original
+{ tirar_bloco migracao/Caddyfile.atual; echo; echo "$BLOCO"; } > migracao/Caddyfile.novo
+if ! cmp -s migracao/Caddyfile.novo migracao/Caddyfile.atual; then
   docker cp migracao/Caddyfile.novo vanguard-web-1:/etc/caddy/Caddyfile
   if docker exec vanguard-web-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 \
      && docker exec vanguard-web-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
     echo "Caddy recarregado sem reiniciar (vanguard não parou)"
   else
-    echo "ERRO no Caddy -- voltando a configuração original"
+    echo "ERRO no Caddy -- voltando a configuração anterior"
     docker cp migracao/Caddyfile.atual vanguard-web-1:/etc/caddy/Caddyfile
     docker exec vanguard-web-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
     exit 1
   fi
-  # Também no código-fonte do vanguard, pra sobreviver a um rebuild dele.
-  if [ -f /opt/vanguard/app/web/Caddyfile ] && ! grep -q 'suporte.primeerp.com.br' /opt/vanguard/app/web/Caddyfile; then
-    cp /opt/vanguard/app/web/Caddyfile /opt/vanguard/app/web/Caddyfile.antes-primehub
-    echo "$BLOCO" >> /opt/vanguard/app/web/Caddyfile
-    echo "bloco também gravado em /opt/vanguard/app/web/Caddyfile (backup .antes-primehub)"
+  if [ -f /opt/vanguard/app/web/Caddyfile ]; then
+    [ -f /opt/vanguard/app/web/Caddyfile.antes-primehub ] || cp /opt/vanguard/app/web/Caddyfile /opt/vanguard/app/web/Caddyfile.antes-primehub
+    { tirar_bloco /opt/vanguard/app/web/Caddyfile; echo; echo "$BLOCO"; } > /tmp/Caddyfile.fonte && cat /tmp/Caddyfile.fonte > /opt/vanguard/app/web/Caddyfile
+    echo "bloco também atualizado em /opt/vanguard/app/web/Caddyfile"
   fi
 else
-  echo "já configurado"
+  echo "Caddy já estava atualizado"
 fi
 
 echo "== 6/6 conferindo"
 sleep 5
-for u in login.php portal/login.php; do
+for u in login portal login.php portal/login.php api/saude api/app/versao; do
   printf '%s: ' "$u"; curl -sS -o /dev/null -w '%{http_code}\n' --max-time 60 "https://suporte.primeerp.com.br/$u" || true
 done
 printf 'vanguard (admin): '; curl -sS -o /dev/null -w '%{http_code}\n' --max-time 30 "https://${ADMIN_DOMAIN_TESTE:-admin.erpvanguard.com.br}/" || true

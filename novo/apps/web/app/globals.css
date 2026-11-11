@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/* Cores vêm de packages/shared (tema.ts), injetadas como variáveis no
+   <html data-tema="claro|escuro"> -- ver app/layout.tsx. */
+@theme inline {
+  --color-fundo: var(--fundo);
+  --color-superficie: var(--superficie);
+  --color-superficie-alta: var(--superficieAlta);
+  --color-borda: var(--borda);
+  --color-texto: var(--texto);
+  --color-suave: var(--textoSuave);
+  --color-primaria: var(--primaria);
+  --color-primaria-texto: var(--primariaTexto);
+  --color-destaque: var(--destaque);
+  --color-sucesso: var(--sucesso);
+  --color-alerta: var(--alerta);
+  --color-perigo: var(--perigo);
+  --color-info: var(--info);
+  --color-grafico1: var(--grafico1);
+  --color-grafico2: var(--grafico2);
+  --font-sans: var(--fonte), ui-sans-serif, system-ui, sans-serif;
+}
+
+html { background: var(--fundo); color: var(--texto); -webkit-tap-highlight-color: transparent; }
+body { min-height: 100dvh; }
+
+/* Fundo com brilho da marca (azul + turquesa), discreto. */
+.fundo-marca {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, color-mix(in oklab, var(--primaria) 18%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, color-mix(in oklab, var(--destaque) 16%, transparent), transparent 60%),
+    var(--fundo);
+}
+
+.gradiente-marca { background-image: linear-gradient(135deg, #1E3FD8, #0FB5C9); }
+
+/* Skeleton: brilho passando por blocos no formato do conteúdo. */
+.esqueleto {
+  position: relative; overflow: hidden; border-radius: 12px;
+  background: color-mix(in oklab, var(--texto) 8%, transparent);
+}
+.esqueleto::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--superficie) 70%, transparent), transparent);
+  animation: brilho 1.3s infinite;
+}
+@keyframes brilho { 100% { transform: translateX(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .esqueleto::after { animation: none; }
+  * { scroll-behavior: auto !important; }
+}
+
+/* Alvos de toque confortáveis (>= 44px) em qualquer coisa clicável. */
+.toque { min-height: 44px; min-width: 44px; }
+
+:focus-visible { outline: 3px solid var(--destaque); outline-offset: 2px; border-radius: 8px; }

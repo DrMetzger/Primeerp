@@ -1,0 +1,106 @@
+# Gera o APK do Prime Hub, assina e publica na VM (suporte.primeerp.com.br/downloads).
+# Cada publicação vira a versão MÍNIMA: quem abrir o app numa versão anterior é
+# obrigado a atualizar. A chave de assinatura fica guardada na VM (nunca pode
+# mudar, senão o Android recusa atualizar por cima). Log público: sem segredos.
+name: Android - gerar e publicar APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/ecstatic-feynman-p65s7l
+      - main
+    paths:
+      - novo/apps/mobile/**
+      - novo/packages/shared/**
+      - .github/workflows/android-apk.yml
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VM_IP: ${{ secrets.VM_IP }}
+      USER_VM: ${{ secrets.USER_VM }}
+      SSHPASS: ${{ secrets.PSW_VM }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Versão
+        run: |
+          N=$(git rev-list --count HEAD)
+          echo "APP_VERSION_CODE=$N" >> "$GITHUB_ENV"
+          echo "APP_VERSION=1.0.$N" >> "$GITHUB_ENV"
+          echo "versão 1.0.$N (código $N)"
+
+      - name: Dependências
+        working-directory: novo
+        run: |
+          corepack enable
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile --filter @primehub/mobile... --config.node-linker=hoisted
+          cd apps/mobile && pnpm exec tsc --noEmit -p .
+
+      - name: Chave de assinatura (guardada na VM)
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 $USER_VM@$VM_IP"
+          mkdir -p ~/assinatura
+          if $SSH 'sudo test -f /opt/primehub/android/primehub.jks'; then
+            $SSH 'sudo cat /opt/primehub/android/primehub.jks' > ~/assinatura/primehub.jks
+            $SSH 'sudo cat /opt/primehub/android/senha.txt' > ~/assinatura/senha.txt
+            echo "usando a chave existente"
+          else
+            openssl rand -hex 24 > ~/assinatura/senha.txt
+            keytool -genkeypair -v -keystore ~/assinatura/primehub.jks -alias primehub -keyalg RSA -keysize 4096 -validity 36500 \
+              -storepass "$(cat ~/assinatura/senha.txt)" -keypass "$(cat ~/assinatura/senha.txt)" \
+              -dname "CN=PrimeERP Solucoes em Tecnologia, O=PrimeERP, L=Tanabi, ST=SP, C=BR" >/dev/null 2>&1
+            $SSH 'sudo mkdir -p /opt/primehub/android && sudo chmod 700 /opt/primehub/android'
+            sshpass -e scp -o StrictHostKeyChecking=accept-new ~/assinatura/primehub.jks ~/assinatura/senha.txt "$USER_VM@$VM_IP:/tmp/"
+            $SSH 'sudo mv /tmp/primehub.jks /tmp/senha.txt /opt/primehub/android/ && sudo chmod 600 /opt/primehub/android/*'
+            echo "chave nova criada e guardada na VM"
+          fi
+          echo "::add-mask::$(cat ~/assinatura/senha.txt)"
+
+      - name: Gerar o APK
+        working-directory: novo/apps/mobile
+        run: |
+          npx expo prebuild --platform android --no-install --clean
+          SENHA=$(cat ~/assinatura/senha.txt)
+          cd android && ./gradlew assembleRelease --no-daemon -q \
+            -Pandroid.injected.signing.store.file="$HOME/assinatura/primehub.jks" \
+            -Pandroid.injected.signing.store.password="$SENHA" \
+            -Pandroid.injected.signing.key.alias=primehub \
+            -Pandroid.injected.signing.key.password="$SENHA"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/primehub.apk"
+          echo "APK: $(du -h "$GITHUB_WORKSPACE/primehub.apk" | cut -f1)"
+
+      - name: Publicar na VM (APK primeiro, versão depois)
+        run: |
+          jq -n --arg v "$APP_VERSION" --argjson c "$APP_VERSION_CODE" --arg em "$(date -Iseconds)" --arg msg "$(git log -1 --format=%s)" \
+            '{versao: $v, versaoCodigo: $c, versaoMinima: $c, publicadoEm: $em, novidades: [$msg]}' > versao.json
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new $USER_VM@$VM_IP"
+          sshpass -e scp -o StrictHostKeyChecking=accept-new primehub.apk versao.json "$USER_VM@$VM_IP:/tmp/"
+          $SSH 'sudo mkdir -p /opt/primehub/dados/downloads && sudo mv /tmp/primehub.apk /opt/primehub/dados/downloads/primehub.apk.novo \
+            && sudo mv /opt/primehub/dados/downloads/primehub.apk.novo /opt/primehub/dados/downloads/primehub.apk \
+            && sudo mv /tmp/versao.json /opt/primehub/dados/downloads/versao.json && sudo chmod 644 /opt/primehub/dados/downloads/*'
+          rm -rf ~/assinatura
+          sleep 3
+          curl -sS https://suporte.primeerp.com.br/api/app/versao | jq -c '{versao, versaoCodigo, tamanhoBytes}' || true

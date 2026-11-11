@@ -25,6 +25,9 @@ export interface Tema {
   alerta: string;
   perigo: string;
   info: string;
+  /** Séries de gráfico (validadas pra daltonismo e contraste em cada tema). */
+  grafico1: string;
+  grafico2: string;
 }
 
 export const temas: Record<NomeTema, Tema> = {
@@ -42,6 +45,8 @@ export const temas: Record<NomeTema, Tema> = {
     alerta: '#B86E00',
     perigo: '#D23A4A',
     info: '#2563EB',
+    grafico1: '#1E3FD8',
+    grafico2: '#0A9FB2',
   },
   escuro: {
     fundo: '#070B1C',
@@ -57,6 +62,8 @@ export const temas: Record<NomeTema, Tema> = {
     alerta: '#FFB547',
     perigo: '#FF6B7A',
     info: '#7AA2FF',
+    grafico1: '#5B7BFF',
+    grafico2: '#17A3B5',
   },
 };
 

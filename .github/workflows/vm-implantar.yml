@@ -8,9 +8,10 @@ on:
     branches:
       - claude/ecstatic-feynman-p65s7l
       - main
-    paths:
-      - deploy/vm/**
-      - .github/workflows/vm-implantar.yml
+    paths-ignore:
+      - docs/**
+      - novo/apps/mobile/**
+      - .github/workflows/android-apk.yml
 
 concurrency:
   group: vm-implantar
