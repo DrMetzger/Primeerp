@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { exigirLogin, login, type Variaveis } from './auth';
 import { respostaApk, versaoAtual } from './app-versao';
+import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
 import { config } from './config';
 import { montarDashboard } from './dashboard';
@@ -50,6 +51,18 @@ app.post('/api/classico', exigirLogin(), async (c) => {
   const corpo = z.object({ destino: z.string().max(300) }).safeParse(await c.req.json().catch(() => null));
   if (!corpo.success) return c.json({ erro: 'Destino inválido.' }, 400);
   return c.json({ url: linkClassico(c.get('usuario'), corpo.data.destino) });
+});
+
+const esquemaAssistente = z.object({
+  mensagem: z.string().trim().min(1).max(1000),
+  historico: z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string().max(4000) })).max(20).default([]),
+});
+
+app.post('/api/assistente', exigirLogin(), async (c) => {
+  const dados = esquemaAssistente.safeParse(await c.req.json().catch(() => null));
+  if (!dados.success) return c.json({ erro: 'Escreva sua pergunta.' }, 400);
+  const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem);
+  return 'erro' in r ? c.json(r, 200) : c.json(r);
 });
 
 app.get('/api/app/versao', async (c) => {

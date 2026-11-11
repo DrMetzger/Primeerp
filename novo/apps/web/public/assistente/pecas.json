@@ -1,0 +1,140 @@
+{
+ "tronco": {
+  "l": 466,
+  "a": 413
+ },
+ "capacete": {
+  "l": 454,
+  "a": 355
+ },
+ "pescoco": {
+  "l": 138,
+  "a": 150
+ },
+ "base": {
+  "l": 374,
+  "a": 264
+ },
+ "braco-relaxado": {
+  "l": 104,
+  "a": 441,
+  "px": 61,
+  "py": 41
+ },
+ "braco-aberto": {
+  "l": 138,
+  "a": 441,
+  "px": 65,
+  "py": 42
+ },
+ "braco-caneta": {
+  "l": 146,
+  "a": 440,
+  "px": 71,
+  "py": 41
+ },
+ "braco-apontando": {
+  "l": 111,
+  "a": 441,
+  "px": 52,
+  "py": 41
+ },
+ "braco-curvado": {
+  "l": 117,
+  "a": 442,
+  "px": 56,
+  "py": 41
+ },
+ "prancheta": {
+  "l": 180,
+  "a": 246
+ },
+ "tablet": {
+  "l": 182,
+  "a": 258
+ },
+ "caneta": {
+  "l": 219,
+  "a": 25
+ },
+ "olho-aberto-e": {
+  "l": 84,
+  "a": 87
+ },
+ "olho-aberto-d": {
+  "l": 84,
+  "a": 87
+ },
+ "olho-fechado-e": {
+  "l": 95,
+  "a": 20
+ },
+ "olho-fechado-d": {
+  "l": 95,
+  "a": 20
+ },
+ "olho-sono-e": {
+  "l": 88,
+  "a": 50
+ },
+ "olho-sono-d": {
+  "l": 88,
+  "a": 50
+ },
+ "olho-feliz-e": {
+  "l": 84,
+  "a": 49
+ },
+ "olho-feliz-d": {
+  "l": 84,
+  "a": 49
+ },
+ "olho-surpreso-e": {
+  "l": 84,
+  "a": 91
+ },
+ "olho-surpreso-d": {
+  "l": 84,
+  "a": 90
+ },
+ "olho-pensando-e": {
+  "l": 100,
+  "a": 55
+ },
+ "olho-pensando-d": {
+  "l": 99,
+  "a": 56
+ },
+ "boca-sorriso": {
+  "l": 174,
+  "a": 58
+ },
+ "boca-neutra": {
+  "l": 138,
+  "a": 20
+ },
+ "boca-a": {
+  "l": 137,
+  "a": 109
+ },
+ "boca-o": {
+  "l": 97,
+  "a": 111
+ },
+ "boca-e": {
+  "l": 172,
+  "a": 106
+ },
+ "boca-bocejo": {
+  "l": 133,
+  "a": 206
+ },
+ "jato": {
+  "l": 103,
+  "a": 138
+ },
+ "brilho": {
+  "l": 86,
+  "a": 86
+ }
+}

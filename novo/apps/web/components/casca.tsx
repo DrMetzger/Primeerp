@@ -2,12 +2,13 @@
 
 import type { UsuarioLogado } from '@primehub/shared';
 import {
-  BarChart3, CalendarDays, ChevronRight, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
+  BarChart3, Bot, CalendarDays, ChevronRight, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
   Settings, UserCircle, Users, UsersRound, Video, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { type ReactNode, useEffect, useState } from 'react';
 import { abrirClassico } from '@/lib/api';
+import { Assistente, chamarAssistente } from './assistente/assistente';
 import { sair, usuarioSalvo } from '@/lib/sessao';
 import { TemaBotao } from './tema-botao';
 
@@ -99,6 +100,14 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
             </li>
           );
         })}
+        <li>
+          <button type="button" onClick={() => { setAberto(false); chamarAssistente(); }}
+            className="toque flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-suave transition hover:bg-superficie-alta hover:text-texto">
+            <Bot size={20} aria-hidden="true" />
+            <span className="flex-1">Assistente</span>
+            <span className="rounded-full bg-destaque/15 px-2 py-0.5 text-xs font-semibold text-destaque">IA</span>
+          </button>
+        </li>
       </ul>
       {usuario && (
         <div className="border-t border-borda p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
@@ -154,6 +163,7 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
         </header>
         <main className="mx-auto max-w-7xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6 sm:px-6">{children}</main>
       </div>
+      {usuario && <Assistente />}
     </div>
   );
 }

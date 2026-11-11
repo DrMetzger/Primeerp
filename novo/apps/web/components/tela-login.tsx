@@ -4,6 +4,7 @@ import type { Sessao, TipoLogin } from '@primehub/shared';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { salvarSessao } from '@/lib/sessao';
+import { Assistente } from './assistente/assistente';
 import { CartaoApk } from './cartao-apk';
 import { TemaBotao } from './tema-botao';
 
@@ -78,6 +79,7 @@ export function TelaLogin({ tipo }: { tipo: TipoLogin }) {
         <CartaoApk />
         <p className="text-center text-sm"><a href={t.outro.href} className="toque inline-flex items-center font-medium text-primaria">{t.outro.texto}</a></p>
       </div>
+      <Assistente modo="login" />
     </main>
   );
 }
