@@ -24,11 +24,10 @@ jobs:
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'bash -s' <<'REMOTO'
-          echo "== sistema"; . /etc/os-release; echo "$PRETTY_NAME | kernel $(uname -r) | usuário $(whoami) | sudo: $(sudo -n true 2>/dev/null && echo sim || echo não)"
-          echo "== cpu/memória/disco"; nproc; free -h | sed -n 1,2p; df -h / | tail -1
-          echo "== portas abertas (processo)"; (sudo -n ss -ltnp 2>/dev/null || ss -ltn) | awk 'NR>1{print $4, $6}' | sed -E 's/users:\(\("([^"]+)".*/\1/' | sort -u
-          echo "== instalado"; for c in nginx apache2 caddy php mysql mariadb docker node git certbot ufw; do printf '%s: ' $c; command -v $c >/dev/null && ($c --version 2>&1 || $c -v 2>&1) | head -1 || echo '-'; done
-          echo "== serviços ativos relevantes"; systemctl list-units --type=service --state=running --no-legend 2>/dev/null | awk '{print $1}' | grep -Ei 'nginx|apache|caddy|php|mysql|maria|docker|traefik|coolify|easypanel|cloudpanel' || echo nenhum
-          echo "== containers"; (sudo -n docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null || echo '-')
-          echo "== firewall"; (sudo -n ufw status 2>/dev/null | head -5 || echo '-')
+          echo "== projeto vanguard (compose)"; sudo -n docker inspect vanguard-web-1 --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }} | arquivos: {{ index .Config.Labels "com.docker.compose.project.config_files" }}'
+          echo "== montagens do web"; sudo -n docker inspect vanguard-web-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+          echo "== redes"; sudo -n docker inspect vanguard-web-1 --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+          echo "== sites no Caddyfile (só endereços e destinos)"; sudo -n docker exec vanguard-web-1 sh -c 'cat /etc/caddy/Caddyfile 2>/dev/null' | grep -E '^\S.*\{|reverse_proxy|import|^\}' | head -30
+          echo "== imagem do web"; sudo -n docker inspect vanguard-web-1 --format '{{.Config.Image}} | entrypoint: {{.Config.Entrypoint}} {{.Config.Cmd}}'
+          echo "== reinício automático"; for c in vanguard-web-1 vanguard-api-1 vanguard-db-1; do sudo -n docker inspect $c --format "$c {{.HostConfig.RestartPolicy.Name}}"; done
           REMOTO
