@@ -24,10 +24,9 @@ jobs:
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'bash -s' <<'REMOTO'
-          echo "== projeto vanguard (compose)"; sudo -n docker inspect vanguard-web-1 --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }} | arquivos: {{ index .Config.Labels "com.docker.compose.project.config_files" }}'
-          echo "== montagens do web"; sudo -n docker inspect vanguard-web-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
-          echo "== redes"; sudo -n docker inspect vanguard-web-1 --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
-          echo "== sites no Caddyfile (só endereços e destinos)"; sudo -n docker exec vanguard-web-1 sh -c 'cat /etc/caddy/Caddyfile 2>/dev/null' | grep -E '^\S.*\{|reverse_proxy|import|^\}' | head -30
-          echo "== imagem do web"; sudo -n docker inspect vanguard-web-1 --format '{{.Config.Image}} | entrypoint: {{.Config.Entrypoint}} {{.Config.Cmd}}'
-          echo "== reinício automático"; for c in vanguard-web-1 vanguard-api-1 vanguard-db-1; do sudo -n docker inspect $c --format "$c {{.HostConfig.RestartPolicy.Name}}"; done
+          cd /opt/vanguard/app/infra
+          echo "== arquivos em /opt/vanguard/app/infra"; ls -la
+          echo "== serviço web no compose"; awk '/^  web:/{f=1} f&&/^  [a-z]/&&!/^  web:/{f=0} f' docker-compose.yml | grep -viE 'password|secret|token|key'
+          echo "== Caddyfile (fonte)"; for f in $(grep -rl --include='Caddyfile*' . 2>/dev/null; find . -maxdepth 3 -name 'Caddyfile*'); do echo "--- $f"; grep -viE 'password|secret|token|key' "$f"; done | head -80
+          echo "== git do vanguard"; (cd /opt/vanguard/app && git log --oneline -1 2>/dev/null && git status --short | head -5) || echo sem git
           REMOTO
