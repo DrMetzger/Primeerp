@@ -24,6 +24,13 @@ class Mailer
 
     public static function enviar(string $para, string $assunto, string $corpoHtml): bool
     {
+        // Cópia de teste (ver WhatsAppApi::configurada()): não envia e-mail.
+        if (getenv('ADMINPRIME_SEM_NOTIFICACOES') === '1') {
+            error_log('E-mail NÃO enviado (modo teste, ADMINPRIME_SEM_NOTIFICACOES=1) pra ' . $para . ': ' . $assunto);
+
+            return false;
+        }
+
         if (self::config('smtp_host', 'SMTP_HOST') !== '') {
             return self::enviarViaSmtp($para, $assunto, $corpoHtml);
         }

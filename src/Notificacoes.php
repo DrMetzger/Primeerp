@@ -398,6 +398,13 @@ class Notificacoes
 
     private static function baseUrlAbsoluta(): string
     {
+        // Na VM (atrás do Caddy) e no cron (linha de comando) não dá pra
+        // confiar em HTTPS/SERVER_NAME -- ADMINPRIME_URL_BASE diz o endereço
+        // público certo (ex.: https://suporte.primeerp.com.br).
+        if (getenv('ADMINPRIME_URL_BASE')) {
+            return rtrim((string) getenv('ADMINPRIME_URL_BASE'), '/');
+        }
+
         return (($_SERVER['HTTPS'] ?? '') === 'on' ? 'https://' : 'http://') . ($_SERVER['SERVER_NAME'] ?? 'www.primeerp.com.br');
     }
 }

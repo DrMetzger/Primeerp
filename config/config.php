@@ -7,11 +7,22 @@
  * versionar credenciais de produção em outros lugares além deste arquivo.
  */
 
-// Ambiente: 'local' (desenvolvimento/testes) ou 'production' (Hostinger)
-// Detecta automaticamente pelo host, mas pode forçar via variável de ambiente.
-$isLocal = in_array($_SERVER['SERVER_NAME'] ?? 'cli', ['localhost', '127.0.0.1', 'cli'], true);
+// Ambiente: 'local' (desenvolvimento/testes) ou 'production' (Hostinger/VM).
+// ADMINPRIME_ENV força ('production' ou 'local'); senão detecta sozinho.
+// ATENÇÃO linha de comando: antes TODA execução CLI era tratada como local
+// -- inclusive o cron da Hostinger, que por isso tentava o banco de teste e
+// nunca processava nada. Agora CLI rodando dentro da conta da Hostinger é
+// produção; CLI em qualquer outro lugar (testes, máquina de dev) é local.
+$ambienteForcado = getenv('ADMINPRIME_ENV');
+if ($ambienteForcado === 'production' || $ambienteForcado === 'local') {
+    $isLocal = $ambienteForcado === 'local';
+} elseif (PHP_SAPI === 'cli') {
+    $isLocal = strpos(__DIR__, '/home/u195563148/') === false;
+} else {
+    $isLocal = in_array($_SERVER['SERVER_NAME'] ?? '', ['localhost', '127.0.0.1'], true);
+}
 
-if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
+if ($isLocal) {
     // --- Configuração LOCAL (ambiente de testes) ---
     define('DB_HOST', getenv('ADMINPRIME_DB_HOST') ?: 'localhost');
     define('DB_NAME', getenv('ADMINPRIME_DB_NAME') ?: 'adminprime_test');
@@ -33,11 +44,11 @@ if ($isLocal && getenv('ADMINPRIME_ENV') !== 'production') {
     define('SMTP_USER', getenv('ADMINPRIME_SMTP_USER') ?: '');
     define('SMTP_PASS', getenv('ADMINPRIME_SMTP_PASS') ?: '');
 } else {
-    // --- Configuração de PRODUÇÃO (Hostinger) ---
-    define('DB_HOST', 'localhost');
-    define('DB_NAME', 'u195563148_claude');
-    define('DB_USER', 'u195563148_claude');
-    define('DB_PASS', '*@2^@cIdb4J?');
+    // --- Configuração de PRODUÇÃO (Hostinger; na VM vem tudo por variável de ambiente) ---
+    define('DB_HOST', getenv('ADMINPRIME_DB_HOST') ?: 'localhost');
+    define('DB_NAME', getenv('ADMINPRIME_DB_NAME') ?: 'u195563148_claude');
+    define('DB_USER', getenv('ADMINPRIME_DB_USER') ?: 'u195563148_claude');
+    define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: '*@2^@cIdb4J?');
 
     // Banco do HESK (sistema de chamados atual, primeerp.com.br/helpdesk/)
     define('HESK_DB_HOST', 'localhost');
@@ -65,7 +76,8 @@ define('DB_CHARSET', 'utf8mb4');
 // continua se chamando /AdminPrime (é só o diretório no servidor, não muda
 // os links do portal já enviados aos clientes), mas o nome mostrado é Prime Hub.
 define('APP_NAME', 'Prime Hub');
-define('APP_BASE_PATH', $isLocal ? '' : '/AdminPrime');
+// Na VM (suporte.primeerp.com.br) o sistema fica na raiz: ADMINPRIME_BASE_PATH="" .
+define('APP_BASE_PATH', getenv('ADMINPRIME_BASE_PATH') !== false ? rtrim((string) getenv('ADMINPRIME_BASE_PATH'), '/') : ($isLocal ? '' : '/AdminPrime'));
 
 // Notificações por e-mail (novos chamados avisam a equipe interna).
 // Envia como o próprio e-mail do Kleber (autenticado via SMTP, ver acima)

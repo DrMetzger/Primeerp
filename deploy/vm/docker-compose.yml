@@ -1,0 +1,59 @@
+# Prime Hub na VM. Fica em /opt/primehub (código + .env + dados).
+# O Caddy do vanguard (portas 80/443) encaminha suporte.primeerp.com.br pro
+# container "primehub-web" pela rede vanguard_default -- por isso o web entra
+# nas duas redes; o banco fica só na rede interna do Prime Hub.
+name: primehub
+
+services:
+  web:
+    build:
+      context: ./app
+      dockerfile: deploy/vm/Dockerfile
+    container_name: primehub-web
+    restart: unless-stopped
+    environment:
+      ADMINPRIME_ENV: production
+      ADMINPRIME_BASE_PATH: ""
+      ADMINPRIME_URL_BASE: https://suporte.primeerp.com.br
+      ADMINPRIME_DB_HOST: db
+      ADMINPRIME_DB_NAME: primehub
+      ADMINPRIME_DB_USER: primehub
+      ADMINPRIME_DB_PASS: ${DB_PASS:?}
+      # Fase de teste: 1 = não manda e-mail/WhatsApp e não liga o cron.
+      ADMINPRIME_SEM_NOTIFICACOES: ${SEM_NOTIFICACOES:-1}
+      PRIMEHUB_CRON: ${PRIMEHUB_CRON:-0}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./dados/uploads:/var/www/html/uploads
+      - ./dados/avatars:/var/www/html/assets/avatars
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - interna
+      - vanguard_default
+
+  db:
+    image: mariadb:11.4
+    container_name: primehub-db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: primehub
+      MARIADB_USER: primehub
+      MARIADB_PASSWORD: ${DB_PASS:?}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?}
+      TZ: America/Sao_Paulo
+    command: ["--max_allowed_packet=512M", "--wait_timeout=600", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - ./dados/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+    networks:
+      - interna
+
+networks:
+  interna:
+  vanguard_default:
+    external: true

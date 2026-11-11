@@ -16,3 +16,6 @@ Thumbs.db
 /assets/avatars/*
 !/assets/avatars/.htaccess
 !/assets/avatars/.gitkeep
+
+# Exportação do banco pra migração (fica só no servidor, nunca no git)
+/config/migracao/

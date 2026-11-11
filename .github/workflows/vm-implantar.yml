@@ -1,0 +1,79 @@
+# Implanta o Prime Hub na VM (suporte.primeerp.com.br). Ver deploy/vm/LEIA-ME.md.
+# O log é público: nada de senha aparece aqui (só contagens e status).
+name: VM - implantar Prime Hub
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/ecstatic-feynman-p65s7l
+      - main
+    paths:
+      - deploy/vm/**
+      - .github/workflows/vm-implantar.yml
+
+concurrency:
+  group: vm-implantar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  implantar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FTP_HOST: ${{ secrets.FTP_HOST }}
+      FTP_USR: ${{ secrets.FTP_USR }}
+      FTP_PSW: ${{ secrets.FTP_PSW }}
+      VM_IP: ${{ secrets.VM_IP }}
+      USER_VM: ${{ secrets.USER_VM }}
+      SSHPASS: ${{ secrets.PSW_VM }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Empacotar o código
+        run: |
+          git archive --format=tar.gz -o /tmp/primehub-app.tar.gz HEAD
+          echo "pacote: $(du -h /tmp/primehub-app.tar.gz | cut -f1)"
+          [ -f deploy/vm/IMPORTAR_BANCO ] && echo "IMPORTAR_BANCO=1" >> "$GITHUB_ENV" || echo "IMPORTAR_BANCO=0" >> "$GITHUB_ENV"
+
+      - name: Pedir a exportação do banco na Hostinger (cron de lá gera o arquivo)
+        if: env.IMPORTAR_BANCO == '1'
+        run: |
+          H="${FTP_HOST#ftp://}"; H="${H%/}"; echo "FTP_H=$H" >> "$GITHUB_ENV"
+          printf 'user = "%s:%s"\n' "$FTP_USR" "$FTP_PSW" > ~/.ftp && chmod 600 ~/.ftp
+          curl -sS -K ~/.ftp -Q "DELE AdminPrime/config/migracao/PRONTO" "ftp://$H/" >/dev/null 2>&1 || true
+          : > EXPORTAR
+          curl -sS --fail -K ~/.ftp --ftp-create-dirs -T EXPORTAR "ftp://$H/AdminPrime/config/migracao/EXPORTAR"
+          echo "pedido enviado; esperando o cron da Hostinger (roda a cada 5 min)..."
+          for i in $(seq 1 75); do
+            if curl -sS --fail -K ~/.ftp "ftp://$H/AdminPrime/config/migracao/PRONTO" -o PRONTO 2>/dev/null; then break; fi
+            sleep 16
+          done
+          [ -s PRONTO ] || { echo "ERRO: a Hostinger não gerou o arquivo em 20 min -- o cron do cron_ia_chamados.php está rodando?"; exit 1; }
+          if jq -e '.erro' PRONTO >/dev/null; then echo "ERRO na exportação: $(jq -r .erro PRONTO | head -c 300)"; exit 1; fi
+          echo "exportado: $(jq -r .linhas PRONTO) linhas, $(( $(jq -r .bytes PRONTO) / 1024 )) KB em $(jq -r .segundos PRONTO)s"
+          echo "DUMP_SHA256=$(jq -r .sha256 PRONTO)" >> "$GITHUB_ENV"
+
+      - name: Instalar na VM
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/primehub-app.tar.gz "$USER_VM@$VM_IP:/tmp/primehub-app.tar.gz"
+          $SSH "$USER_VM@$VM_IP" 'sudo mkdir -p /opt/primehub'
+          {
+            printf 'export FTP_HOST=%q FTP_USR=%q FTP_PSW=%q IMPORTAR_BANCO=%q DUMP_SHA256=%q\n' "$FTP_HOST" "$FTP_USR" "$FTP_PSW" "$IMPORTAR_BANCO" "${DUMP_SHA256:-}"
+            cat deploy/vm/instalar.sh
+          } | $SSH "$USER_VM@$VM_IP" 'sudo bash -s'
+
+      - name: Apagar a exportação da Hostinger
+        if: always() && env.IMPORTAR_BANCO == '1'
+        run: |
+          H="${FTP_HOST#ftp://}"; H="${H%/}"
+          for f in primehub.sql.gz primehub.sql.gz.parcial PRONTO EXPORTAR; do
+            curl -sS -K ~/.ftp -Q "DELE AdminPrime/config/migracao/$f" "ftp://$H/" >/dev/null 2>&1 || true
+          done
+          rm -f ~/.ftp PRONTO
+          echo "exportação removida da Hostinger"

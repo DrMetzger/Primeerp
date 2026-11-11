@@ -36,6 +36,12 @@ class WhatsAppApi
 
     public static function configurada(): bool
     {
+        // ADMINPRIME_SEM_NOTIFICACOES=1: cópia de teste (ex.: VM antes da
+        // troca definitiva) -- nunca manda nada pra cliente de verdade.
+        if (getenv('ADMINPRIME_SEM_NOTIFICACOES') === '1') {
+            return false;
+        }
+
         return self::token() !== '' && self::phoneNumberId() !== '';
     }
 

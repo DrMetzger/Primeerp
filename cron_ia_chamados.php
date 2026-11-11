@@ -26,6 +26,9 @@ if (!$viaCli && ($_GET['token'] ?? '') !== CRON_SECRET) {
     exit('Acesso negado.');
 }
 
+// Migração pra VM: exporta o banco se o workflow pediu (ver src/ExportarBanco.php).
+\AdminPrime\ExportarBanco::seSolicitado();
+
 $processados = IaChamados::processarPendentes(Database::connection());
 
 echo "Análises de IA processadas: {$processados}\n";
