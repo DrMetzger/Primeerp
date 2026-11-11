@@ -71,6 +71,7 @@ jobs:
             .github/**
             deploy/**
             docs/**
+            novo/**
             uploads/**
             assets/avatars/**
             README.md

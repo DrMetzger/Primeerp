@@ -1,0 +1,12 @@
+{
+  "name": "primehub-novo",
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "scripts": {
+    "typecheck": "pnpm -r --parallel run typecheck",
+    "build": "pnpm -r run build"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -31,6 +31,19 @@ Substitui o PHP aos poucos, sem parar o atendimento.
   adequado nos dois temas, leitura por leitor de tela (TalkBack).
 - Funciona da tela mais estreita (360dp) até tablet, retrato e paisagem.
 
+## Carregamento e abertura
+- **Skeleton** em todo carregamento (site e APK): blocos animados no formato
+  do conteúdo (cards, gráficos, listas), nunca tela branca ou só "carregando".
+- **Animação de abertura do APK com cara de IA**: o "P" da PrimeERP se monta
+  com partículas/rede neural em azul e turquesa, enquanto o app verifica a
+  versão e o login.
+
+## Atualização obrigatória do APK
+- Ao abrir, o app consulta `/api/app/versao`. Se a versão instalada for
+  menor que a mínima, **bloqueia tudo** e só mostra "Atualizar agora"
+  (baixa e abre o instalador). Nunca abre numa versão velha.
+- O APK fica disponível pra baixar na tela de login da equipe e na do cliente.
+
 ## Agente de IA
 - Agente dentro do site, com avatar (sugestão: D-ID Agents ou HeyGen
   Interactive Avatar; imagem estática pode sair do Leonardo.ai/Midjourney).

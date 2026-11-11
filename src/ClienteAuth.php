@@ -90,6 +90,37 @@ class ClienteAuth
         $_SESSION['portal_setor_eh_master'] = (bool) ($setorResp['eh_master'] ?? false);
     }
 
+    /**
+     * Login vindo do sistema novo (sso.php): mesma sessão que o attempt()
+     * montaria, a partir do id já autenticado lá.
+     */
+    public static function iniciarSessaoPorId(PDO $pdo, string $perfil, int $id): bool
+    {
+        if ($perfil === 'master') {
+            $stmt = $pdo->prepare('SELECT * FROM clientes WHERE id = ? AND portal_ativo = 1 LIMIT 1');
+            $stmt->execute([$id]);
+            if ($cliente = $stmt->fetch()) {
+                self::iniciarSessaoMaster($cliente);
+                return true;
+            }
+            return false;
+        }
+        $stmt = $pdo->prepare('
+            SELECT sr.*, s.cliente_id, s.nome AS setor_nome, c.nome AS empresa_nome
+            FROM setor_responsaveis sr
+            JOIN setores s ON s.id = sr.setor_id
+            JOIN clientes c ON c.id = s.cliente_id
+            WHERE sr.id = ? AND sr.portal_ativo = 1 AND s.ativo = 1
+            LIMIT 1
+        ');
+        $stmt->execute([$id]);
+        if ($setorResp = $stmt->fetch()) {
+            self::iniciarSessaoSetor($setorResp);
+            return true;
+        }
+        return false;
+    }
+
     public static function logout(): void
     {
         unset(
