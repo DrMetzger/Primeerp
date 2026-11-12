@@ -1,85 +1,318 @@
-import type { UsuarioLogado } from '@primehub/shared';
-import { primeira } from './db';
+import { manualEmTexto, type UsuarioLogado } from '@primehub/shared';
+import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
+import { consulta, primeira } from './db';
 
 /**
- * Assistente do Prime Hub (o robô do site/app): responde dúvidas de uso do
- * sistema com o Gemini, usando a mesma chave cadastrada em Configurações
- * (tabela configuracoes, chave gemini_api_key). Modelo mais barato, resposta
- * curta e limite diário por pessoa, pra não gastar à toa.
+ * DOIS assistentes separados, ambos no Gemini pago da Prime:
+ *
+ *  - EQUIPE (painel administrativo): conhece o manual do Prime Hub, consulta
+ *    a operação e PROPÕE ações (abrir/encerrar chamado, mudar situação,
+ *    trocar responsável). Ação que muda dado nunca roda sozinha: volta como
+ *    cartão de confirmação e a tela executa pelo api_acoes.php (mesmas regras,
+ *    avisos e permissões de sempre).
+ *  - CLIENTE (portal): especialista em Protheus/ADVPL que fala em nome da
+ *    equipe, vê só os chamados da empresa (e do setor) da pessoa, nunca gera
+ *    código, nunca contorna o sistema de chamados e sempre defende a Prime.
  */
 
-const MODELOS = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
-const LIMITE_DIA_POR_PESSOA = 60;
+const MODELOS = ['gemini-flash-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-flash-lite-latest'];
+const LIMITE_DIA = { equipe: 200, cliente: 40 } as const;
 const usoHoje = new Map<string, { dia: string; n: number }>();
 
 export interface MensagemChat { autor: 'pessoa' | 'assistente'; texto: string }
+export interface AcaoProposta { id: string; titulo: string; detalhe: string; arquivo: 'api_acoes.php'; campos: Record<string, string>; perigo?: boolean }
+export interface RespostaAssistente { texto: string; acoes?: AcaoProposta[] }
 
-async function chaveGemini(): Promise<string> {
-  const linha = await primeira<{ valor: string | null }>("SELECT valor FROM configuracoes WHERE chave = 'gemini_api_key'").catch(() => null);
-  return linha?.valor?.trim() || process.env.GEMINI_API_KEY || '';
+type Parte = { text?: string; thought?: boolean; functionCall?: { name: string; args?: Record<string, unknown> }; functionResponse?: unknown; thoughtSignature?: string };
+type Conteudo = { role: 'user' | 'model'; parts: Parte[] };
+
+async function config(chave: string): Promise<string> {
+  const l = await primeira<{ valor: string | null }>('SELECT valor FROM configuracoes WHERE chave = ?', [chave]).catch(() => null);
+  return l?.valor?.trim() ?? '';
 }
 
-function instrucoes(usuario: UsuarioLogado): string {
-  const quem = usuario.tipo === 'equipe'
-    ? `Você conversa com ${usuario.nome}, da EQUIPE da PrimeERP (perfil ${usuario.perfil ?? 'colaborador'}). No Prime Hub a equipe tem: Dashboard (KPIs de atendimento), Chamados (lista com filtros; abrir um chamado leva à tela do cliente, onde se responde, anexa arquivos e usa o botão "Sugerir resposta com IA"), Clientes, Agenda, Relatórios, Fontes ADVPL, Usuários e Configurações (só administradores; inclui a IA dos chamados).`
-    : `Você conversa com ${usuario.nome}, CLIENTE da PrimeERP (empresa ${usuario.empresa ?? ''}). No Prime Hub o cliente tem: Meus chamados (acompanhar e abrir chamado pelo botão "Abrir chamado", com anexos), Calendário de treinamentos, Videoaulas, Fontes ADVPL e Minha equipe.`;
-  return `Você é o assistente virtual do Prime Hub, a central de atendimento da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP). ${quem}
-
-SEU JEITO: simpático, educado e descolado na medida certa, como um colega de trabalho gente boa. Pode usar um toque de humor leve e um emoji de vez em quando, mas sempre com respeito. Nunca seja seco, nunca diga que "não pode responder" de forma ríspida e nunca deixe a pessoa sem resposta.
-
-O QUE VOCÊ FAZ: ajuda a usar o Prime Hub e tira dúvidas rápidas de Protheus/ERP.
-- Pergunta fora do assunto ou brincadeira (ex.: "como faço pra não trabalhar hoje?"): responda com bom humor e gentileza, em uma ou duas frases, e traga a conversa de volta pro que você pode ajudar. Ex.: "Haha, essa eu não consigo resolver 😄 mas posso deixar seu dia mais leve: quer que eu te mostre os chamados que estão esperando você?"
-- Problema técnico que precisa de análise (erro no Protheus, ajuste de fonte, nota rejeitada etc.): explique o que der e oriente a abrir um chamado com prints, porque a equipe analisa.
-- Nunca invente telas, botões, rotinas ou parâmetros que você não tem certeza que existem. Não peça senha nem dados sensíveis.
-
-FORMATO: português do Brasil, texto puro (sem markdown, sem asteriscos), curto: no máximo 4 frases ou 5 passos curtos.`;
+/** Nome de quem "assina" pelo portal: o mesmo de "Responder em nome de" da IA dos chamados. */
+async function nomeAtendente(): Promise<string> {
+  const id = Number(await config('ia_chamados_usuario_id')) || 0;
+  const u = id ? await primeira<{ nome: string }>('SELECT nome FROM usuarios WHERE id = ? AND ativo = 1', [id]) : null;
+  const k = u ?? await primeira<{ nome: string }>("SELECT nome FROM usuarios WHERE ativo = 1 AND nome LIKE 'Kleber%' ORDER BY id LIMIT 1");
+  return (k?.nome ?? 'Kleber').split(' ')[0] ?? 'Kleber';
 }
 
-export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string): Promise<{ texto: string } | { erro: string }> {
+const curto = (t: string | null | undefined, n = 400) => (t ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+const ROTULO: Record<string, string> = { aberto: 'Aberto', aguardando_equipe: 'Aguardando nós', aguardando_cliente: 'Aguardando cliente', fechado: 'Fechado' };
+
+// ---------------------------------------------------------------- Ferramentas
+
+interface Ferramenta {
+  declaracao: { name: string; description: string; parameters?: { type: 'OBJECT'; properties: Record<string, { type: string; description: string; enum?: string[] }>; required?: string[] } };
+  executar: (u: UsuarioLogado, a: Record<string, unknown>, acoes: AcaoProposta[]) => Promise<unknown>;
+}
+
+const txt = (a: Record<string, unknown>, k: string) => (typeof a[k] === 'string' ? (a[k] as string).trim() : typeof a[k] === 'number' ? String(a[k]) : '');
+const num = (a: Record<string, unknown>, k: string) => Number(a[k]) || 0;
+
+async function chamadoVisivel(u: UsuarioLogado, id: number) {
+  const e = u.tipo === 'equipe' ? await filtroEscopoEquipe(u) : filtroEscopoCliente(u);
+  return primeira<{ id: number; titulo: string; status: string; prioridade: string; cliente: string; clienteId: number; responsavel: string | null; descricao: string; criadoEm: string; setor: string | null }>(
+    `SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome cliente, ch.cliente_id clienteId, u.nome responsavel, ch.descricao, ch.criado_em criadoEm, s.nome setor
+       FROM chamados ch JOIN clientes c ON c.id = ch.cliente_id LEFT JOIN usuarios u ON u.id = ch.responsavel_id LEFT JOIN setores s ON s.id = ch.setor_id
+      WHERE ${e.sql} AND ch.id = ?`, [...e.params, id]);
+}
+
+async function buscarChamados(u: UsuarioLogado, a: Record<string, unknown>) {
+  const e = u.tipo === 'equipe' ? await filtroEscopoEquipe(u) : filtroEscopoCliente(u);
+  const cond = [e.sql];
+  const p: unknown[] = [...e.params];
+  const status = txt(a, 'status');
+  if (status === 'pendentes') cond.push("ch.status <> 'fechado'");
+  else if (ROTULO[status]) { cond.push('ch.status = ?'); p.push(status); }
+  const termo = txt(a, 'texto');
+  if (termo) { cond.push('(ch.titulo LIKE ? OR ch.descricao LIKE ? OR c.nome LIKE ? OR ch.id = ?)'); p.push(`%${termo}%`, `%${termo}%`, `%${termo}%`, Number(termo) || 0); }
+  const l = await consulta<{ id: number; titulo: string; status: string; prioridade: string; cliente: string; responsavel: string | null; atualizado: string }>(
+    `SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome cliente, u.nome responsavel, ch.atualizado_em atualizado
+       FROM chamados ch JOIN clientes c ON c.id = ch.cliente_id LEFT JOIN usuarios u ON u.id = ch.responsavel_id
+      WHERE ${cond.join(' AND ')} ORDER BY FIELD(ch.status, 'aguardando_equipe', 'aberto', 'aguardando_cliente', 'fechado'), ch.atualizado_em DESC LIMIT 12`, p);
+  return l.map((c) => ({ ...c, status: ROTULO[c.status] ?? c.status, ...(u.tipo === 'cliente' ? { responsavel: undefined } : {}) }));
+}
+
+async function conversa(id: number, u: UsuarioLogado) {
+  const r = await consulta<{ autor: string; tipo: string; mensagem: string; em: string }>(
+    `SELECT r.autor_nome autor, r.autor_tipo tipo, r.mensagem, r.criado_em em FROM chamado_respostas r WHERE r.chamado_id = ? ORDER BY r.id DESC LIMIT 6`, [id]);
+  return r.reverse().map((m) => ({ de: m.tipo === 'equipe' ? (u.tipo === 'cliente' ? 'Equipe PrimeERP' : m.autor) : m.autor, quando: m.em, texto: curto(m.mensagem, 600) }));
+}
+
+const FERRAMENTAS_EQUIPE: Ferramenta[] = [
+  {
+    declaracao: { name: 'resumo_operacao', description: 'Resumo da operação de atendimento agora: pendências por situação, urgentes, chamados esperando há mais tempo, carga por responsável e movimento de hoje.' },
+    executar: async (u) => {
+      const e = await filtroEscopoEquipe(u);
+      const [porStatus, antigos, porResp, hoje] = await Promise.all([
+        consulta<{ status: string; n: number }>(`SELECT ch.status, COUNT(*) n FROM chamados ch WHERE ${e.sql} GROUP BY ch.status`, e.params),
+        consulta<{ id: number; titulo: string; cliente: string; prioridade: string; desde: string }>(
+          `SELECT ch.id, ch.titulo, c.nome cliente, ch.prioridade, ch.atualizado_em desde FROM chamados ch JOIN clientes c ON c.id = ch.cliente_id
+            WHERE ${e.sql} AND ch.status IN ('aberto','aguardando_equipe') ORDER BY FIELD(ch.prioridade,'urgente','alta','media','baixa'), ch.atualizado_em LIMIT 8`, e.params),
+        consulta<{ responsavel: string | null; n: number }>(
+          `SELECT u.nome responsavel, COUNT(*) n FROM chamados ch LEFT JOIN usuarios u ON u.id = ch.responsavel_id WHERE ${e.sql} AND ch.status IN ('aberto','aguardando_equipe') GROUP BY u.nome ORDER BY n DESC`, e.params),
+        primeira<{ abertos: number; fechados: number; respostas: number }>(
+          `SELECT (SELECT COUNT(*) FROM chamados ch WHERE ${e.sql} AND DATE(ch.criado_em) = CURDATE()) abertos,
+                  (SELECT COUNT(*) FROM chamados ch WHERE ${e.sql} AND DATE(ch.fechado_em) = CURDATE()) fechados,
+                  (SELECT COUNT(*) FROM chamado_respostas r WHERE r.autor_tipo = 'equipe' AND DATE(r.criado_em) = CURDATE()) respostas`, [...e.params, ...e.params]),
+      ]);
+      return {
+        porSituacao: Object.fromEntries(porStatus.map((s) => [ROTULO[s.status] ?? s.status, Number(s.n)])),
+        maisUrgentesEsperandoNos: antigos, cargaPorResponsavel: porResp.map((r) => ({ responsavel: r.responsavel ?? 'Sem responsável', pendentes: Number(r.n) })), hoje,
+      };
+    },
+  },
+  {
+    declaracao: {
+      name: 'buscar_chamados', description: 'Busca chamados por texto (número, título, descrição ou cliente) e/ou situação.',
+      parameters: { type: 'OBJECT', properties: { texto: { type: 'STRING', description: 'Termo de busca, opcional' }, status: { type: 'STRING', description: 'Situação', enum: ['pendentes', 'aberto', 'aguardando_equipe', 'aguardando_cliente', 'fechado'] } } },
+    },
+    executar: (u, a) => buscarChamados(u, a),
+  },
+  {
+    declaracao: { name: 'detalhes_chamado', description: 'Dados e as últimas mensagens de um chamado, pelo número.', parameters: { type: 'OBJECT', properties: { chamado_id: { type: 'INTEGER', description: 'Número do chamado' } }, required: ['chamado_id'] } },
+    executar: async (u, a) => {
+      const c = await chamadoVisivel(u, num(a, 'chamado_id'));
+      if (!c) return { erro: 'Chamado não encontrado ou fora do acesso.' };
+      return { ...c, status: ROTULO[c.status] ?? c.status, descricao: curto(c.descricao, 800), ultimasMensagens: await conversa(c.id, u) };
+    },
+  },
+  {
+    declaracao: { name: 'listar_clientes', description: 'Lista clientes (id e nome) para achar o cliente certo antes de abrir chamado.', parameters: { type: 'OBJECT', properties: { texto: { type: 'STRING', description: 'Parte do nome' } } } },
+    executar: async (_u, a) => consulta<{ id: number; nome: string; status: string }>("SELECT id, nome, status FROM clientes WHERE nome LIKE ? ORDER BY nome LIMIT 15", [`%${txt(a, 'texto')}%`]),
+  },
+  {
+    declaracao: { name: 'listar_equipe', description: 'Lista as pessoas ativas da equipe (id e nome), para atribuir responsável.' },
+    executar: async () => consulta<{ id: number; nome: string }>('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome'),
+  },
+  {
+    declaracao: {
+      name: 'propor_abrir_chamado', description: 'Prepara a abertura de um chamado para um cliente (a pessoa confirma num cartão antes de criar).',
+      parameters: { type: 'OBJECT', properties: {
+        cliente_id: { type: 'INTEGER', description: 'id do cliente (use listar_clientes)' }, titulo: { type: 'STRING', description: 'Título curto' },
+        descricao: { type: 'STRING', description: 'Descrição completa' }, categoria: { type: 'STRING', description: 'Categoria', enum: ['Geral', 'Compras', 'Estoque/Custos/PCP', 'Faturamento', 'Financeiro', 'Gestão de Pessoal', 'Ponto Eletrônico', 'Fiscal', 'Contabilidade', 'Desenvolvimento'] },
+        prioridade: { type: 'STRING', description: 'Prioridade', enum: ['baixa', 'media', 'alta', 'urgente'] },
+      }, required: ['cliente_id', 'titulo', 'descricao', 'categoria'] },
+    },
+    executar: async (_u, a, acoes) => {
+      const c = await primeira<{ nome: string }>('SELECT nome FROM clientes WHERE id = ?', [num(a, 'cliente_id')]);
+      if (!c) return { erro: 'Cliente não encontrado. Use listar_clientes.' };
+      acoes.push({ id: `abrir-${Date.now()}`, titulo: `Abrir chamado para ${c.nome}`, detalhe: `${txt(a, 'titulo').toUpperCase()} · ${txt(a, 'categoria')} · prioridade ${txt(a, 'prioridade') || 'media'}`, arquivo: 'api_acoes.php',
+        campos: { acao: 'abrir_chamado', cliente_id: String(num(a, 'cliente_id')), titulo: txt(a, 'titulo'), descricao: txt(a, 'descricao'), categoria: txt(a, 'categoria') || 'Geral', prioridade: txt(a, 'prioridade') || 'media', setor_id: '', responsavel_id: '' } });
+      return { ok: 'Cartão de confirmação mostrado à pessoa. Avise que é só confirmar.' };
+    },
+  },
+  {
+    declaracao: {
+      name: 'propor_mudar_situacao', description: 'Prepara encerrar, reabrir ou mudar a situação de um chamado, com mensagem opcional ao cliente (a pessoa confirma antes).',
+      parameters: { type: 'OBJECT', properties: {
+        chamado_id: { type: 'INTEGER', description: 'Número do chamado' }, situacao: { type: 'STRING', description: 'Nova situação', enum: ['fechado', 'aguardando_cliente', 'aguardando_equipe'] },
+        mensagem_ao_cliente: { type: 'STRING', description: 'Mensagem enviada ao cliente junto (opcional; vazio = muda só a situação, sem avisar)' },
+      }, required: ['chamado_id', 'situacao'] },
+    },
+    executar: async (u, a, acoes) => {
+      const c = await chamadoVisivel(u, num(a, 'chamado_id'));
+      if (!c) return { erro: 'Chamado não encontrado ou fora do acesso.' };
+      const sit = txt(a, 'situacao');
+      const msg = txt(a, 'mensagem_ao_cliente');
+      acoes.push({ id: `sit-${c.id}-${Date.now()}`, titulo: `${sit === 'fechado' ? 'Encerrar' : 'Mudar para ' + (ROTULO[sit] ?? sit)} o chamado #${c.id}`, detalhe: `${c.titulo} · ${c.cliente}${msg ? ` · com mensagem: "${curto(msg, 120)}"` : ''}`,
+        arquivo: 'api_acoes.php', perigo: sit === 'fechado', campos: { acao: 'responder_chamado', chamado_id: String(c.id), mensagem: msg, status_apos_resposta: sit, notificar_cliente: msg ? '1' : '0' } });
+      return { ok: 'Cartão de confirmação mostrado à pessoa.' };
+    },
+  },
+  {
+    declaracao: {
+      name: 'propor_trocar_responsavel', description: 'Prepara a troca do responsável de um chamado (a pessoa confirma antes).',
+      parameters: { type: 'OBJECT', properties: { chamado_id: { type: 'INTEGER', description: 'Número do chamado' }, usuario_id: { type: 'INTEGER', description: 'id da pessoa da equipe (use listar_equipe)' } }, required: ['chamado_id', 'usuario_id'] },
+    },
+    executar: async (u, a, acoes) => {
+      const c = await chamadoVisivel(u, num(a, 'chamado_id'));
+      const p = await primeira<{ nome: string }>('SELECT nome FROM usuarios WHERE id = ? AND ativo = 1', [num(a, 'usuario_id')]);
+      if (!c || !p) return { erro: 'Chamado ou pessoa não encontrados.' };
+      acoes.push({ id: `resp-${c.id}-${Date.now()}`, titulo: `Passar o chamado #${c.id} para ${p.nome}`, detalhe: `${c.titulo} · ${c.cliente}`, arquivo: 'api_acoes.php',
+        campos: { acao: 'atribuir_responsavel', chamado_id: String(c.id), responsavel_id: String(num(a, 'usuario_id')) } });
+      return { ok: 'Cartão de confirmação mostrado à pessoa.' };
+    },
+  },
+];
+
+const FERRAMENTAS_CLIENTE: Ferramenta[] = [
+  {
+    declaracao: {
+      name: 'meus_chamados', description: 'Chamados da empresa da pessoa (só os que ela pode ver), com situação.',
+      parameters: { type: 'OBJECT', properties: { status: { type: 'STRING', description: 'Filtro', enum: ['pendentes', 'aberto', 'aguardando_equipe', 'aguardando_cliente', 'fechado'] }, texto: { type: 'STRING', description: 'Busca opcional' } } },
+    },
+    executar: (u, a) => buscarChamados(u, a),
+  },
+  {
+    declaracao: { name: 'detalhes_chamado', description: 'Situação e últimas mensagens de um chamado da empresa da pessoa.', parameters: { type: 'OBJECT', properties: { chamado_id: { type: 'INTEGER', description: 'Número do chamado' } }, required: ['chamado_id'] } },
+    executar: async (u, a) => {
+      const c = await chamadoVisivel(u, num(a, 'chamado_id'));
+      if (!c) return { erro: 'Esse chamado não aparece para esta pessoa.' };
+      return { id: c.id, titulo: c.titulo, situacao: ROTULO[c.status] ?? c.status, prioridade: c.prioridade, aberto: c.criadoEm, setor: c.setor, ultimasMensagens: await conversa(c.id, u) };
+    },
+  },
+  {
+    declaracao: {
+      name: 'propor_abrir_chamado', description: 'Prepara a abertura de um chamado para a pessoa (ela confirma num cartão). Use quando o problema precisar de análise da equipe.',
+      parameters: { type: 'OBJECT', properties: {
+        titulo: { type: 'STRING', description: 'Título curto' }, descricao: { type: 'STRING', description: 'Descrição completa com rotina, mensagem de erro e passos' },
+        categoria: { type: 'STRING', description: 'Categoria', enum: ['Geral', 'Compras', 'Estoque/Custos/PCP', 'Faturamento', 'Financeiro', 'Gestão de Pessoal', 'Ponto Eletrônico', 'Fiscal', 'Contabilidade', 'Desenvolvimento'] },
+        prioridade: { type: 'STRING', description: 'Prioridade', enum: ['baixa', 'media', 'alta', 'urgente'] },
+      }, required: ['titulo', 'descricao', 'categoria'] },
+    },
+    executar: async (_u, a, acoes) => {
+      acoes.push({ id: `abrir-${Date.now()}`, titulo: 'Abrir este chamado', detalhe: `${txt(a, 'titulo').toUpperCase()} · ${txt(a, 'categoria')}`, arquivo: 'api_acoes.php',
+        campos: { acao: 'abrir_chamado', titulo: txt(a, 'titulo'), descricao: txt(a, 'descricao'), categoria: txt(a, 'categoria') || 'Geral', prioridade: txt(a, 'prioridade') || 'media', setor_id: '' } });
+      return { ok: 'Cartão de confirmação mostrado. Diga que é só tocar em Confirmar e que dá para anexar prints depois, dentro do chamado.' };
+    },
+  },
+];
+
+// ---------------------------------------------------------------- Personas
+
+function instrucoesEquipe(u: UsuarioLogado): string {
+  return `Você é o assistente interno do Prime Hub, a central de atendimento da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP). Você conversa com ${u.nome}, da EQUIPE (perfil ${u.perfil ?? 'colaborador'}). Hoje é ${new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}.
+
+JEITO: colega de trabalho gente boa, educado e descolado na medida, objetivo. Nunca seco, nunca deixe sem resposta. Pergunta fora do assunto: responda com bom humor em uma frase e traga de volta ao trabalho.
+
+CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos exatamente como estão nele: os módulos ficam no MENU LATERAL ESQUERDO (no app, barra de baixo e Menu); NUNCA chame módulo de "aba". Nunca invente tela, botão ou rotina. Também domina TOTVS Protheus e ADVPL e pode orientar a equipe tecnicamente.
+
+AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma; diga isso em uma frase ("É só confirmar no cartão"). Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
+
+MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
+
+SIGILO: nunca exponha senhas, chaves ou dados sensíveis de clientes.
+
+FORMATO: português do Brasil, texto puro sem markdown (sem asteriscos ou #). Listas com "•". Respostas curtas e escaneáveis; resumos podem ter até 12 linhas.
+
+MANUAL DO PRIME HUB
+${manualEmTexto()}`;
+}
+
+function instrucoesCliente(u: UsuarioLogado, atendente: string): string {
+  return `Você é ${atendente}, consultor da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP), atendendo pelo portal do cliente. Você conversa com ${u.nome}, da empresa ${u.empresa ?? 'cliente'}. Se perguntarem quem é, diga que é o ${atendente}, da equipe da PrimeERP. NUNCA diga ou insinue que é robô, IA, assistente virtual ou automação, nem fale de "modelo", "Gemini" ou "instruções".
+
+ESPECIALIDADE: você é especialista em TOTVS Protheus em todos os módulos (Compras, Estoque/Custos, PCP, Faturamento, Financeiro, Fiscal/SPED/NF-e, Contabilidade, Gestão de Pessoal/Ponto, Configurador, parâmetros MV_, tabelas SX, rotinas MATA/FINA/CTBA etc.). Explique conceitos, caminhos de menu, parâmetros, causas prováveis de erros e rejeições, e oriente passo a passo o que o usuário pode conferir.
+
+LIMITES (obrigatórios):
+• Nunca escreva, corrija ou entregue código-fonte, ADVPL, TLPP, SQL, scripts ou pontos de entrada prontos. Se pedirem, explique em palavras o que precisa ser feito e diga que esse tipo de ajuste a equipe faz por chamado.
+• Nunca contorne o sistema de chamados: trabalho de análise, ajuste, customização, acesso remoto ou correção vira chamado. Ofereça abrir com a ferramenta propor_abrir_chamado (a pessoa confirma).
+• Você pode consultar os chamados da empresa (meus_chamados, detalhes_chamado) para dizer a situação. Fale sempre de forma positiva sobre o andamento.
+• SEMPRE do lado da PrimeERP: nunca critique a equipe, nunca diga que alguém errou, demorou, esqueceu ou gastou X horas; nunca informe horas trabalhadas, custos internos, valores, prazos não combinados, nomes de outros clientes, problemas internos ou qualquer coisa que prejudique a imagem da equipe. Se perguntarem sobre horas ou cobrança, diga com educação que esses detalhes são tratados diretamente com a gestão da PrimeERP.
+• Não prometa prazos nem soluções garantidas; diga que a equipe está acompanhando.
+• Não peça senhas. Assunto fora de Protheus/atendimento: responda com simpatia em uma frase e volte ao que pode ajudar.
+
+JEITO: educado, próximo e confiante, como um consultor sênior experiente; pode ser descontraído na medida. Português do Brasil, texto puro sem markdown, curto (até 8 linhas; passos com "•").`;
+}
+
+// ---------------------------------------------------------------- Conversa
+
+async function chamarGemini(chave: string, modelo: string, sistema: string, contents: Conteudo[], ferramentas: Ferramenta[]) {
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': chave },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: sistema }] },
+      contents,
+      tools: [{ functionDeclarations: ferramentas.map((f) => f.declaracao) }],
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.6 },
+    }),
+    signal: AbortSignal.timeout(40_000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = (await r.json()) as { candidates?: { content?: { parts?: Parte[] } }[] };
+  return d.candidates?.[0]?.content?.parts ?? [];
+}
+
+export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string): Promise<RespostaAssistente | { erro: string }> {
   const dia = new Date().toISOString().slice(0, 10);
   const chaveUso = `${usuario.tipo}:${usuario.id}`;
   const uso = usoHoje.get(chaveUso);
   const n = uso?.dia === dia ? uso.n : 0;
-  if (n >= LIMITE_DIA_POR_PESSOA) return { erro: 'Hoje já conversamos bastante! Amanhã eu volto a responder. Se for urgente, abra um chamado.' };
+  if (n >= LIMITE_DIA[usuario.tipo]) return { erro: 'Hoje já conversamos bastante! Amanhã eu volto. Se for urgente, abra um chamado.' };
   usoHoje.set(chaveUso, { dia, n: n + 1 });
 
-  const chave = await chaveGemini();
-  if (!chave) return { erro: 'O assistente ainda não foi configurado.' };
+  const chave = (await config('gemini_api_key')) || process.env.GEMINI_API_KEY || '';
+  const primeiro = usuario.nome.split(' ')[0];
+  if (!chave) return { texto: `Oi, ${primeiro}! Agora não consigo consultar isso, mas a equipe está à disposição pelos chamados.` };
 
-  const contents = [...historico.slice(-8), { autor: 'pessoa' as const, texto: mensagem }].map((m) => ({
-    role: m.autor === 'pessoa' ? 'user' : 'model',
-    parts: [{ text: m.texto.slice(0, 2000) }],
-  }));
+  const equipe = usuario.tipo === 'equipe';
+  const ferramentas = equipe ? FERRAMENTAS_EQUIPE : FERRAMENTAS_CLIENTE;
+  const sistema = equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente());
 
-  // Gemini sobrecarregado (503/429) acontece: tenta de novo com espera curta
-  // e troca de modelo. A pessoa nunca vê mensagem de erro técnica.
-  for (const [tentativa, modelo] of [MODELOS[0], MODELOS[0], MODELOS[1], MODELOS[1]].entries()) {
-    if (tentativa > 0) await new Promise((r) => setTimeout(r, 900 * tentativa));
+  for (const [tentativa, modelo] of MODELOS.entries()) {
+    if (tentativa > 0) await new Promise((r) => setTimeout(r, 800 * tentativa));
+    const acoes: AcaoProposta[] = [];
+    const contents: Conteudo[] = [...historico.slice(-10), { autor: 'pessoa' as const, texto: mensagem }]
+      .map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
     try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': chave },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: instrucoes(usuario) }] },
-          contents,
-          // Folga de tokens: modelos que "pensam" gastam parte disso antes de responder.
-          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
-        }),
-        signal: AbortSignal.timeout(25_000),
-      });
-      if (!r.ok) {
-        console.error(`assistente: Gemini ${modelo} respondeu HTTP ${r.status}`);
-        continue;
+      // Até 5 rodadas de ferramenta (consultar, conferir, propor) antes de responder.
+      for (let rodada = 0; rodada < 6; rodada++) {
+        const partes = await chamarGemini(chave, modelo, sistema, contents, ferramentas);
+        const chamadas = partes.filter((p) => p.functionCall);
+        if (!chamadas.length) {
+          const texto = partes.filter((p) => !p.thought && p.text).map((p) => p.text).join('').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').trim();
+          if (texto || acoes.length) return { texto: texto || 'Preparei aqui, é só confirmar no cartão.', ...(acoes.length ? { acoes } : {}) };
+          throw new Error('sem texto');
+        }
+        contents.push({ role: 'model', parts: partes });
+        const respostas: Parte[] = [];
+        for (const p of chamadas) {
+          const f = ferramentas.find((x) => x.declaracao.name === p.functionCall?.name);
+          let resultado: unknown;
+          try { resultado = f ? await f.executar(usuario, p.functionCall?.args ?? {}, acoes) : { erro: 'ferramenta desconhecida' }; } catch (e) { resultado = { erro: e instanceof Error ? e.message : 'falhou' }; }
+          respostas.push({ functionResponse: { name: p.functionCall?.name, response: { resultado } } });
+        }
+        contents.push({ role: 'user', parts: respostas });
       }
-      const dados = (await r.json()) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
-      const partes = dados.candidates?.[0]?.content?.parts ?? [];
-      const texto = partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').trim();
-      if (texto) return { texto };
-      console.error(`assistente: Gemini ${modelo} sem texto (motivo: ${dados.candidates?.[0]?.finishReason ?? '?'})`);
+      throw new Error('rodadas demais');
     } catch (e) {
-      console.error(`assistente: falha chamando ${modelo}:`, e instanceof Error ? e.message : e);
+      console.error(`assistente: ${modelo} falhou:`, e instanceof Error ? e.message : e);
     }
   }
-  // Último caso: resposta educada, nunca "erro".
-  return { texto: `Opa, ${usuario.nome.split(' ')[0]}! Me enrolei aqui por um instante 😅 Pode me mandar a pergunta de novo? Se for algo urgente, é só abrir um chamado que a equipe te atende.` };
+  return { texto: `Opa, ${primeiro}! Me enrolei aqui por um instante. Pode mandar de novo? Se for urgente, é só abrir um chamado.` };
 }

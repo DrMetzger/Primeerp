@@ -1,0 +1,78 @@
+# Teste de ponta a ponta dos DOIS assistentes (equipe e cliente) num banco
+# descartável com dados fictícios -- nunca toca produção. Usa o secret
+# GEMINI_KEY (algumas chamadas por execução). O log mostra só as respostas.
+name: Testar assistentes de IA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - novo/apps/api/src/assistente.ts
+      - novo/packages/shared/src/manual.ts
+      - .github/scripts/teste_assistente.mjs
+      - .github/workflows/testar-assistente.yml
+
+permissions:
+  contents: read
+
+jobs:
+  teste:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: adminprime_test
+          MARIADB_USER: adminprime
+          MARIADB_PASSWORD: testpass123
+        ports: ['3306:3306']
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-retries=20
+    env:
+      ADMINPRIME_DB_HOST: 127.0.0.1
+      ADMINPRIME_DB_NAME: adminprime_test
+      ADMINPRIME_DB_USER: adminprime
+      ADMINPRIME_DB_PASS: testpass123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, curl, mbstring
+      - name: Criar tabelas e dados fictícios
+        run: |
+          php -r '
+            require "config/config.php";
+            spl_autoload_register(function ($c) { $f = "src/" . substr($c, 11) . ".php"; if (is_file($f)) require $f; });
+            $p = new PDO("mysql:host=127.0.0.1;dbname=adminprime_test;charset=utf8mb4", "adminprime", "testpass123",
+              [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+            for ($i = 0; $i < 4; $i++) { try { AdminPrime\Migrations::run($p); } catch (Throwable $e) {} }'
+          php .github/scripts/teste_ia_chamados.php --sem-ia > /dev/null
+          mysql -h127.0.0.1 -uadminprime -ptestpass123 adminprime_test -e "
+            INSERT IGNORE INTO usuarios (id, nome, email, senha_hash, perfil) VALUES (1, 'Kleber Farias', 'kleber@teste.local', 'x', 'admin');
+            UPDATE clientes SET acesso_fora_horario = 1 WHERE id = 900;
+            UPDATE chamados SET status = 'aguardando_equipe', prioridade = 'urgente' WHERE id = (SELECT id FROM (SELECT MAX(id) id FROM chamados) t);"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependências
+        working-directory: novo
+        run: |
+          corepack enable
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile --filter @primehub/api...
+      - name: Testar assistentes
+        working-directory: novo/apps/api
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
+          PORT: '3999'
+          DB_HOST: 127.0.0.1
+          DB_NAME: adminprime_test
+          DB_USER: adminprime
+          DB_PASS: testpass123
+          JWT_SECRET: segredo-de-teste-do-workflow
+          SSO_SECRET: sso-de-teste
+        run: |
+          npx tsx src/index.ts > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -s localhost:3999/api/saude && break; sleep 1; done
+          node ../../../.github/scripts/teste_assistente.mjs
+          echo "---- log da API (erros) ----"; grep -i "assistente\|erro" api.log | head -20 || true
