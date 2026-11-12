@@ -1,4 +1,4 @@
-import type { ChamadoDetalhe, ClienteDetalhe, ClienteResumo, UsuarioLogado } from '@primehub/shared';
+import type { ChamadoDetalhe, ClienteDetalhe, ClienteResumo, SetorDetalhe, UsuarioLogado } from '@primehub/shared';
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { SQL_CHAMADO_RESUMO } from './dashboard';
 import { consulta, primeira } from './db';
@@ -56,9 +56,11 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
     consulta<ClienteDetalhe['setores'][number]>(
       `SELECT s.id, s.nome, s.ativo, (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ('aberto','aguardando_equipe')) pendentes
          FROM setores s WHERE s.cliente_id = ? ORDER BY s.nome`, [id]),
-    consulta<ClienteDetalhe['pessoas'][number]>(
-      `SELECT sr.id, sr.nome, sr.email, sr.telefone, sr.foto_perfil foto, s.nome setor, sr.portal_ativo portalAtivo
-         FROM setor_responsaveis sr LEFT JOIN setores s ON s.id = sr.setor_id WHERE sr.cliente_id = ? ORDER BY sr.nome`, [id]),
+    consulta<ClienteDetalhe['pessoas'][number] & { setorIdsTxt: string | null }>(
+      `SELECT sr.id, sr.nome, sr.email, sr.telefone, sr.documento, sr.eh_master master, sr.foto_perfil foto, sr.portal_ativo portalAtivo,
+              (SELECT GROUP_CONCAT(s2.nome ORDER BY s2.nome SEPARATOR ', ') FROM setor_responsavel_setores v JOIN setores s2 ON s2.id = v.setor_id WHERE v.setor_responsavel_id = sr.id) setor,
+              (SELECT GROUP_CONCAT(v.setor_id) FROM setor_responsavel_setores v WHERE v.setor_responsavel_id = sr.id) setorIdsTxt
+         FROM setor_responsaveis sr WHERE sr.cliente_id = ? ORDER BY sr.nome`, [id]),
     consulta<ClienteDetalhe['documentos'][number]>(
       `SELECT d.id, d.titulo, d.categoria, s.nome setor, d.arquivo_nome_original arquivo, d.arquivo_tamanho tamanho, d.criado_em criadoEm
          FROM documentos d LEFT JOIN setores s ON s.id = d.setor_id WHERE d.cliente_id = ? ORDER BY d.criado_em DESC LIMIT 200`, [id]),
@@ -72,7 +74,7 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
   return {
     cliente: numeros(base, CAMPOS_NUM),
     setores: setores.map((s) => ({ ...s, ativo: Boolean(s.ativo), pendentes: Number(s.pendentes) })),
-    pessoas: pessoas.map((p) => ({ ...p, portalAtivo: Boolean(p.portalAtivo) })),
+    pessoas: pessoas.map(({ setorIdsTxt, ...p }) => ({ ...p, portalAtivo: Boolean(p.portalAtivo), master: Boolean(p.master), setorIds: String(setorIdsTxt ?? '').split(',').filter(Boolean).map(Number) })),
     documentos: documentos.map((d) => ({ ...d, tamanho: Number(d.tamanho) })),
     treinamentos,
     equipe,
@@ -124,4 +126,47 @@ export async function detalharChamado(usuario: UsuarioLogado, id: number): Promi
   const { aberturaNome: _n, aberturaFoto: _f, ...resto } = chamado;
   void _n; void _f;
   return { chamado: { ...resto, horasEsperando: resto.horasEsperando === null ? null : Number(resto.horasEsperando) }, mensagens, ia };
+}
+
+/** Tudo de um setor do cliente (a "pasta" do setor, como no sistema de sempre). */
+export async function detalharSetor(usuario: UsuarioLogado, clienteId: number, setorId: number): Promise<SetorDetalhe | null> {
+  const f = await filtroClientes(usuario);
+  const cliente = await primeira<SetorDetalhe['cliente']>(`SELECT c.id, c.nome, c.logo FROM clientes c WHERE ${f.sql} AND c.id = ?`, [...f.params, clienteId]);
+  const setor = cliente && await primeira<{ id: number; nome: string; icone: string | null; ativo: number }>('SELECT id, nome, icone, ativo FROM setores WHERE id = ? AND cliente_id = ?', [setorId, clienteId]);
+  if (!cliente || !setor) return null;
+  if (!PERFIS_ADMIN.includes(usuario.perfil ?? '')) {
+    const restrito = await primeira<{ r: number }>('SELECT acesso_restrito_por_cliente r FROM usuarios WHERE id = ?', [usuario.id]);
+    if (restrito?.r) {
+      const ok = await primeira<{ x: number }>('SELECT 1 x FROM usuario_cliente_setores WHERE usuario_id = ? AND cliente_id = ? AND (setor_id IS NULL OR setor_id = ?)', [usuario.id, clienteId, setorId]);
+      if (!ok) return null;
+    }
+  }
+  const [pessoas, docs, treinamentos, fontes, propostas, kpis, sugestoesIa, equipe] = await Promise.all([
+    consulta<SetorDetalhe['pessoas'][number]>(
+      `SELECT sr.id, sr.nome, sr.email, sr.telefone, sr.foto_perfil foto, ? setor, sr.portal_ativo portalAtivo FROM setor_responsaveis sr
+        WHERE sr.cliente_id = ? AND (sr.setor_id = ? OR sr.id IN (SELECT setor_responsavel_id FROM setor_responsavel_setores WHERE setor_id = ?)) ORDER BY sr.nome`, [setor.nome, clienteId, setorId, setorId]),
+    consulta<SetorDetalhe['documentos'][number] & { categoria: string | null }>(
+      `SELECT d.id, d.titulo, d.categoria, NULL setor, d.arquivo_nome_original arquivo, d.arquivo_tamanho tamanho, d.criado_em criadoEm FROM documentos d WHERE d.cliente_id = ? AND d.setor_id = ? ORDER BY d.criado_em DESC`, [clienteId, setorId]),
+    consulta<SetorDetalhe['treinamentos'][number]>(
+      `SELECT t.id, t.titulo, t.tipo, t.status, NULL setor, CONCAT(t.data_inicio, ' ', COALESCE(t.hora_inicio, '00:00:00')) inicio,
+              CASE WHEN t.data_fim IS NULL THEN NULL ELSE CONCAT(t.data_fim, ' ', COALESCE(t.hora_fim, '00:00:00')) END fim, t.link_reuniao link, t.descricao, t.responsavel_id responsavelId, t.chamado_id chamadoId
+         FROM treinamentos t WHERE t.cliente_id = ? AND t.setor_id = ? ORDER BY t.data_inicio DESC, t.hora_inicio`, [clienteId, setorId]),
+    consulta<SetorDetalhe['fontes'][number]>(
+      `SELECT id, titulo, ponto_entrada pontoEntrada, descricao, arquivo_nome_original arquivo, arquivo_tamanho tamanho, criado_em criadoEm FROM setor_fontes_advpl WHERE setor_id = ? ORDER BY titulo`, [setorId]),
+    consulta<SetorDetalhe['propostas'][number]>(
+      `SELECT id, titulo, descricao, status, documento_id documentoId, criado_em criadoEm FROM propostas_desenvolvimento WHERE cliente_id = ? AND setor_id = ? ORDER BY criado_em DESC`, [clienteId, setorId]).catch(() => []),
+    consulta<SetorDetalhe['kpis'][number]>(
+      `SELECT id, nome_kpi nome, valor, meta, direcao_melhor direcao, unidade, periodo, observacoes FROM kpis WHERE cliente_id = ? AND setor_id = ? ORDER BY periodo DESC, nome_kpi`, [clienteId, setorId]).catch(() => []),
+    consulta<SetorDetalhe['sugestoesIa'][number]>(`SELECT id, sugestao texto, criado_em criadoEm FROM setor_sugestoes_ia WHERE setor_id = ? ORDER BY criado_em DESC LIMIT 10`, [setorId]).catch(() => []),
+    consulta<SetorDetalhe['equipe'][number]>('SELECT id, nome, foto_perfil foto FROM usuarios WHERE ativo = 1 ORDER BY nome'),
+  ]);
+  const video = (d: { categoria: string | null }) => d.categoria === 'Vídeo aula';
+  return {
+    cliente, setor: { ...setor, ativo: Boolean(setor.ativo) },
+    pessoas: pessoas.map((p) => ({ ...p, portalAtivo: Boolean(p.portalAtivo) })),
+    documentos: docs.filter((d) => !video(d)).map((d) => ({ ...d, tamanho: Number(d.tamanho) })),
+    videoaulas: docs.filter(video).map((d) => ({ ...d, tamanho: Number(d.tamanho) })),
+    treinamentos, fontes: fontes.map((x) => ({ ...x, tamanho: Number(x.tamanho) })), propostas,
+    kpis: kpis.map((k) => ({ ...k, valor: Number(k.valor), meta: k.meta === null ? null : Number(k.meta) })), sugestoesIa, equipe,
+  };
 }

@@ -160,6 +160,9 @@ export interface Pessoa {
   foto: string | null;
   setor: string | null;
   portalAtivo: boolean;
+  documento?: string | null;
+  master?: boolean;
+  setorIds?: number[];
 }
 
 export interface Documento {
@@ -230,3 +233,17 @@ export interface Perfil { nome: string; email: string; telefone: string | null; 
 
 export interface PessoaPortal { id: number; nome: string; email: string | null; telefone: string | null; foto: string | null; master: boolean; portalAtivo: boolean; setores: string[] }
 export interface EquipePortal { setores: { id: number; nome: string; ativo: boolean }[]; pessoas: PessoaPortal[]; podeGerenciar: boolean }
+
+export interface SetorDetalhe {
+  cliente: { id: number; nome: string; logo: string | null };
+  setor: { id: number; nome: string; icone: string | null; ativo: boolean };
+  pessoas: Pessoa[];
+  documentos: Documento[];
+  videoaulas: Documento[];
+  treinamentos: (Treinamento & { fim: string | null; descricao: string | null; responsavelId: number | null; chamadoId: number | null })[];
+  fontes: { id: number; titulo: string; pontoEntrada: string | null; descricao: string | null; arquivo: string; tamanho: number; criadoEm: string }[];
+  propostas: { id: number; titulo: string; descricao: string | null; status: string; documentoId: number | null; criadoEm: string }[];
+  kpis: { id: number; nome: string; valor: number; meta: number | null; direcao: string | null; unidade: string | null; periodo: string | null; observacoes: string | null }[];
+  sugestoesIa: { id: number; texto: string; criadoEm: string }[];
+  equipe: { id: number; nome: string; foto: string | null }[];
+}

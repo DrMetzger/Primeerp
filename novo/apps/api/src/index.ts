@@ -8,7 +8,7 @@ import type { UsuarioLogado } from '@primehub/shared';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
-import { detalharChamado, detalharCliente, listarClientes } from './clientes';
+import { detalharChamado, detalharCliente, detalharSetor, listarClientes } from './clientes';
 import { garantirEstrutura } from './pessoas';
 import { lerPerfil, listarFontesGlobais, listarUsuarios, montarAgenda, portalCalendario, portalEquipe, portalFontes, portalVideoaulas } from './modulos';
 import { config } from './config';
@@ -89,6 +89,7 @@ app.get('/api/chamados', exigirLogin(), async (c) => {
     ...(status ? { status } : {}),
     ...(busca ? { busca } : {}),
     ...(Number(c.req.query('cliente')) > 0 ? { clienteId: Number(c.req.query('cliente')) } : {}),
+    ...(Number(c.req.query('setor')) > 0 ? { setorId: Number(c.req.query('setor')) } : {}),
   }));
 });
 
@@ -97,6 +98,11 @@ app.get('/api/clientes', exigirLogin('equipe'), async (c) => c.json(await listar
 app.get('/api/clientes/:id', exigirLogin('equipe'), async (c) => {
   const d = await detalharCliente(c.get('usuario'), Number(c.req.param('id')));
   return d ? c.json(d) : c.json({ erro: 'Cliente não encontrado.' }, 404);
+});
+
+app.get('/api/clientes/:id/setores/:setor', exigirLogin('equipe'), async (c) => {
+  const d = await detalharSetor(c.get('usuario'), Number(c.req.param('id')), Number(c.req.param('setor')));
+  return d ? c.json(d) : c.json({ erro: 'Setor não encontrado.' }, 404);
 });
 
 app.get('/api/chamados/:id', exigirLogin(), async (c) => {

@@ -1,7 +1,9 @@
 'use client';
 
 import type { Agenda, TarefaAgenda } from '@primehub/shared';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, Plus, Trash2, Video } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, Columns3, ExternalLink, GanttChart, Plus, Trash2, Video } from 'lucide-react';
+import { CalendarioMes } from '@/components/calendario-mes';
+import { GanttSemana } from '@/components/gantt-semana';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { EsqueletoLista } from '@/components/esqueleto';
@@ -26,9 +28,12 @@ export default function PaginaAgenda() {
   const [form, setForm] = useState<FormTarefa | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [aviso, setAviso] = useState('');
+  const [visao, setVisao] = useState<'semana' | 'gantt' | 'mes'>('gantt');
 
   const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(semana); d.setDate(d.getDate() + i); return d; });
-  const de = iso(dias[0] ?? semana), ate = iso(dias[6] ?? semana);
+  // No mês carrega uma janela larga (o calendário navega sozinho entre meses).
+  const largo = (n: number) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return iso(d); };
+  const de = visao === 'mes' ? largo(-3) : iso(dias[0] ?? semana), ate = visao === 'mes' ? largo(6) : iso(dias[6] ?? semana);
 
   const carregar = useCallback(() => {
     api<Agenda>(`/api/agenda?de=${de}&ate=${ate}`).then(setDados).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Não consegui abrir a agenda.'));
@@ -62,6 +67,14 @@ export default function PaginaAgenda() {
     await enviarAcao('agenda.php', { acao: 'mudar_status_tarefa', ajax: '1', tarefa_id: String(t.id), status }).catch(() => carregar());
   }
 
+  async function mover(t: TarefaAgenda, data: string, hora: string) {
+    setDados((d) => d && { ...d, tarefas: d.tarefas.map((x) => (x.id === t.id ? { ...x, data, horaInicio: hora } : x)) });
+    try {
+      await enviarAcao('agenda.php', { acao: 'mover_tarefa', ajax: '1', tarefa_id: String(t.id), data, hora_inicio: hora, duracao_minutos: String(t.duracaoMinutos ?? 60) });
+    } catch { /* volta ao que está salvo */ }
+    carregar();
+  }
+
   const mudar = (k: keyof FormTarefa) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm((f) => f && { ...f, [k]: e.target.value });
   const hoje = iso(new Date());
   const nav = (n: number) => setSemana((s) => { const x = new Date(s); x.setDate(x.getDate() + n * 7); return x; });
@@ -74,14 +87,30 @@ export default function PaginaAgenda() {
 
   return (
     <Casca tipo="equipe" titulo="Agenda" acoes={acoes}>
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Forma de ver a agenda">
+        {([['gantt', 'Gantt', GanttChart, '#8b5cf6'], ['semana', 'Semana', Columns3, '#0ea5e9'], ['mes', 'Mês', CalendarDays, '#10b981']] as const).map(([v, r, Icone, cor]) => (
+          <button key={v} type="button" role="tab" aria-selected={visao === v} onClick={() => setVisao(v)}
+            className={`toque inline-flex items-center gap-2 rounded-2xl border px-4 text-sm font-semibold ${visao === v ? 'border-transparent text-white shadow-lg' : 'border-borda bg-superficie text-texto'}`}
+            style={visao === v ? { background: `linear-gradient(135deg, ${cor}, color-mix(in oklab, ${cor} 60%, #0b1020))` } : undefined}>
+            <Icone size={18} aria-hidden="true" style={visao === v ? undefined : { color: cor }} /> {r}
+          </button>
+        ))}
+      </div>
+      {visao !== 'mes' && <div className="mb-4 flex items-center gap-2">
         <BotaoSecundario onClick={() => nav(-1)} aria-label="Semana anterior"><ChevronLeft size={20} /></BotaoSecundario>
         <p className="flex-1 text-center font-semibold text-texto">{(dias[0] ?? semana).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} – {(dias[6] ?? semana).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
         <BotaoSecundario onClick={() => setSemana(inicioSemana(new Date()))}>Hoje</BotaoSecundario>
         <BotaoSecundario onClick={() => nav(1)} aria-label="Próxima semana"><ChevronRight size={20} /></BotaoSecundario>
-      </div>
+      </div>}
       {erro && <Aviso texto={erro} erro />}
-      {!dados && !erro ? <EsqueletoLista linhas={7} /> : dados && (
+      {dados && visao === 'gantt' && <GanttSemana dias={dias} tarefas={dados.tarefas} eventos={dados.eventos} aoMover={(t, d, h) => void mover(t, d, h)} aoAbrir={editar} />}
+      {dados && visao === 'mes' && (
+        <CalendarioMes eventos={[
+          ...dados.tarefas.map((t) => ({ id: `t${t.id}`, data: t.data, hora: t.horaInicio, titulo: t.titulo, cor: t.status === 'concluida' ? '#64748b' : '#0ea5e9', aoClicar: () => editar(t) })),
+          ...dados.eventos.filter((e) => e.inicio).map((e) => ({ id: `e${e.id}`, data: (e.inicio ?? '').slice(0, 10), hora: (e.inicio ?? '').slice(11, 16), titulo: `${e.titulo} · ${e.cliente ?? ''}`, cor: '#8b5cf6', aoClicar: () => { if (e.link) window.open(e.link, '_blank', 'noopener'); } })),
+        ]} aoEscolherDia={() => undefined} />
+      )}
+      {!dados && !erro ? <EsqueletoLista linhas={7} /> : dados && visao === 'semana' && (
         <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {dias.map((d) => {
             const dia = iso(d);

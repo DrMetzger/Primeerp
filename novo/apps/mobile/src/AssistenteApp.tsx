@@ -1,16 +1,17 @@
 import type { UsuarioLogado } from '@primehub/shared';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
-import { api } from './api';
+import { acaoPhp, api } from './api';
 import { type AcaoRobo, RoboNativo } from './RoboNativo';
 import { useTema } from './tema';
 import { T } from './ui';
 
-interface Mensagem { autor: 'pessoa' | 'assistente'; texto: string }
+interface Acao { id: string; titulo: string; detalhe: string; arquivo: string; campos: Record<string, string>; perigo?: boolean; estado: 'pendente' | 'rodando' | 'feita' | 'cancelada' | 'erro'; aviso?: string }
+interface Mensagem { autor: 'pessoa' | 'assistente'; texto: string; acao?: Acao }
 
 const SUGESTOES = {
-  equipe: ['Como respondo um chamado com a IA?', 'Onde vejo os chamados aguardando nós?', 'Como cadastro um cliente novo?'],
-  cliente: ['Como abro um chamado?', 'Onde acompanho meus chamados?', 'Como anexo um print?'],
+  equipe: ['Resumo da operação de hoje', 'Quais urgentes estão esperando a gente?', 'Como respondo um chamado com a IA?'],
+  cliente: ['Como estão meus chamados?', 'O que é a rejeição 539 da NF-e?', 'Quero abrir um chamado'],
 };
 
 /** Conversa com o assistente (o mesmo robô e a mesma IA do site). */
@@ -23,7 +24,25 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
   const [pensando, setPensando] = useState(false);
   const lista = useRef<FlatList<Mensagem>>(null);
 
-  function responder(resposta: string) {
+  function mudarAcao(id: string, mudanca: Partial<Acao>) {
+    setMensagens((m) => m.map((x) => (x.acao?.id === id ? { ...x, acao: { ...x.acao, ...mudanca } } : x)));
+  }
+
+  /** Ação proposta pela IA: só roda com o toque em Confirmar. */
+  async function confirmar(a: Acao) {
+    mudarAcao(a.id, { estado: 'rodando' });
+    setAcao('anotar');
+    try {
+      const r = await acaoPhp<{ ok: boolean; id?: number | null }>(a.arquivo, a.campos);
+      mudarAcao(a.id, { estado: 'feita', aviso: `Feito!${r.id ? ` Chamado #${r.id} criado.` : ''}` });
+      setAcao('comemorar');
+    } catch (e) {
+      mudarAcao(a.id, { estado: 'erro', aviso: e instanceof Error ? e.message : 'Não deu certo.' });
+      setAcao('parado');
+    }
+  }
+
+  function responder(resposta: string, acoes: Acao[] = []) {
     setAcao('falar');
     let i = 0;
     const passo = () => {
@@ -32,7 +51,7 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
       if (i < resposta.length) setTimeout(passo, 22);
       else {
         setDigitando('');
-        setMensagens((m) => [...m, { autor: 'assistente', texto: resposta }]);
+        setMensagens((m) => [...m, { autor: 'assistente', texto: resposta }, ...acoes.map((a) => ({ autor: 'assistente' as const, texto: '', acao: a }))]);
         setAcao('sorrir');
         setTimeout(() => setAcao('parado'), 1800);
       }
@@ -54,9 +73,9 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
     setPensando(true);
     setAcao('anotar');
     try {
-      const r = await api<{ texto?: string; erro?: string }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p, historico }) });
+      const r = await api<{ texto?: string; erro?: string; acoes?: Omit<Acao, 'estado'>[] }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p, historico: historico.filter((m) => !m.acao) }) });
       setPensando(false);
-      responder(r.texto ?? r.erro ?? 'Não consegui responder agora.');
+      responder(r.texto ?? r.erro ?? 'Não consegui responder agora.', (r.acoes ?? []).map((a) => ({ ...a, estado: 'pendente' as const })));
     } catch {
       setPensando(false);
       responder('Fiquei sem conexão. Tenta de novo?');
@@ -74,7 +93,24 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
       </View>
       <FlatList ref={lista} data={itens} keyExtractor={(_, i) => String(i)} contentContainerStyle={{ padding: 16, gap: 8 }}
         onContentSizeChange={() => lista.current?.scrollToEnd({ animated: true })}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => item.acao ? (
+          <View style={{ alignSelf: 'stretch', borderRadius: 18, padding: 14, gap: 8, borderWidth: 1, borderColor: item.acao.perigo ? tema.perigo : tema.primaria, backgroundColor: tema.superficie }}>
+            <T style={{ fontWeight: '800' }}>⚡ {item.acao.titulo}</T>
+            <T style={{ color: tema.textoSuave, fontSize: 14 }}>{item.acao.detalhe}</T>
+            {item.acao.estado === 'pendente' && (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable onPress={() => item.acao && void confirmar(item.acao)} accessibilityRole="button" style={{ flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: item.acao.perigo ? tema.perigo : tema.primaria }}>
+                  <T style={{ color: '#FFFFFF', fontWeight: '800' }}>Confirmar</T>
+                </Pressable>
+                <Pressable onPress={() => item.acao && mudarAcao(item.acao.id, { estado: 'cancelada', aviso: 'Cancelado.' })} accessibilityRole="button" style={{ minHeight: 48, paddingHorizontal: 16, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: tema.borda }}>
+                  <T>Cancelar</T>
+                </Pressable>
+              </View>
+            )}
+            {item.acao.estado === 'rodando' && <T style={{ color: tema.textoSuave }}>Fazendo…</T>}
+            {!!item.acao.aviso && <T style={{ fontWeight: '700', color: item.acao.estado === 'feita' ? tema.sucesso : item.acao.estado === 'erro' ? tema.perigo : tema.textoSuave }}>{item.acao.aviso}</T>}
+          </View>
+        ) : (
           <View style={{ alignSelf: item.autor === 'pessoa' ? 'flex-end' : 'flex-start', maxWidth: '85%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10,
             backgroundColor: item.autor === 'pessoa' ? tema.primaria : tema.superficie, borderWidth: item.autor === 'pessoa' ? 0 : 1, borderColor: tema.borda }}>
             <T style={{ color: item.autor === 'pessoa' ? tema.primariaTexto : tema.texto, fontSize: 16, lineHeight: 22 }}>{item.texto}</T>

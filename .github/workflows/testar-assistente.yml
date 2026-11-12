@@ -61,6 +61,7 @@ jobs:
           corepack enable
           COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile --filter @primehub/api...
       - name: Testar assistentes
+        timeout-minutes: 12
         working-directory: novo/apps/api
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}

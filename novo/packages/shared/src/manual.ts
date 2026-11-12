@@ -97,16 +97,22 @@ A ficha do cliente tem abas internas: Visão geral (indicadores e chamados recen
   {
     id: 'setores',
     titulo: '10. Setores do cliente',
-    texto: `Cada cliente pode ser dividido em setores (Financeiro, Fiscal, Compras, etc.). Setores são independentes: a pessoa de um setor só vê os chamados do próprio setor, enquanto o master (contato principal, ou alguém marcado como master) vê a empresa toda. Ao entrar em um setor pela ficha do cliente, a equipe vê só o que é daquele setor: chamados, documentos, treinamentos, videoaulas, fontes ADVPL e as pessoas responsáveis.
+    texto: `Cada cliente pode ser dividido em setores (Financeiro, Fiscal, Compras, etc.). Setores são independentes: a pessoa de um setor só vê os chamados do próprio setor, enquanto o master (contato principal, ou alguém marcado como master) vê a empresa toda.
 
-A equipe cria e edita setores pela ficha do cliente. Clientes liberados pela Prime também podem criar setores e cadastrar pessoas pelo item "Minha equipe" do portal; o cliente nunca consegue excluir nada, só incluir e ajustar.`,
+Na ficha do cliente, aba Setores, cada setor é um cartão colorido; o lápis edita ou exclui e o "+ Setor" cria. Tocando no cartão abre a PÁGINA DO SETOR, com abas próprias: Chamados (só os do setor), Pessoas (convite e retirada de acesso), Documentos, Calendário (treinamentos, reuniões, conversas e auxílios em calendário mensal, com agendamento), Vídeo aulas, Fontes ADVPL (enviar, editar, excluir), Propostas de desenvolvimento (com situação), Métricas (indicadores com meta e barra de progresso) e IA do setor (análise com diagnóstico e sugestões de melhoria).
+
+As pessoas do cliente são cadastradas na aba Usuários da ficha: nome, e-mail, telefone, setores e se é master; ali também se envia convite, link de nova senha e se tira o acesso. Clientes liberados pela Prime também podem criar setores e cadastrar pessoas pelo item "Minha equipe" do portal; o cliente nunca consegue excluir nada.`,
   },
   {
     id: 'agenda',
     titulo: '11. Agenda da Prime (calendário e Gantt)',
-    texto: `Menu lateral > Agenda é o quadro de trabalho compartilhado da gestão (admin, diretor e CEO), para decidir qual cliente atender primeiro e quando. Mostra a semana com as tarefas da equipe e as reuniões e treinamentos marcados com clientes. Use as setas para trocar de semana e "Hoje" para voltar.
+    texto: `Menu lateral > Agenda é o quadro de trabalho compartilhado da gestão (admin, diretor e CEO), para decidir qual cliente atender primeiro e quando. No topo há três formas de ver: Gantt, Semana e Mês.
 
-"Nova tarefa" (ou o + de cada dia) cria uma tarefa com título, dia, horário, duração, cliente, responsável e anotações. Marque a caixinha para dar a tarefa como feita. Tarefas ligadas a um chamado mostram o número, que leva direto à conversa. As reuniões com clientes aparecem com o logo da empresa e o botão para entrar no link da reunião.`,
+GANTT: uma linha por dia da semana e o horário na horizontal (07h às 20h), com a faixa do almoço e uma linha vermelha marcando a hora atual. Cada tarefa é uma barra colorida pela pessoa responsável. Para reagendar, ARRASTE a barra para outro horário ou outro dia (encaixa de 15 em 15 minutos); para editar, toque nela. Reuniões e treinamentos com clientes aparecem tracejados e abrem o link da reunião.
+
+SEMANA: um cartão por dia, com caixinha para marcar a tarefa como feita. MÊS: calendário mensal completo com tudo marcado; toque no dia para ver a lista.
+
+"Nova tarefa" (ou o + de cada dia) cria uma tarefa com título, dia, horário, duração, cliente, responsável e anotações. Tarefas ligadas a um chamado mostram o número, que leva direto à conversa.`,
   },
   {
     id: 'relatorios',

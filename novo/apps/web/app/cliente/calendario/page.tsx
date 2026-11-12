@@ -3,6 +3,7 @@
 import type { EventoCliente } from '@primehub/shared';
 import { CalendarDays, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { CalendarioMes } from '@/components/calendario-mes';
 import { Casca } from '@/components/casca';
 import { EsqueletoLista } from '@/components/esqueleto';
 import { Vazio, dataBR } from '@/components/ui/basico';
@@ -39,6 +40,9 @@ export default function PaginaCalendario() {
     <Casca tipo="cliente" titulo="Calendário">
       {!itens ? <EsqueletoLista /> : !itens.length ? <Vazio><CalendarDays className="mx-auto mb-2" aria-hidden="true" />Nenhum treinamento ou reunião agendado.</Vazio> : (
         <div className="space-y-6">
+          <CalendarioMes eventos={itens.filter((e) => e.inicio).map((e) => ({ id: String(e.id), data: (e.inicio ?? '').slice(0, 10), hora: (e.inicio ?? '').slice(11, 16), titulo: e.titulo,
+            cor: ({ treinamento: '#10b981', reuniao: '#6366f1', conversa: '#0ea5e9', auxilio: '#f59e0b' } as Record<string, string>)[e.tipo ?? ''] ?? '#10b981',
+            aoClicar: () => { if (e.link) window.open(e.link, '_blank', 'noopener'); } }))} />
           <section><h2 className="mb-2 font-bold text-texto">Próximos</h2>{proximos.length ? lista(proximos) : <Vazio>Nada marcado por enquanto.</Vazio>}</section>
           {passados.length > 0 && <section><h2 className="mb-2 font-bold text-texto">Já aconteceram</h2>{lista(passados)}</section>}
         </div>

@@ -22,11 +22,13 @@ const perguntas = [
 ];
 
 for (const [t, quem, pergunta] of perguntas) {
+  const inicio = Date.now();
   const r = await fetch('http://localhost:3999/api/assistente', {
+    signal: AbortSignal.timeout(90_000),
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${t}` },
     body: JSON.stringify({ mensagem: pergunta, historico: [] }),
   });
   const d = await r.json();
-  console.log(`\n===== [${quem}] ${pergunta}\n${d.texto ?? d.erro}`);
+  console.log(`\n===== [${quem}] ${pergunta} (${Math.round((Date.now() - inicio) / 1000)}s)\n${d.texto ?? d.erro}`);
   for (const a of d.acoes ?? []) console.log(`  [CARTÃO] ${a.titulo} — ${a.detalhe} → ${JSON.stringify(a.campos)}`);
 }
