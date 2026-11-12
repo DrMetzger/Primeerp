@@ -2,7 +2,7 @@
 
 import type { UsuarioLogado } from '@primehub/shared';
 import {
-  BarChart3, Bot, CalendarDays, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
+  BarChart3, BookOpen, Bot, CalendarDays, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
   Settings, UserCircle, Users, UsersRound, Video, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
@@ -12,25 +12,26 @@ import { sair, usuarioSalvo } from '@/lib/sessao';
 import { TemaBotao } from './tema-botao';
 
 /** Item do menu: tudo é tela do sistema novo. */
-interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; somenteAdmin?: boolean }
+interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; cor?: string; somenteAdmin?: boolean }
 
 const MENU_EQUIPE: ItemMenu[] = [
-  { rotulo: 'Dashboard', icone: LayoutDashboard, href: '/painel' },
-  { rotulo: 'Chamados', icone: LifeBuoy, href: '/painel/chamados' },
-  { rotulo: 'Clientes', icone: Users, href: '/painel/clientes' },
-  { rotulo: 'Agenda', icone: CalendarDays, href: '/painel/agenda', somenteAdmin: true },
-  { rotulo: 'Relatórios', icone: BarChart3, href: '/painel/relatorios', somenteAdmin: true },
-  { rotulo: 'Fontes ADVPL', icone: Code2, href: '/painel/fontes', somenteAdmin: true },
-  { rotulo: 'Usuários', icone: UsersRound, href: '/painel/usuarios', somenteAdmin: true },
-  { rotulo: 'Configurações', icone: Settings, href: '/painel/configuracoes', somenteAdmin: true },
+  { rotulo: 'Dashboard', icone: LayoutDashboard, cor: '#6366f1', href: '/painel' },
+  { rotulo: 'Chamados', icone: LifeBuoy, cor: '#0ea5e9', href: '/painel/chamados' },
+  { rotulo: 'Clientes', icone: Users, cor: '#10b981', href: '/painel/clientes' },
+  { rotulo: 'Agenda', icone: CalendarDays, cor: '#f43f5e', href: '/painel/agenda', somenteAdmin: true },
+  { rotulo: 'Relatórios', icone: BarChart3, cor: '#84cc16', href: '/painel/relatorios', somenteAdmin: true },
+  { rotulo: 'Fontes ADVPL', icone: Code2, cor: '#06b6d4', href: '/painel/fontes', somenteAdmin: true },
+  { rotulo: 'Usuários', icone: UsersRound, cor: '#8b5cf6', href: '/painel/usuarios', somenteAdmin: true },
+  { rotulo: 'Configurações', icone: Settings, cor: '#94a3b8', href: '/painel/configuracoes', somenteAdmin: true },
+  { rotulo: 'Manual', icone: BookOpen, cor: '#f59e0b', href: '/painel/manual' },
 ];
 
 const MENU_CLIENTE: ItemMenu[] = [
-  { rotulo: 'Meus chamados', icone: LifeBuoy, href: '/cliente' },
-  { rotulo: 'Calendário', icone: CalendarDays, href: '/cliente/calendario' },
-  { rotulo: 'Videoaulas', icone: Video, href: '/cliente/videoaulas' },
-  { rotulo: 'Fontes ADVPL', icone: Code2, href: '/cliente/fontes' },
-  { rotulo: 'Minha equipe', icone: UsersRound, href: '/cliente/equipe' },
+  { rotulo: 'Meus chamados', icone: LifeBuoy, cor: '#0ea5e9', href: '/cliente' },
+  { rotulo: 'Calendário', icone: CalendarDays, cor: '#f43f5e', href: '/cliente/calendario' },
+  { rotulo: 'Videoaulas', icone: Video, cor: '#d946ef', href: '/cliente/videoaulas' },
+  { rotulo: 'Fontes ADVPL', icone: Code2, cor: '#06b6d4', href: '/cliente/fontes' },
+  { rotulo: 'Minha equipe', icone: UsersRound, cor: '#8b5cf6', href: '/cliente/equipe' },
 ];
 
 const ADMIN = ['admin', 'diretor', 'ceo'];
@@ -91,7 +92,9 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
             <li key={item.rotulo}>
               <button type="button" onClick={() => irPara(item)} aria-current={ativo ? 'page' : undefined}
                 className={`toque group flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium transition ${ativo ? 'gradiente-marca text-white shadow-md' : 'text-suave hover:bg-superficie-alta hover:text-texto'}`}>
-                <Icone size={20} aria-hidden="true" />
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition" style={ativo ? { background: 'rgb(255 255 255 / .2)', color: '#fff' } : { background: `color-mix(in oklab, ${item.cor ?? '#0ea5e9'} 16%, transparent)`, color: item.cor ?? '#0ea5e9' }}>
+                  <Icone size={18} aria-hidden="true" />
+                </span>
                 <span className="flex-1">{item.rotulo}</span>
                 {abrindo === item.rotulo && !ativo ? <span className="text-xs">abrindo…</span> : null}
               </button>

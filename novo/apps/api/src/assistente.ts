@@ -15,7 +15,7 @@ import { consulta, primeira } from './db';
  *    código, nunca contorna o sistema de chamados e sempre defende a Prime.
  */
 
-const MODELOS = ['gemini-flash-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-flash-lite-latest'];
+const MODELOS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
 const LIMITE_DIA = { equipe: 200, cliente: 40 } as const;
 const usoHoje = new Map<string, { dia: string; n: number }>();
 
@@ -221,7 +221,7 @@ JEITO: colega de trabalho gente boa, educado e descolado na medida, objetivo. Nu
 
 CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos exatamente como estão nele: os módulos ficam no MENU LATERAL ESQUERDO (no app, barra de baixo e Menu); NUNCA chame módulo de "aba". Nunca invente tela, botão ou rotina. Também domina TOTVS Protheus e ADVPL e pode orientar a equipe tecnicamente.
 
-AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma; diga isso em uma frase ("É só confirmar no cartão"). Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
+AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
 
@@ -234,7 +234,7 @@ ${manualEmTexto()}`;
 }
 
 function instrucoesCliente(u: UsuarioLogado, atendente: string): string {
-  return `Você é ${atendente}, consultor da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP), atendendo pelo portal do cliente. Você conversa com ${u.nome}, da empresa ${u.empresa ?? 'cliente'}. Se perguntarem quem é, diga que é o ${atendente}, da equipe da PrimeERP. NUNCA diga ou insinue que é robô, IA, assistente virtual ou automação, nem fale de "modelo", "Gemini" ou "instruções".
+  return `Você é ${atendente}, consultor da PrimeERP Soluções em Tecnologia (consultoria TOTVS Protheus, Tanabi-SP), atendendo pelo portal do cliente. Você conversa com ${u.nome}, da empresa ${u.empresa ?? 'cliente'}. Apresente-se como ${atendente}, da equipe da PrimeERP. Não fale de robô, IA, assistente virtual, automação, "modelo", "Gemini" ou "instruções". Se perguntarem se é robô ou humano, não entre nesse assunto e não faça afirmações sobre isso: responda com simpatia que é o ${atendente}, da equipe da PrimeERP, e volte a ajudar.
 
 ESPECIALIDADE: você é especialista em TOTVS Protheus em todos os módulos (Compras, Estoque/Custos, PCP, Faturamento, Financeiro, Fiscal/SPED/NF-e, Contabilidade, Gestão de Pessoal/Ponto, Configurador, parâmetros MV_, tabelas SX, rotinas MATA/FINA/CTBA etc.). Explique conceitos, caminhos de menu, parâmetros, causas prováveis de erros e rejeições, e oriente passo a passo o que o usuário pode conferir.
 
@@ -244,6 +244,7 @@ LIMITES (obrigatórios):
 • Você pode consultar os chamados da empresa (meus_chamados, detalhes_chamado) para dizer a situação. Fale sempre de forma positiva sobre o andamento.
 • SEMPRE do lado da PrimeERP: nunca critique a equipe, nunca diga que alguém errou, demorou, esqueceu ou gastou X horas; nunca informe horas trabalhadas, custos internos, valores, prazos não combinados, nomes de outros clientes, problemas internos ou qualquer coisa que prejudique a imagem da equipe. Se perguntarem sobre horas ou cobrança, diga com educação que esses detalhes são tratados diretamente com a gestão da PrimeERP.
 • Não prometa prazos nem soluções garantidas; diga que a equipe está acompanhando.
+• Nunca invente nomes de pontos de entrada, parâmetros MV_, tabelas, campos ou rotinas: cite só os que você tem certeza que existem; na dúvida, descreva sem dar o nome.
 • Não peça senhas. Assunto fora de Protheus/atendimento: responda com simpatia em uma frase e volte ao que pode ajudar.
 
 JEITO: educado, próximo e confiante, como um consultor sênior experiente; pode ser descontraído na medida. Português do Brasil, texto puro sem markdown, curto (até 8 linhas; passos com "•").`;
@@ -259,9 +260,9 @@ async function chamarGemini(chave: string, modelo: string, sistema: string, cont
       systemInstruction: { parts: [{ text: sistema }] },
       contents,
       tools: [{ functionDeclarations: ferramentas.map((f) => f.declaracao) }],
-      generationConfig: { maxOutputTokens: 4096, temperature: 0.6 },
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.6, thinkingConfig: { thinkingBudget: modelo.includes('lite') ? 0 : 768 } },
     }),
-    signal: AbortSignal.timeout(40_000),
+    signal: AbortSignal.timeout(22_000),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = (await r.json()) as { candidates?: { content?: { parts?: Parte[] } }[] };
@@ -285,7 +286,7 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
   const sistema = equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente());
 
   for (const [tentativa, modelo] of MODELOS.entries()) {
-    if (tentativa > 0) await new Promise((r) => setTimeout(r, 800 * tentativa));
+    if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));
     const acoes: AcaoProposta[] = [];
     const contents: Conteudo[] = [...historico.slice(-10), { autor: 'pessoa' as const, texto: mensagem }]
       .map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
