@@ -14,6 +14,7 @@ import { lerPerfil, listarFontesGlobais, listarUsuarios, montarAgenda, portalCal
 import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
+import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 
 const app = new Hono<{ Variables: Variaveis }>();
 
@@ -140,6 +141,20 @@ app.post('/api/assistente', exigirLogin(), async (c) => {
   if (!dados.success) return c.json({ erro: 'Escreva sua pergunta.' }, 400);
   const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem, dados.data.tela);
   return 'erro' in r ? c.json(r, 200) : c.json(r);
+});
+
+// WhatsApp (Meta Cloud API): verificação do endereço e mensagens recebidas.
+app.get('/api/whatsapp/webhook', (c) => {
+  const token = process.env.WHATSAPP_VERIFY_TOKEN || 'primehub-verify-token';
+  if (c.req.query('hub.mode') === 'subscribe' && c.req.query('hub.verify_token') === token) return c.text(c.req.query('hub.challenge') ?? '');
+  return c.text('Forbidden', 403);
+});
+app.post('/api/whatsapp/webhook', async (c) => {
+  const corpo = await c.req.text();
+  if (!(await assinaturaValida(corpo, c.req.header('x-hub-signature-256')))) return c.text('Assinatura inválida', 403);
+  // Responde já (a Meta reenvia se demorar) e processa em seguida.
+  setImmediate(() => { processarWebhook(corpo).catch((e) => console.error('WhatsApp webhook:', e instanceof Error ? e.message : e)); });
+  return c.text('OK');
 });
 
 app.get('/api/app/versao', async (c) => {

@@ -53,8 +53,12 @@ services:
       SSO_SECRET: ${SSO_SECRET:?}
       URL_BASE: https://suporte.primeerp.com.br
       DOWNLOADS_DIR: /downloads
+      UPLOADS_DIR: /uploads
+      SEM_NOTIFICACOES: ${SEM_NOTIFICACOES:-1}
+      TZ: America/Sao_Paulo
     volumes:
       - ./dados/downloads:/downloads:ro
+      - ./dados/uploads:/uploads
     depends_on:
       db:
         condition: service_healthy

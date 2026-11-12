@@ -16,7 +16,7 @@ if (str_contains(__DIR__, '/public_html/')) {
     }
     $arquivo = basename($_SERVER['SCRIPT_FILENAME'] ?? '');
     if ($arquivo === 'webhook_whatsapp.php') {
-        $ch = curl_init($novoSistema . '/webhook_whatsapp.php' . (($_SERVER['QUERY_STRING'] ?? '') !== '' ? '?' . $_SERVER['QUERY_STRING'] : ''));
+        $ch = curl_init($novoSistema . '/api/whatsapp/webhook' . (($_SERVER['QUERY_STRING'] ?? '') !== '' ? '?' . $_SERVER['QUERY_STRING'] : ''));
         $cabecalhos = ['Content-Type: ' . ($_SERVER['CONTENT_TYPE'] ?? 'application/json')];
         if (!empty($_SERVER['HTTP_X_HUB_SIGNATURE_256'])) {
             $cabecalhos[] = 'X-Hub-Signature-256: ' . $_SERVER['HTTP_X_HUB_SIGNATURE_256'];

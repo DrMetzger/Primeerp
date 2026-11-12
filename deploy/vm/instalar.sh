@@ -65,7 +65,14 @@ echo "== 5/6 Caddy do vanguard: suporte.primeerp.com.br -> Prime Hub"
 BLOCO='# >>> Prime Hub (gerenciado por /opt/primehub -- não editar à mão)
 suporte.primeerp.com.br {
 	encode gzip
-	@classico path *.php /assets/* /uploads/* /vendor/*
+	@classico {
+		path *.php /assets/* /uploads/* /vendor/*
+		not path /webhook_whatsapp.php
+	}
+	handle /webhook_whatsapp.php {
+		rewrite * /api/whatsapp/webhook?{query}
+		reverse_proxy primehub-api:3000
+	}
 	handle /api/* {
 		reverse_proxy primehub-api:3000
 	}
