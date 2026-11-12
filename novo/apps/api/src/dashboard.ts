@@ -1,6 +1,7 @@
 import type { ChamadoResumo, Dashboard, ItemRanking, Kpi, PontoSemana, StatusChamado, UsuarioLogado } from '@primehub/shared';
 import { filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
+import { ultimosAutores } from './pessoas';
 
 function variacao(atual: number, anterior: number): number | null {
   if (!anterior) return null;
@@ -13,7 +14,7 @@ function kpi(rotulo: string, valor: number, anterior: number | null, subirEhBom:
 
 /** Linha de chamado + horas esperando resposta nossa (última msg do cliente sem resposta). */
 export const SQL_CHAMADO_RESUMO = `
-  SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome AS cliente, ch.cliente_id AS clienteId, c.logo AS clienteLogo, u.nome AS responsavel,
+  SELECT ch.id, ch.titulo, ch.status, ch.prioridade, c.nome AS cliente, ch.cliente_id AS clienteId, c.logo AS clienteLogo, u.nome AS responsavel, u.foto_perfil AS responsavelFoto,
          ch.criado_em AS criadoEm, ch.atualizado_em AS atualizadoEm,
          CASE WHEN ch.status IN ('aberto','aguardando_equipe') THEN
            TIMESTAMPDIFF(HOUR, COALESCE((SELECT MAX(r.criado_em) FROM chamado_respostas r WHERE r.chamado_id = ch.id AND r.autor_tipo = 'cliente'), ch.criado_em), NOW())
@@ -88,6 +89,8 @@ export async function montarDashboard(usuario: UsuarioLogado): Promise<Dashboard
   const maisAntigos = (await consulta<ChamadoResumo>(
     `${SQL_CHAMADO_RESUMO} ${w("ch.status IN ('aberto','aguardando_equipe')")} ORDER BY horasEsperando DESC LIMIT 6`, p))
     .map((r) => ({ ...r, horasEsperando: r.horasEsperando === null ? null : Number(r.horasEsperando) }));
+  const autoresAntigos = await ultimosAutores(maisAntigos.map((c) => c.id));
+  for (const c of maisAntigos) c.ultimo = autoresAntigos.get(c.id) ?? null;
 
   const ia = await primeira<{ a: number; e: number; s: number; t: number }>(
     `SELECT COUNT(*) a, SUM(ia.status = 'enviada') e, SUM(ia.status = 'sugerida') s, COALESCE(SUM(ia.tokens_entrada + ia.tokens_saida), 0) t

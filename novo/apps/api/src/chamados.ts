@@ -2,6 +2,7 @@ import type { ChamadoResumo, ListaChamados, StatusChamado, UsuarioLogado } from 
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { SQL_CHAMADO_RESUMO } from './dashboard';
 import { consulta, primeira } from './db';
+import { ultimosAutores } from './pessoas';
 
 const STATUS: StatusChamado[] = ['aberto', 'aguardando_equipe', 'aguardando_cliente', 'fechado'];
 
@@ -34,6 +35,8 @@ export async function listarChamados(usuario: UsuarioLogado, filtros: { status?:
     `${SQL_CHAMADO_RESUMO} ${onde} ORDER BY FIELD(ch.status, 'aguardando_equipe', 'aberto', 'aguardando_cliente', 'fechado'), ch.atualizado_em DESC LIMIT ${porPagina} OFFSET ${(pagina - 1) * porPagina}`,
     params,
   )).map((r) => ({ ...r, horasEsperando: r.horasEsperando === null ? null : Number(r.horasEsperando) }));
+  const autores = await ultimosAutores(itens.map((c) => c.id));
+  for (const c of itens) c.ultimo = autores.get(c.id) ?? null;
 
   return { itens, total };
 }

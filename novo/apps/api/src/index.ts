@@ -9,6 +9,7 @@ import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
 import { detalharChamado, detalharCliente, listarClientes } from './clientes';
+import { garantirEstrutura } from './pessoas';
 import { lerPerfil, listarFontesGlobais, listarUsuarios, montarAgenda, portalCalendario, portalEquipe, portalFontes, portalVideoaulas } from './modulos';
 import { config } from './config';
 import { montarDashboard } from './dashboard';
@@ -142,6 +143,7 @@ app.get('/api/app/versao', async (c) => {
 
 app.get('/downloads/primehub.apk', () => respostaApk());
 
+void garantirEstrutura();
 serve({ fetch: app.fetch, port: config.porta }, (info) => {
   console.log(`API do Prime Hub ouvindo na porta ${info.port}`);
 });

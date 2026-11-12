@@ -2,6 +2,7 @@ import type { ChamadoDetalhe, ClienteDetalhe, ClienteResumo, UsuarioLogado } fro
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { SQL_CHAMADO_RESUMO } from './dashboard';
 import { consulta, primeira } from './db';
+import { JOINS_AUTOR_RESPOSTA, registrarLeitura, SQL_AUTOR_RESPOSTA, tipoAnexo } from './pessoas';
 
 const PERFIS_ADMIN = ['admin', 'diretor', 'ceo'];
 
@@ -80,24 +81,47 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
 
 export async function detalharChamado(usuario: UsuarioLogado, id: number): Promise<ChamadoDetalhe | null> {
   const escopo = usuario.tipo === 'equipe' ? await filtroEscopoEquipe(usuario) : filtroEscopoCliente(usuario);
-  const chamado = await primeira<ChamadoDetalhe['chamado']>(
-    `${SQL_CHAMADO_RESUMO.replace('SELECT ch.id,', 'SELECT ch.descricao, ch.categoria, ch.responsavel_id responsavelId, ch.origem_canal origem, (SELECT nome FROM setores WHERE id = ch.setor_id) setor, ch.id,')}
+  const chamado = await primeira<ChamadoDetalhe['chamado'] & { aberturaNome: string | null; aberturaFoto: string | null }>(
+    `${SQL_CHAMADO_RESUMO.replace('SELECT ch.id,', `SELECT ch.descricao, ch.categoria, ch.responsavel_id responsavelId, ch.origem_canal origem,
+        (SELECT nome FROM setores WHERE id = ch.setor_id) setor,
+        CASE WHEN ch.aberto_por = 'equipe' THEN 'Equipe PrimeERP' WHEN ch.aberto_por_tipo = 'setor' THEN (SELECT nome FROM setor_responsaveis WHERE id = ch.aberto_por_setor_responsavel_id) ELSE NULLIF(c.contato_nome, '') END aberturaNome,
+        CASE WHEN ch.aberto_por = 'equipe' THEN NULL WHEN ch.aberto_por_tipo = 'setor' THEN (SELECT foto_perfil FROM setor_responsaveis WHERE id = ch.aberto_por_setor_responsavel_id) ELSE c.foto_perfil END aberturaFoto,
+        ch.id,`)}
      WHERE ${escopo.sql} AND ch.id = ?`, [...escopo.params, id]);
   if (!chamado) return null;
 
-  const respostas = await consulta<{ id: number; autorTipo: 'cliente' | 'equipe'; autorNome: string; mensagem: string; criadoEm: string }>(
-    'SELECT id, autor_tipo autorTipo, autor_nome autorNome, mensagem, criado_em criadoEm FROM chamado_respostas WHERE chamado_id = ? ORDER BY criado_em, id', [id]);
-  const anexos = await consulta<{ id: number; respostaId: number | null; nome: string; tamanho: number }>(
-    'SELECT id, resposta_id respostaId, arquivo_nome_original nome, arquivo_tamanho tamanho FROM chamado_anexos WHERE chamado_id = ? ORDER BY id', [id]);
-  const anexosDe = (respostaId: number | null) => anexos.filter((a) => a.respostaId === respostaId).map(({ id: aid, nome, tamanho }) => ({ id: aid, nome, tamanho: Number(tamanho) }));
+  // Antes de ler as leituras: quem abriu agora também "viu".
+  await registrarLeitura(id, usuario);
 
-  // A abertura do chamado é a primeira mensagem da conversa.
+  const [respostas, anexos, leituras] = await Promise.all([
+    consulta<{ id: number; autorTipo: 'cliente' | 'equipe'; autorNome: string; autorFoto: string | null; autorPapel: string | null; mensagem: string; criadoEm: string }>(
+      `SELECT r.id, r.autor_tipo autorTipo, r.mensagem, r.criado_em criadoEm, ${SQL_AUTOR_RESPOSTA}
+         FROM chamado_respostas r ${JOINS_AUTOR_RESPOSTA} WHERE r.chamado_id = ? ORDER BY r.criado_em, r.id`, [id]),
+    consulta<{ id: number; respostaId: number | null; nome: string; tamanho: number }>(
+      'SELECT id, resposta_id respostaId, arquivo_nome_original nome, arquivo_tamanho tamanho FROM chamado_anexos WHERE chamado_id = ? ORDER BY id', [id]),
+    consulta<{ tipo: string; nome: string | null; em: string }>(
+      'SELECT leitor_tipo tipo, leitor_nome nome, lido_em em FROM chamado_leituras WHERE chamado_id = ?', [id]).catch(() => []),
+  ]);
+  const anexosDe = (respostaId: number | null) => anexos.filter((a) => a.respostaId === respostaId)
+    .map(({ id: aid, nome, tamanho }) => ({ id: aid, nome, tamanho: Number(tamanho), tipo: tipoAnexo(nome) }));
+  const em = (v: string) => new Date(String(v).replace(' ', 'T')).getTime();
+  const vistoPor = (autorTipo: 'cliente' | 'equipe', criadoEm: string) => leituras
+    .filter((l) => (autorTipo === 'equipe' ? l.tipo !== 'equipe' : l.tipo === 'equipe') && em(l.em) >= em(criadoEm))
+    .map((l) => ({ nome: l.nome ?? (l.tipo === 'equipe' ? 'Equipe' : 'Cliente'), em: l.em }));
+
+  const abertaPelaEquipe = chamado.aberturaNome === 'Equipe PrimeERP';
   const mensagens = [
-    { id: 0, autorTipo: 'cliente' as const, autorNome: chamado.cliente ?? 'Cliente', mensagem: chamado.descricao, criadoEm: chamado.criadoEm, anexos: anexosDe(null) },
-    ...respostas.map((r) => ({ ...r, anexos: anexosDe(r.id) })),
+    {
+      id: 0, autorTipo: (abertaPelaEquipe ? 'equipe' : 'cliente') as 'equipe' | 'cliente', autorNome: chamado.aberturaNome ?? chamado.cliente ?? 'Cliente',
+      autorFoto: chamado.aberturaFoto, autorPapel: abertaPelaEquipe ? 'Equipe PrimeERP' : chamado.cliente, mensagem: chamado.descricao,
+      criadoEm: chamado.criadoEm, anexos: anexosDe(null), vistoPor: vistoPor(abertaPelaEquipe ? 'equipe' : 'cliente', chamado.criadoEm),
+    },
+    ...respostas.map((r) => ({ ...r, anexos: anexosDe(r.id), vistoPor: vistoPor(r.autorTipo, r.criadoEm) })),
   ];
   const ia = usuario.tipo === 'equipe'
     ? await primeira<NonNullable<ChamadoDetalhe['ia']>>('SELECT status, resposta, fonte, status_sugerido statusSugerido FROM chamado_ia_analises WHERE chamado_id = ?', [id]).catch(() => null)
     : null;
-  return { chamado: { ...chamado, horasEsperando: chamado.horasEsperando === null ? null : Number(chamado.horasEsperando) }, mensagens, ia };
+  const { aberturaNome: _n, aberturaFoto: _f, ...resto } = chamado;
+  void _n; void _f;
+  return { chamado: { ...resto, horasEsperando: resto.horasEsperando === null ? null : Number(resto.horasEsperando) }, mensagens, ia };
 }

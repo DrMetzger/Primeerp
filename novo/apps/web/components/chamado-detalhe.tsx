@@ -1,13 +1,14 @@
 'use client';
 
 import { rotuloStatus, type ChamadoDetalhe, type ClienteDetalhe } from '@primehub/shared';
-import { ArrowLeft, Bot, CheckCircle2, Download, Lock, Paperclip, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Bot, Check, CheckCheck, CheckCircle2, Download, FileText, Lock, Paperclip, RotateCcw, Send, Sparkles, UploadCloud, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { acaoPhp, api } from '@/lib/api';
 import { Casca } from './casca';
 import { SeloStatus } from './chamados';
 import { Esqueleto } from './esqueleto';
-import { BotaoPrimario, BotaoSecundario, CLASSE_ENTRADA, Painel, dataBR, tamanhoArquivo } from './ui/basico';
+import { Avatar } from './ui/avatar';
+import { BotaoPrimario, BotaoSecundario, CLASSE_ENTRADA, Painel, dataBR, tamanhoArquivo, tempoRelativo } from './ui/basico';
 import { LogoEmpresa } from './ui/logo-empresa';
 
 type Visao = 'equipe' | 'cliente';
@@ -38,6 +39,7 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
   const [aviso, setAviso] = useState('');
   const [ia, setIa] = useState<{ rodando: boolean; passos: string[]; erro: string }>({ rodando: false, passos: [], erro: '' });
   const fimConversa = useRef<HTMLDivElement>(null);
+  const [arrastando, setArrastando] = useState(false);
 
   const carregar = useCallback(async (cid: number) => {
     try {
@@ -161,25 +163,47 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
               </div>
             </Painel>
 
-            <ol className="space-y-3" aria-label="Conversa do chamado">
+            <ol className="space-y-4" aria-label="Conversa do chamado">
               {dados.mensagens.map((m) => {
                 const nosso = m.autorTipo === 'equipe';
                 const minha = (visao === 'equipe') === nosso;
                 return (
-                  <li key={m.id} className={`flex ${minha ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[92%] rounded-3xl border p-4 shadow-sm sm:max-w-[80%] ${minha ? 'rounded-br-md border-primaria/30 bg-primaria/10' : 'rounded-bl-md border-borda bg-superficie'}`}>
-                      <p className="mb-1 text-xs font-semibold text-suave">{m.autorNome} · {dataBR(m.criadoEm, true)}</p>
-                      <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-texto">{m.mensagem}</div>
-                      {m.anexos.length > 0 && (
-                        <ul className="mt-3 flex flex-wrap gap-2">
-                          {m.anexos.map((a) => (
-                            <li key={a.id}>
-                              <a href={`/download_anexo_chamado.php?id=${a.id}`} className="toque inline-flex items-center gap-2 rounded-xl border border-borda bg-fundo px-3 text-sm text-texto hover:border-primaria">
-                                <Download size={16} aria-hidden="true" /> <span className="max-w-48 truncate">{a.nome}</span> <span className="text-xs text-suave">{tamanhoArquivo(a.tamanho)}</span>
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
+                  <li key={m.id} className={`flex items-end gap-2 ${minha ? 'flex-row-reverse' : ''}`}>
+                    <Avatar nome={m.autorNome} foto={m.autorFoto} tamanho={40} anel={nosso ? 'ring-primaria/60' : 'ring-destaque/60'} />
+                    <div className={`max-w-[85%] sm:max-w-[75%] ${minha ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                      <p className={`flex flex-wrap items-baseline gap-x-2 px-1 text-xs ${minha ? 'justify-end text-right' : ''}`}>
+                        <b className="text-sm font-semibold text-texto">{m.autorNome}</b>
+                        {m.autorPapel && <span className={`rounded-full px-2 py-0.5 font-semibold ${nosso ? 'bg-primaria/15 text-primaria' : 'bg-destaque/15 text-destaque'}`}>{m.autorPapel}</span>}
+                        <span className="text-suave" title={dataBR(m.criadoEm, true)}>{tempoRelativo(m.criadoEm)}</span>
+                      </p>
+                      <div className={`rounded-3xl border p-4 shadow-sm ${minha ? 'rounded-br-md border-primaria/30 bg-primaria/10' : 'rounded-bl-md border-borda bg-superficie'}`}>
+                        <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-texto">{m.mensagem}</div>
+                        {m.anexos.length > 0 && (
+                          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {m.anexos.map((a) => (
+                              <li key={a.id}>
+                                {a.tipo === 'imagem' ? (
+                                  <a href={`/download_anexo_chamado.php?id=${a.id}`} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-2xl border border-borda bg-black/20">
+                                    <img src={`/download_anexo_chamado.php?id=${a.id}&ver=1`} alt={a.nome} loading="lazy" className="max-h-64 w-full object-contain" />
+                                  </a>
+                                ) : a.tipo === 'video' ? (
+                                  <video controls preload="metadata" src={`/download_anexo_chamado.php?id=${a.id}&ver=1`} className="max-h-64 w-full rounded-2xl bg-black" />
+                                ) : (
+                                  <a href={`/download_anexo_chamado.php?id=${a.id}`} className="toque flex items-center gap-2 rounded-xl border border-borda bg-fundo px-3 text-sm text-texto hover:border-primaria">
+                                    {a.tipo === 'pdf' ? <FileText size={16} className="shrink-0 text-perigo" aria-hidden="true" /> : <Download size={16} className="shrink-0 text-primaria" aria-hidden="true" />}
+                                    <span className="min-w-0 flex-1 truncate">{a.nome}</span> <span className="text-xs text-suave">{tamanhoArquivo(a.tamanho)}</span>
+                                  </a>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      {minha && (
+                        <p className={`flex items-center gap-1 px-1 text-xs ${m.vistoPor.length ? 'text-sucesso' : 'text-suave'}`} title={m.vistoPor.map((v) => `${v.nome} · ${dataBR(v.em, true)}`).join('\n')}>
+                          {m.vistoPor.length ? <CheckCheck size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
+                          {m.vistoPor.length ? `Visto por ${m.vistoPor.map((v) => v.nome.split(' ')[0]).join(', ')} ${tempoRelativo(m.vistoPor.reduce((a, v) => (v.em > a ? v.em : a), m.vistoPor[0]?.em ?? ''))}` : 'Enviado, ainda não visto'}
+                        </p>
                       )}
                     </div>
                   </li>
@@ -188,6 +212,16 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
             </ol>
             <div ref={fimConversa} />
 
+            <div className="relative"
+              onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setArrastando(true); } }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArrastando(false); }}
+              onDrop={(e) => { e.preventDefault(); setArrastando(false); const f = Array.from(e.dataTransfer.files); if (f.length) setAnexos((l) => [...l, ...f]); }}
+              onPaste={(e) => { const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); setAnexos((l) => [...l, ...f]); } }}>
+            {arrastando && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-primaria bg-primaria/15 text-primaria backdrop-blur-sm">
+                <UploadCloud size={40} aria-hidden="true" /><p className="font-bold">Solte aqui para anexar</p><p className="text-sm">Imagens, vídeos, PDFs, planilhas, fontes…</p>
+              </div>
+            )}
             <Painel titulo={dados.chamado.status === 'fechado' ? 'Chamado encerrado — responder reabre' : 'Responder'}>
               {visao === 'equipe' && (
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -211,7 +245,7 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
               )}
               <label className="block">
                 <span className="sr-only">Mensagem</span>
-                <textarea value={mensagem} onChange={(e) => setMensagem(e.target.value)} rows={6} placeholder="Escreva a resposta…"
+                <textarea value={mensagem} onChange={(e) => setMensagem(e.target.value)} rows={6} placeholder="Escreva a resposta… (arraste ou cole imagens, vídeos e arquivos aqui)"
                   className="w-full rounded-2xl border border-borda bg-fundo p-3 text-base leading-relaxed text-texto outline-none focus:border-primaria" />
               </label>
               {anexos.length > 0 && (
@@ -249,6 +283,7 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
               </div>
               {aviso && <p className="mt-3 text-sm text-suave" role="status">{aviso}</p>}
             </Painel>
+            </div>
           </div>
 
           <aside className="space-y-4">

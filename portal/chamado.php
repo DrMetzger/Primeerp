@@ -46,6 +46,17 @@ if (!$chamado) {
     die('Chamado não encontrado.');
 }
 
+// Confirmação de leitura (a equipe vê "visto por ..." no sistema novo).
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    try {
+        $pdo->prepare('INSERT INTO chamado_leituras (chamado_id, leitor_tipo, leitor_id, leitor_nome, lido_em) VALUES (?, ?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE lido_em = NOW(), leitor_nome = VALUES(leitor_nome)')
+            ->execute([$chamadoId, ClienteAuth::isMaster() ? 'master' : 'setor', ClienteAuth::isMaster() ? $clienteId : (int) ClienteAuth::setorResponsavelId(), ClienteAuth::clienteNome()]);
+    } catch (\Throwable $e) {
+        // Sem a tabela ainda: só não marca a leitura.
+    }
+}
+
 // Trocar o setor de um chamado -- só quem tem permissão de master pode (é
 // quem vê/gerencia todos os setores; login de setor comum não deveria
 // conseguir mandar o próprio chamado pra outro setor, senão perderia acesso

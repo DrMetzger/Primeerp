@@ -13,6 +13,20 @@ class Migrations
 {
     public static function run(PDO $pdo): void
     {
+        // Confirmação de leitura dos chamados (sistema novo): última vez que
+        // cada pessoa abriu cada chamado. Mensagem conta como "vista" quando
+        // alguém do outro lado abriu o chamado depois dela.
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS chamado_leituras (
+                chamado_id INT NOT NULL,
+                leitor_tipo VARCHAR(10) NOT NULL,
+                leitor_id INT NOT NULL,
+                leitor_nome VARCHAR(150) NULL,
+                lido_em DATETIME NOT NULL,
+                PRIMARY KEY (chamado_id, leitor_tipo, leitor_id),
+                KEY idx_leitura_chamado (chamado_id, lido_em)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INT AUTO_INCREMENT PRIMARY KEY,

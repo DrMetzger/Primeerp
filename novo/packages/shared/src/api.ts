@@ -100,6 +100,9 @@ export interface ChamadoResumo {
   atualizadoEm: string;
   /** Horas desde a última mensagem do cliente sem resposta nossa. */
   horasEsperando: number | null;
+  responsavelFoto?: string | null;
+  /** Quem escreveu por último no chamado (pessoa, não a empresa). */
+  ultimo?: { nome: string; foto: string | null; tipo: 'equipe' | 'cliente'; em: string } | null;
 }
 
 export interface Dashboard {
@@ -188,15 +191,20 @@ export interface ClienteDetalhe {
   equipe: { id: number; nome: string; foto: string | null }[];
 }
 
-export interface Anexo { id: number; nome: string; tamanho: number }
+export interface Anexo { id: number; nome: string; tamanho: number; tipo: 'imagem' | 'video' | 'pdf' | 'arquivo' }
 
 export interface MensagemChamado {
   id: number;
   autorTipo: 'cliente' | 'equipe';
   autorNome: string;
+  autorFoto: string | null;
+  /** Cargo/papel curto: "Equipe PrimeERP", "Financeiro", "Master"… */
+  autorPapel: string | null;
   mensagem: string;
   criadoEm: string;
   anexos: Anexo[];
+  /** Quem do OUTRO lado já viu essa mensagem (e quando). */
+  vistoPor: { nome: string; em: string }[];
 }
 
 export interface ChamadoDetalhe {

@@ -95,3 +95,19 @@ export function Aviso({ texto, erro = false }: { texto: string; erro?: boolean }
   if (!texto) return null;
   return <p role={erro ? 'alert' : 'status'} className={`rounded-xl px-3 py-2 text-sm ${erro ? 'bg-perigo/10 text-perigo' : 'bg-sucesso/10 text-sucesso'}`}>{texto}</p>;
 }
+
+/** "agora", "há 5 min", "há 3 h", "ontem", "há 4 dias", depois a data. */
+export function tempoRelativo(valor: string | null | undefined): string {
+  if (!valor) return '';
+  const d = new Date(valor.replace(' ', 'T'));
+  const min = Math.round((Date.now() - d.getTime()) / 60000);
+  if (Number.isNaN(min)) return '';
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `há ${h} h`;
+  const dias = Math.round(h / 24);
+  if (dias === 1) return 'ontem';
+  if (dias < 30) return `há ${dias} dias`;
+  return d.toLocaleDateString('pt-BR');
+}

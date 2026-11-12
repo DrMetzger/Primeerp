@@ -49,9 +49,16 @@ if (!$caminhoCompleto || !$uploadsBase || !str_starts_with($caminhoCompleto, $up
     die('Arquivo não encontrado.');
 }
 
+// ?ver=1 (sistema novo): mostra imagem/vídeo/PDF dentro da conversa em vez
+// de baixar. Só esses tipos -- qualquer outro continua sendo download.
+$tiposVisualizaveis = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp',
+    'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mov' => 'video/quicktime', 'm4v' => 'video/mp4', 'pdf' => 'application/pdf'];
+$extensaoAnexo = strtolower(pathinfo($anexo['arquivo_nome_original'], PATHINFO_EXTENSION));
+$mostrarNaTela = ($_GET['ver'] ?? '') === '1' && isset($tiposVisualizaveis[$extensaoAnexo]);
 header('Content-Description: File Transfer');
-header('Content-Type: application/octet-stream');
-header('Content-Disposition: attachment; filename="' . basename($anexo['arquivo_nome_original']) . '"');
+header('Content-Type: ' . ($mostrarNaTela ? $tiposVisualizaveis[$extensaoAnexo] : 'application/octet-stream'));
+header('X-Content-Type-Options: nosniff');
+header('Content-Disposition: ' . ($mostrarNaTela ? 'inline' : 'attachment') . '; filename="' . basename($anexo['arquivo_nome_original']) . '"');
 header('Content-Length: ' . filesize($caminhoCompleto));
 header('Cache-Control: private');
 

@@ -2,6 +2,8 @@
 
 import { corStatus, rotuloStatus, type ChamadoResumo } from '@primehub/shared';
 import { Clock, Flame } from 'lucide-react';
+import { Avatar } from './ui/avatar';
+import { tempoRelativo } from './ui/basico';
 import { LogoEmpresa } from './ui/logo-empresa';
 
 function esperando(horas: number | null): string | null {
@@ -37,24 +39,30 @@ export function ListaChamados({ itens, visao }: { itens: ChamadoResumo[]; visao:
         return (
           <li key={c.id}>
             <a href={rota(c)}
-              className="toque flex w-full flex-col gap-2 rounded-2xl border border-borda bg-superficie p-4 text-left shadow-sm transition hover:border-primaria/50 hover:shadow-md md:flex-row md:items-center md:gap-4">
-              <div className="flex items-center gap-2 md:w-48 md:shrink-0">
-                <span className="text-sm font-semibold tabular-nums text-suave">#{c.id}</span>
-                <SeloStatus status={c.status} />
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                {visao === 'equipe' && <LogoEmpresa nome={c.cliente} logo={c.clienteLogo} />}
-                <div className="min-w-0 flex-1">
-                <p className="line-clamp-2 font-semibold text-texto md:line-clamp-1">{c.titulo}</p>
-                <p className="mt-0.5 truncate text-sm text-suave">
-                  {visao === 'equipe' ? (c.cliente ?? 'Sem cliente') : 'Aberto em ' + new Date(c.criadoEm.replace(' ', 'T')).toLocaleDateString('pt-BR')}
-                  {visao === 'equipe' && c.responsavel ? ` · ${c.responsavel}` : ''}
-                </p>
+              className="group flex w-full items-center gap-3 rounded-2xl border border-borda bg-superficie p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primaria/50 hover:shadow-lg sm:gap-4 sm:p-4">
+              {visao === 'equipe' && <LogoEmpresa nome={c.cliente} logo={c.clienteLogo} />}
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold tabular-nums text-suave">#{c.id}</span>
+                  <SeloStatus status={c.status} />
+                  {urgente && <span className="inline-flex items-center gap-1 rounded-full bg-perigo/10 px-2 py-0.5 text-xs font-bold text-perigo"><Flame size={13} aria-hidden="true" />{c.prioridade === 'urgente' ? 'Urgente' : 'Alta'}</span>}
+                  {visao === 'equipe' && <span className="truncate text-xs font-semibold text-suave">{c.cliente}</span>}
                 </div>
+                <p className="line-clamp-2 font-semibold text-texto md:line-clamp-1">{c.titulo}</p>
+                {c.ultimo ? (
+                  <p className="flex min-w-0 items-center gap-2 text-sm text-suave">
+                    <Avatar nome={c.ultimo.nome} foto={c.ultimo.foto} tamanho={22} anel={c.ultimo.tipo === 'equipe' ? 'ring-primaria/60' : 'ring-destaque/60'} />
+                    <span className="truncate"><b className="font-semibold text-texto">{c.ultimo.nome}</b> respondeu {tempoRelativo(c.ultimo.em)}</span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-suave">Aberto {tempoRelativo(c.criadoEm)}, ainda sem respostas</p>
+                )}
               </div>
-              <div className="flex items-center gap-3 text-sm md:justify-end">
-                {urgente && <span className="inline-flex items-center gap-1 font-semibold text-perigo"><Flame size={16} aria-hidden="true" />{c.prioridade === 'urgente' ? 'Urgente' : 'Alta'}</span>}
-                {tempo && visao === 'equipe' && <span className="inline-flex items-center gap-1 text-suave" title="Tempo esperando resposta nossa"><Clock size={16} aria-hidden="true" />{tempo}</span>}
+              <div className="hidden shrink-0 flex-col items-end gap-2 sm:flex">
+                {visao === 'equipe' && c.responsavel && (
+                  <span className="flex items-center gap-1.5 text-xs text-suave" title="Responsável"><Avatar nome={c.responsavel} foto={c.responsavelFoto ?? null} tamanho={26} /><span className="hidden lg:inline">{c.responsavel.split(' ')[0]}</span></span>
+                )}
+                {tempo && visao === 'equipe' && <span className="inline-flex items-center gap-1 rounded-full bg-alerta/10 px-2 py-0.5 text-xs font-semibold text-alerta" title="Esperando resposta nossa"><Clock size={13} aria-hidden="true" />{tempo}</span>}
               </div>
             </a>
           </li>
