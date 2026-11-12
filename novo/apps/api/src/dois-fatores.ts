@@ -91,10 +91,10 @@ async function enviarEmail(para: string, nome: string, codigo: string): Promise<
   });
   const remetente = await config('smtp_nome_remetente', 'SMTP_NOME', 'Prime Hub');
   const primeiroNome = nome.split(' ')[0] ?? '';
-  await transporte.sendMail({
+  const envio = await transporte.sendMail({
     from: `"${remetente}" <${usuario}>`,
     to: para,
-    subject: `${codigo} é o seu código de acesso ao Prime Hub`,
+    subject: 'Seu código de acesso ao Prime Hub',
     text: `Olá, ${primeiroNome}!\n\nSeu código de acesso ao Prime Hub é: ${codigo}\n\nEle vale por ${VALIDADE_MIN} minutos. Se não foi você que tentou entrar, ignore este e-mail e troque sua senha.\n\nPrimeERP Soluções em Tecnologia`,
     html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;color:#0E1630">
       <p style="font-size:16px">Olá, ${primeiroNome}!</p>
@@ -103,10 +103,40 @@ async function enviarEmail(para: string, nome: string, codigo: string): Promise<
       <p style="font-size:14px;color:#56627F">Ele vale por ${VALIDADE_MIN} minutos. Se não foi você que tentou entrar, ignore este e-mail e troque sua senha.</p>
       <p style="font-size:13px;color:#56627F">PrimeERP Soluções em Tecnologia</p></div>`,
   });
+  // Sem endereço no log: só se o servidor aceitou.
+  console.log(`2FA: e-mail aceito pelo servidor (${String(envio.response ?? '').slice(0, 80)})`);
+}
+
+/** Telefone cadastrado da pessoa (equipe, master do cliente ou responsável de setor). */
+async function telefoneDe(u: UsuarioLogado): Promise<string> {
+  const l = u.tipo === 'equipe'
+    ? await primeira<{ t: string | null }>('SELECT telefone t FROM usuarios WHERE id = ?', [u.id])
+    : u.perfil === 'master'
+      ? await primeira<{ t: string | null }>('SELECT contato_telefone t FROM clientes WHERE id = ?', [u.id])
+      : await primeira<{ t: string | null }>('SELECT telefone t FROM setor_responsaveis WHERE id = ?', [u.id]);
+  const d = (l?.t ?? '').replace(/\D/g, '');
+  return d.length === 10 || d.length === 11 ? `55${d}` : d;
+}
+
+/** Código pelo WhatsApp oficial da PrimeERP (mesma conta do bot). */
+async function enviarWhatsApp(telefone: string, nome: string, codigo: string): Promise<void> {
+  const token = await config('whatsapp_access_token', 'WHATSAPP_ACCESS_TOKEN');
+  const numeroId = await config('whatsapp_phone_number_id', 'WHATSAPP_PHONE_NUMBER_ID');
+  if (!token || !numeroId) throw new Error('O WhatsApp da PrimeERP não está configurado. Use o e-mail.');
+  const r = await fetch(`https://graph.facebook.com/v21.0/${numeroId}/messages`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: telefone, type: 'text', text: { body: `Olá, ${nome.split(' ')[0] ?? ''}! Seu código de acesso ao Prime Hub é: *${codigo}*\n\nVale por ${VALIDADE_MIN} minutos. Não compartilhe com ninguém.` } }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!r.ok) {
+    console.error(`2FA: WhatsApp recusou (HTTP ${r.status})`);
+    // Fora da janela de 24h a Meta só aceita modelo aprovado: a pessoa manda um "oi" e tenta de novo.
+    throw new Error('Não deu para mandar pelo WhatsApp. Mande um "oi" para o WhatsApp da PrimeERP e toque em "Receber por WhatsApp" de novo.');
+  }
 }
 
 /** Cria o desafio e manda o código. Retorna o id do desafio e o e-mail mascarado. */
-export async function iniciarDesafio(usuario: UsuarioLogado): Promise<{ desafio: string; destino: string }> {
+export async function iniciarDesafio(usuario: UsuarioLogado, canal: 'email' | 'whatsapp' = 'email'): Promise<{ desafio: string; destino: string }> {
   await garantirTabelas();
   if (!usuario.email) throw new Error('Seu cadastro está sem e-mail. Fale com a PrimeERP.');
   const recentes = await primeira<{ n: number }>(
@@ -117,6 +147,12 @@ export async function iniciarDesafio(usuario: UsuarioLogado): Promise<{ desafio:
   const desafio = randomBytes(16).toString('hex');
   await consulta(`INSERT INTO login_2fa (id, tipo, usuario_id, usuario_json, codigo_hash, expira_em) VALUES (?, ?, ?, ?, ?, NOW() + INTERVAL ${VALIDADE_MIN} MINUTE)`,
     [desafio, usuario.tipo, usuario.id, JSON.stringify(usuario), hash(`${desafio}:${codigo}`)]);
+  if (canal === 'whatsapp') {
+    const tel = await telefoneDe(usuario);
+    if (tel.length < 12) throw new Error('Seu cadastro está sem telefone/WhatsApp. Use o e-mail ou peça para a PrimeERP cadastrar.');
+    await enviarWhatsApp(tel, usuario.nome, codigo);
+    return { desafio, destino: `WhatsApp final ${tel.slice(-4)}` };
+  }
   await enviarEmail(usuario.email, usuario.nome, codigo);
   return { desafio, destino: mascarar(usuario.email) };
 }

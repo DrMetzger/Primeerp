@@ -60,11 +60,11 @@ export function Login({ aoEntrar }: { aoEntrar: (s: Sessao) => void }) {
     }
   }
 
-  async function reenviar() {
+  async function reenviar(canal: 'email' | 'whatsapp' = 'email') {
     if (!desafio) return;
     setErro('');
     try {
-      const novo = await api<DesafioCodigo>('/api/login/reenviar', { method: 'POST', body: JSON.stringify({ desafio: desafio.desafio }) });
+      const novo = await api<DesafioCodigo>('/api/login/reenviar', { method: 'POST', body: JSON.stringify({ desafio: desafio.desafio, canal }) });
       setDesafio(novo);
       setCodigo('');
       setAviso(`Enviamos um código novo para ${novo.destino}.`);
@@ -155,6 +155,11 @@ export function Login({ aoEntrar }: { aoEntrar: (s: Sessao) => void }) {
                     <T style={{ color: tema.primaria, fontWeight: '700' }}>Reenviar código</T>
                   </Pressable>
                 </View>
+                <Pressable onPress={() => void reenviar('whatsapp')} accessibilityRole="button"
+                  style={{ minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                  <T style={{ color: '#10b981', fontWeight: '800' }}>💬 Receber o código pelo WhatsApp</T>
+                </Pressable>
+                <T style={{ color: tema.textoSuave, fontSize: 12, textAlign: 'center' }}>Não chegou? Olhe a caixa de Spam / Lixo eletrônico.</T>
               </>
             )}
           </Cartao>

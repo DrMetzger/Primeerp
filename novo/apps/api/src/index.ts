@@ -65,12 +65,12 @@ app.post('/api/login/codigo', async (c) => {
 });
 
 app.post('/api/login/reenviar', async (c) => {
-  const corpo = z.object({ desafio: z.string().regex(/^[0-9a-f]{32}$/) }).safeParse(await c.req.json().catch(() => null));
+  const corpo = z.object({ desafio: z.string().regex(/^[0-9a-f]{32}$/), canal: z.enum(['email', 'whatsapp']).default('email') }).safeParse(await c.req.json().catch(() => null));
   if (!corpo.success) return c.json({ erro: 'Entre de novo.' }, 400);
   const linha = await primeira<{ usuario_json: string }>('SELECT usuario_json FROM login_2fa WHERE id = ? AND usado_em IS NULL AND criado_em > NOW() - INTERVAL 30 MINUTE', [corpo.data.desafio]);
   if (!linha) return c.json({ erro: 'Entre de novo.' }, 400);
   try {
-    return c.json({ etapa: 'codigo', ...(await iniciarDesafio(JSON.parse(linha.usuario_json) as UsuarioLogado)) });
+    return c.json({ etapa: 'codigo', ...(await iniciarDesafio(JSON.parse(linha.usuario_json) as UsuarioLogado, corpo.data.canal)) });
   } catch (e) {
     return c.json({ erro: e instanceof Error ? e.message : 'Não foi possível reenviar.' }, 503);
   }

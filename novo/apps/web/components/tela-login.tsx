@@ -113,11 +113,11 @@ export function TelaLogin({ tipo: tipoInicial }: { tipo: TipoLogin }) {
     }
   }
 
-  async function reenviar() {
+  async function reenviar(canal: 'email' | 'whatsapp' = 'email') {
     if (!desafio) return;
     setErro('');
     try {
-      const novo = await postar<DesafioCodigo>('/api/login/reenviar', { desafio: desafio.desafio });
+      const novo = await postar<DesafioCodigo>('/api/login/reenviar', { desafio: desafio.desafio, canal });
       setDesafio(novo);
       setCodigo('');
       setAviso(`Enviamos um código novo para ${novo.destino}.`);
@@ -192,6 +192,10 @@ export function TelaLogin({ tipo: tipoInicial }: { tipo: TipoLogin }) {
                 <button type="button" onClick={() => { setDesafio(null); setErro(''); setAviso(''); }} className="toque inline-flex items-center gap-1 text-suave hover:text-texto"><ArrowLeft size={16} aria-hidden="true" /> Voltar</button>
                 <button type="button" onClick={() => void reenviar()} className="toque font-medium text-primaria">Reenviar código</button>
               </div>
+              <button type="button" onClick={() => void reenviar('whatsapp')} className="toque flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                💬 Receber o código pelo WhatsApp
+              </button>
+              <p className="text-center text-xs text-suave">Não chegou? Olhe a caixa de Spam / Lixo eletrônico (assunto "Seu código de acesso ao Prime Hub").</p>
             </form>
           )}
         </div>
