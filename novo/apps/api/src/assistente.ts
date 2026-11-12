@@ -269,7 +269,21 @@ async function chamarGemini(chave: string, modelo: string, sistema: string, cont
   return d.candidates?.[0]?.content?.parts ?? [];
 }
 
-export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string): Promise<RespostaAssistente | { erro: string }> {
+export interface TelaAtual { rota: string; titulo: string; texto: string }
+
+/** O que a pessoa está vendo agora, pra IA ajudar naquela tela específica. */
+function blocoTela(tela: TelaAtual | undefined): string {
+  if (!tela) return '';
+  return `
+
+TELA QUE A PESSOA ESTÁ VENDO AGORA (use para entender "isso", "aqui", "esse chamado", "essa tela"; é só leitura, nunca invente o que não está nela):
+Endereço: ${tela.rota}
+Título: ${tela.titulo}
+Conteúdo visível:
+${tela.texto.slice(0, 6000)}`;
+}
+
+export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string, tela?: TelaAtual): Promise<RespostaAssistente | { erro: string }> {
   const dia = new Date().toISOString().slice(0, 10);
   const chaveUso = `${usuario.tipo}:${usuario.id}`;
   const uso = usoHoje.get(chaveUso);
@@ -283,7 +297,7 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
 
   const equipe = usuario.tipo === 'equipe';
   const ferramentas = equipe ? FERRAMENTAS_EQUIPE : FERRAMENTAS_CLIENTE;
-  const sistema = equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente());
+  const sistema = (equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente())) + blocoTela(tela);
 
   for (const [tentativa, modelo] of MODELOS.entries()) {
     if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));

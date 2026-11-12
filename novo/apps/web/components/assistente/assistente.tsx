@@ -12,6 +12,19 @@ interface Acao { id: string; titulo: string; detalhe: string; arquivo: string; c
 const CHAVE_OCULTO = 'ph_assistente_oculto';
 export const EVENTO_CHAMAR = 'primehub:assistente';
 
+/**
+ * O que a pessoa está vendo agora (endereço, título e o texto visível da
+ * área principal), pra IA ajudar exatamente naquela tela. Campos de senha
+ * não entram (innerText não lê valor de input).
+ */
+function contextoDaTela(): { rota: string; titulo: string; texto: string } {
+  const principal = document.querySelector('main') ?? document.body;
+  const dialogo = document.querySelector('[role="dialog"]:not([aria-label="Conversa com o assistente"])');
+  const titulo = document.querySelector('header h1')?.textContent ?? document.title;
+  const texto = `${dialogo ? `[JANELA ABERTA] ${(dialogo as HTMLElement).innerText}\n\n` : ''}${(principal as HTMLElement).innerText}`;
+  return { rota: location.pathname + location.search + location.hash, titulo: titulo.trim(), texto: texto.replace(/\n{3,}/g, '\n\n').slice(0, 6000) };
+}
+
 /** Chama o assistente de volta (botão do menu). */
 export function chamarAssistente(): void {
   window.dispatchEvent(new Event(EVENTO_CHAMAR));
@@ -41,6 +54,12 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   const [digitando, setDigitando] = useState('');
   const fim = useRef<HTMLDivElement>(null);
   const [tamanho, setTamanho] = useState(150);
+  // Posição (distância da direita e de baixo): arrastável e lembrada.
+  const [pos, setPos] = useState<{ d: number; b: number }>({ d: 12, b: 12 });
+  const arrasto = useRef<{ x: number; y: number; d: number; b: number; moveu: boolean } | null>(null);
+  useEffect(() => {
+    try { const p = JSON.parse(localStorage.getItem('ph_assistente_pos') ?? 'null') as { d: number; b: number } | null; if (p) setPos(p); } catch { /* sem armazenamento */ }
+  }, []);
 
   const tipo = modo === 'login' ? 'login' : (usuarioSalvo()?.tipo ?? 'cliente');
   const primeiroNome = modo === 'login' ? '' : (usuarioSalvo()?.nome.split(' ')[0] ?? '');
@@ -137,7 +156,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     try {
       const r = await fetch('/api/assistente', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mensagem: p, historico }),
+        body: JSON.stringify({ mensagem: p, historico, tela: contextoDaTela() }),
       });
       const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[] };
       setPensando(false);
@@ -166,12 +185,45 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
 
   if (!visivel) return null;
   const escala = tamanho / CENA.largura;
+  const alturaRobo = CENA.altura * escala;
+  const espacoAcima = typeof window !== 'undefined' ? innerHeight - pos.b - alturaRobo : 600;
+  const espacoAbaixo = pos.b;
+  // Abre a conversa pro lado com mais espaço e cabe na tela.
+  const noTopo = espacoAbaixo > espacoAcima;
+  const alturaPainel = Math.max(260, Math.min(680, (noTopo ? espacoAbaixo : espacoAcima) - 16));
+  const naEsquerda = typeof window !== 'undefined' && pos.d > innerWidth / 2;
+
+  /** Arrastar o robô pela tela (mouse ou dedo). Toque sem arrastar = clique. */
+  function comecarArrasto(e: React.PointerEvent) {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    arrasto.current = { x: e.clientX, y: e.clientY, d: pos.d, b: pos.b, moveu: false };
+  }
+  function moverArrasto(e: React.PointerEvent) {
+    const a = arrasto.current;
+    if (!a) return;
+    const dx = e.clientX - a.x, dy = e.clientY - a.y;
+    if (!a.moveu && Math.abs(dx) + Math.abs(dy) < 6) return;
+    a.moveu = true;
+    const altura = CENA.altura * escala;
+    setPos({ d: Math.max(4, Math.min(innerWidth - tamanho - 4, a.d - dx)), b: Math.max(4, Math.min(innerHeight - altura - 4, a.b - dy)) });
+  }
+  function soltarArrasto() {
+    const a = arrasto.current;
+    arrasto.current = null;
+    if (!a) return;
+    if (a.moveu) {
+      try { localStorage.setItem('ph_assistente_pos', JSON.stringify(pos)); } catch { /* ignore */ }
+      robo.current?.agir('surpreso', 700);
+      return;
+    }
+    if (aberto) robo.current?.agir('surpreso', 900); else abrir();
+  }
 
   return (
-    <div className="pointer-events-none fixed z-50" style={{ right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+    <div className="pointer-events-none fixed z-50" style={{ right: `max(${pos.d}px, env(safe-area-inset-right))`, bottom: `max(${pos.b}px, env(safe-area-inset-bottom))` }}>
       {aberto && (
         <section aria-label="Conversa com o assistente"
-          className="pointer-events-auto absolute bottom-full right-0 mb-2 flex max-h-[min(78dvh,680px)] w-[min(94vw,440px)] flex-col overflow-hidden rounded-3xl border border-borda bg-superficie shadow-2xl">
+          className={`pointer-events-auto absolute ${noTopo ? 'top-full mt-2' : 'bottom-full mb-2'} ${naEsquerda ? 'left-0' : 'right-0'} flex w-[min(94vw,440px)] flex-col overflow-hidden rounded-3xl border border-borda bg-superficie shadow-2xl`} style={{ maxHeight: alturaPainel }}>
           <header className="gradiente-marca flex items-center gap-2 px-4 py-3 text-white">
             <Sparkles size={18} aria-hidden="true" />
             <div className="flex-1">
@@ -225,9 +277,11 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
           className="absolute -top-1 right-0 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-borda bg-superficie text-suave shadow hover:text-perigo">
           <X size={18} />
         </button>
-        <button type="button" onClick={() => (aberto ? robo.current?.agir('surpreso', 900) : abrir())}
+        <button type="button" onPointerDown={comecarArrasto} onPointerMove={moverArrasto} onPointerUp={soltarArrasto} onPointerCancel={() => { arrasto.current = null; }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!aberto) abrir(); } }}
+          title="Arraste para mudar de lugar"
           onMouseEnter={() => { if (!robo.current?.acaoAtual) robo.current?.agir('sorrir', 1400); }}
-          aria-label={aberto ? 'Assistente PrimeERP' : 'Abrir o assistente PrimeERP'} className="block h-full w-full cursor-pointer rounded-3xl">
+          aria-label={aberto ? 'Assistente PrimeERP' : 'Abrir o assistente PrimeERP'} className="block h-full w-full cursor-grab touch-none rounded-3xl active:cursor-grabbing">
           <div ref={palco} aria-hidden="true" style={{ width: CENA.largura, height: CENA.altura, transform: `scale(${escala})`, transformOrigin: '0 0' }} />
         </button>
       </div>

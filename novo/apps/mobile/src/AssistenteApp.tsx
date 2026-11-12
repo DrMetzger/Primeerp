@@ -15,7 +15,7 @@ const SUGESTOES = {
 };
 
 /** Conversa com o assistente (o mesmo robô e a mesma IA do site). */
-export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
+export function AssistenteApp({ usuario, tela }: { usuario: UsuarioLogado; tela?: { rota: string; titulo: string; texto: string } }) {
   const { tema } = useTema();
   const [acao, setAcao] = useState<AcaoRobo>('acenar');
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
@@ -73,7 +73,7 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
     setPensando(true);
     setAcao('anotar');
     try {
-      const r = await api<{ texto?: string; erro?: string; acoes?: Omit<Acao, 'estado'>[] }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p, historico: historico.filter((m) => !m.acao) }) });
+      const r = await api<{ texto?: string; erro?: string; acoes?: Omit<Acao, 'estado'>[] }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p, historico: historico.filter((m) => !m.acao), ...(tela ? { tela } : {}) }) });
       setPensando(false);
       responder(r.texto ?? r.erro ?? 'Não consegui responder agora.', (r.acoes ?? []).map((a) => ({ ...a, estado: 'pendente' as const })));
     } catch {
@@ -88,7 +88,7 @@ export function AssistenteApp({ usuario }: { usuario: UsuarioLogado }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={{ alignItems: 'center', paddingTop: 6 }}>
         <Pressable onPress={() => setAcao('comemorar')} onPressOut={() => setTimeout(() => setAcao('parado'), 1500)} accessibilityRole="button" accessibilityLabel="Robô assistente">
-          <RoboNativo altura={210} acao={acao} />
+          <RoboNativo altura={172} acao={acao} />
         </Pressable>
       </View>
       <FlatList ref={lista} data={itens} keyExtractor={(_, i) => String(i)} contentContainerStyle={{ padding: 16, gap: 8 }}

@@ -4,7 +4,6 @@ import type { DesafioCodigo, RespostaLogin, Sessao, TipoLogin } from '@primehub/
 import { ArrowLeft, Building2, Eye, EyeOff, Headset, LogIn, MailCheck, ShieldCheck } from 'lucide-react';
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { salvarSessao } from '@/lib/sessao';
-import { Assistente } from './assistente/assistente';
 import { CartaoApk } from './cartao-apk';
 import { Logo } from './logo';
 import { TemaBotao } from './tema-botao';
@@ -199,7 +198,6 @@ export function TelaLogin({ tipo: tipoInicial }: { tipo: TipoLogin }) {
 
         {!desafio && <CartaoApk />}
       </div>
-      <Assistente modo="login" />
     </main>
   );
 }

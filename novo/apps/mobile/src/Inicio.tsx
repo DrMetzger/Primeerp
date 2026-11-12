@@ -280,6 +280,8 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   useEffect(() => { aoFicarForaDoHorario(() => setForaDoHorario(true)); return () => aoFicarForaDoHorario(null); }, []);
   const [pilha, setPilha] = useState<Tela[]>([]);
   const ir = (t: Tela) => setPilha((p) => [...p, t]);
+  // Última tela vista antes de abrir o Assistente: a IA ajuda "nessa tela".
+  const [telaVista, setTelaVista] = useState<{ rota: string; titulo: string; texto: string } | undefined>(undefined);
   const voltar = useCallback(() => setPilha((p) => p.slice(0, -1)), []);
 
   // Botão "voltar" do Android volta uma tela em vez de fechar o app.
@@ -319,6 +321,13 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   ];
   const titulos: Record<Aba, string> = { painel: 'Dashboard', chamados: equipe ? 'Chamados' : 'Meus chamados', assistente: 'Assistente PrimeERP', menu: 'Menu' };
   const atual = pilha[pilha.length - 1];
+  useEffect(() => {
+    if (aba === 'assistente') return;
+    const t = pilha[pilha.length - 1];
+    const descricao = !t ? `Aba ${aba} do app` : t.tipo === 'chamado' ? `Conversa do chamado número ${t.id}` : t.tipo === 'cliente' ? `Ficha do cliente id ${t.id}`
+      : t.tipo === 'setor' ? `Página do setor id ${t.id} do cliente id ${t.clienteId}` : t.tipo === 'novoChamado' ? 'Formulário de abrir chamado' : `Tela ${t.tipo}`;
+    setTelaVista({ rota: `app:${t ? t.tipo : aba}`, titulo: t ? (TITULOS_TELA[t.tipo] ?? t.tipo) : aba, texto: `${descricao} (app Android). Use as ferramentas para consultar os dados dessa tela.` });
+  }, [aba, pilha]);
   const tituloAtual = !atual ? titulos[aba] : atual.tipo === 'chamado' ? `Chamado #${atual.id}` : atual.tipo === 'cliente' ? 'Cliente' : atual.tipo === 'setor' ? 'Setor'
     : atual.tipo === 'novoChamado' ? (equipe ? 'Novo chamado' : 'Abrir chamado') : TITULOS_TELA[atual.tipo] ?? '';
   const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
@@ -384,7 +393,7 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
       <View style={{ flex: 1, display: atual ? 'none' : 'flex' }}>
         {aba === 'painel' && <Painel aoAbrirChamado={abrirChamado} />}
         {aba === 'chamados' && <Chamados equipe={equipe} aoAbrirChamado={abrirChamado} aoNovo={() => ir({ tipo: 'novoChamado' })} />}
-        {aba === 'assistente' && <AssistenteApp usuario={usuario} />}
+        {aba === 'assistente' && <AssistenteApp usuario={usuario} {...(telaVista ? { tela: telaVista } : {})} />}
         {aba === 'menu' && <Menu itens={itensMenu} />}
       </View>
       <View accessibilityRole="tablist" style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: tema.borda,

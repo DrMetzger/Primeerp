@@ -156,7 +156,7 @@ Perfis: Colaborador, Administrador, Diretor e CEO; os três últimos têm acesso
   {
     id: 'assistente',
     titulo: '19. Assistente da equipe (o robô)',
-    texto: `O robô no canto da tela é o assistente da equipe. Além de tirar dúvidas de uso do sistema e de Protheus, ele faz ações: resume a operação (pendências, urgentes, quem está com o quê), busca chamados, mostra o resumo de um chamado, abre chamado para um cliente, encerra chamado, muda situação e troca responsável. Toda ação que altera dados aparece como um cartão de confirmação; nada muda sem o seu clique em Confirmar. O robô some pelo X acima dele e volta pelo item Assistente do menu.`,
+    texto: `O robô no canto da tela é o assistente da equipe. Além de tirar dúvidas de uso do sistema e de Protheus, ele faz ações: resume a operação (pendências, urgentes, quem está com o quê), busca chamados, mostra o resumo de um chamado, abre chamado para um cliente, encerra chamado, muda situação e troca responsável. Toda ação que altera dados aparece como um cartão de confirmação; nada muda sem o seu clique em Confirmar. O assistente enxerga a tela em que você está (o chamado aberto, a lista, o formulário), então dá para perguntar "o que eu faço aqui?" ou "resume esse chamado". No site, clique e ARRASTE o robô para qualquer canto da tela (ele lembra o lugar); a conversa abre para o lado que tiver espaço. O robô some pelo X acima dele e volta pelo item Assistente do menu. Ele não aparece nas telas de login.`,
   },
   {
     id: 'boas-praticas',

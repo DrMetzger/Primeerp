@@ -55,7 +55,7 @@ export function TelaAgenda({ aoAbrirChamado }: { aoAbrirChamado: (id: number) =>
   const [aviso, setAviso] = useState('');
   const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(inicio); d.setDate(d.getDate() + i); return d; });
   const de = iso(dias[0] ?? inicio), ate = iso(dias[6] ?? inicio);
-  const carregar = useCallback(() => api<Agenda>(`/api/agenda?de=${de}&ate=${ate}`).then(setDados).catch(() => setDados({ tarefas: [], eventos: [], clientes: [], equipe: [] })), [de, ate]);
+  const carregar = useCallback(() => api<Agenda>(`/api/agenda?de=${de}&ate=${ate}`).then(setDados).catch(() => setDados({ tarefas: [], eventos: [], clientes: [], equipe: [], horario: { expedienteInicio: '08:00', expedienteFim: '18:00', almocoInicio: '12:00', almocoFim: '13:00' } })), [de, ate]);
   useEffect(() => { setDados(null); void carregar(); }, [carregar]);
 
   async function feita(t: TarefaAgenda) {
