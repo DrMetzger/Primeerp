@@ -8,7 +8,8 @@ import { AssistenteApp } from './AssistenteApp';
 import { Esqueleto, EsqueletoPainel } from './Esqueleto';
 import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
-import { FotoPessoa, TelaAgenda, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
+import { TelaAgenda } from './TelaAgenda';
+import { FotoPessoa, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
 import { TelaSetor } from './TelaSetor';
 import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
 import { Cartao, T } from './ui';
@@ -225,14 +226,14 @@ function Chamados({ equipe, aoAbrirChamado, aoNovo }: { equipe: boolean; aoAbrir
           </Pressable>
         )}
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 10 }} style={{ flexGrow: 0 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingVertical: 10 }}>
         {filtros.map(([v, r]) => (
           <Pressable key={r} onPress={() => setStatus(v)} accessibilityRole="tab" accessibilityState={{ selected: status === v }}
-            style={{ minHeight: 44, borderRadius: 99, paddingHorizontal: 16, justifyContent: 'center', backgroundColor: status === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: status === v ? tema.primaria : tema.borda }}>
+            style={{ minHeight: 40, borderRadius: 99, paddingHorizontal: 13, justifyContent: 'center', backgroundColor: status === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: status === v ? tema.primaria : tema.borda }}>
             <T style={{ fontWeight: '700', fontSize: 14, color: status === v ? tema.primariaTexto : tema.textoSuave }}>{r}</T>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
       {!dados ? (
         <View style={{ padding: 16, gap: 10 }}>{[0, 1, 2, 3, 4].map((i) => <Esqueleto key={i} altura={110} />)}</View>
       ) : (

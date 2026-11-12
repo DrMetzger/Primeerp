@@ -56,9 +56,11 @@ export async function linkArquivo(destino: string): Promise<string> {
 }
 
 /** Ações que reaproveitam as regras do PHP (avisos, anexos, fila da IA). */
-export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: string[] }>(arquivo: string, campos: Record<string, string>): Promise<T> {
+export async function acaoPhp<T = { ok: boolean; id?: number | null; avisos?: string[] }>(arquivo: string, campos: Record<string, string>, arquivos: Record<string, { uri: string; name: string; type: string }[]> = {}): Promise<T> {
   const corpo = new FormData();
   for (const [k, v] of Object.entries(campos)) corpo.append(k, v);
+  // Arquivos do celular (o React Native manda o conteúdo a partir do uri).
+  for (const [k, lista] of Object.entries(arquivos)) for (const a of lista) corpo.append(k, { uri: a.uri, name: a.name, type: a.type } as unknown as Blob);
   const r = await fetch(`${URL_SERVIDOR}/${arquivo}`, {
     method: 'POST', body: corpo,
     headers: { 'X-PrimeHub': '1', ...(token ? { authorization: `Bearer ${token}` } : {}) },

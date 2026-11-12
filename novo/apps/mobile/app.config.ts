@@ -18,12 +18,14 @@ const config: ExpoConfig = {
     package: 'br.com.primeerp.primehub',
     versionCode: versaoCodigo,
     adaptiveIcon: { foregroundImage: './assets/icone-frente.png', backgroundImage: './assets/icone-fundo.png', backgroundColor: '#0B1B6F' },
-    permissions: ['INTERNET', 'REQUEST_INSTALL_PACKAGES'],
+    permissions: ['INTERNET', 'REQUEST_INSTALL_PACKAGES', 'CAMERA'],
   },
   plugins: [
     'expo-secure-store',
     ['expo-splash-screen', { image: './assets/icone-p.png', imageWidth: 120, backgroundColor: '#070B1C' }],
     'expo-font',
+    ['expo-image-picker', { photosPermission: 'O Prime Hub usa suas fotos para anexar prints e vídeos nos chamados.', cameraPermission: 'O Prime Hub usa a câmera para tirar fotos e anexar nos chamados.' }],
+    'expo-document-picker',
   ],
   extra: { urlServidor: process.env.APP_URL_SERVIDOR ?? 'https://suporte.primeerp.com.br' },
 };

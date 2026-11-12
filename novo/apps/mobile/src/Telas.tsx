@@ -6,7 +6,9 @@ import { acaoPhp, api, arquivoPublico, linkArquivo, relatorioJson } from './api'
 import { Esqueleto } from './Esqueleto';
 import { useTema } from './tema';
 import { FotoPessoa } from './FotoPessoa';
-import { Cartao, T } from './ui';
+import { Cartao, SeletorAnexos, T } from './ui';
+import type { ArquivoEscolhido } from './arquivos';
+import { SecaoDocumentosApp, SecaoEquipePrimeApp, SecaoPessoasApp, SecaoRiscoApp, SecaoSetoresApp } from './ClienteSecoes';
 
 // ---------------------------------------------------------------- Peças
 
@@ -114,6 +116,7 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
   const [statusApos, setStatusApos] = useState<StatusApos>('aguardando_cliente');
   const [avisar, setAvisar] = useState(true);
   const [enviando, setEnviando] = useState(false);
+  const [anexos, setAnexos] = useState<ArquivoEscolhido[]>([]);
   const [aviso, setAviso] = useState('');
   const [ia, setIa] = useState<{ rodando: boolean; texto: string }>({ rodando: false, texto: '' });
 
@@ -123,13 +126,13 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
   useEffect(() => { void carregar(); }, [carregar]);
 
   async function responder() {
-    if (!mensagem.trim()) return;
+    if (!mensagem.trim() && !anexos.length) return;
     setEnviando(true); setAviso('');
     try {
       const campos: Record<string, string> = { acao: 'responder_chamado', chamado_id: String(id), mensagem };
       if (equipe) { campos.status_apos_resposta = statusApos; campos.notificar_cliente = avisar ? '1' : '0'; }
-      await acaoPhp('api_acoes.php', campos);
-      setMensagem(''); setAviso('Resposta enviada. ✅');
+      const r = await acaoPhp('api_acoes.php', campos, { 'anexos[]': anexos });
+      setMensagem(''); setAnexos([]); setAviso(r.avisos?.length ? `Resposta enviada, mas: ${r.avisos.join(' ')}` : 'Resposta enviada. ✅');
       await carregar();
     } catch (e) { setAviso(e instanceof Error ? e.message : 'Não deu pra enviar agora.'); }
     setEnviando(false);
@@ -246,13 +249,14 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
             </Pressable>
           )}
           <Entrada rotulo="Mensagem" valor={mensagem} aoMudar={setMensagem} linhas={6} dica="Escreva a resposta…" />
+          <SeletorAnexos arquivos={anexos} aoMudar={setAnexos} rotulo="Anexar prints, vídeos ou arquivos" />
           {equipe && (
             <>
               <Escolha rotulo="Depois de responder" opcoes={[...STATUS_APOS]} valor={statusApos} aoMudar={setStatusApos} />
               <Escolha rotulo="Avisar o cliente (e-mail e WhatsApp)" opcoes={[{ valor: 'sim', rotulo: 'Sim' }, { valor: 'nao', rotulo: 'Não' }]} valor={avisar ? 'sim' : 'nao'} aoMudar={(v) => setAvisar(v === 'sim')} />
             </>
           )}
-          <BotaoGradiente titulo={enviando ? 'Enviando…' : 'Enviar resposta'} aoTocar={() => void responder()} desativado={enviando || !mensagem.trim()} />
+          <BotaoGradiente titulo={enviando ? 'Enviando…' : 'Enviar resposta'} aoTocar={() => void responder()} desativado={enviando || (!mensagem.trim() && !anexos.length)} />
           {!!aviso && <T style={{ color: tema.textoSuave, fontSize: 14 }}>{aviso}</T>}
         </Cartao>
         <BotaoContorno titulo={c.status === 'fechado' ? '↺ Reabrir chamado' : '✓ Encerrar chamado'} aoTocar={() => void encerrarOuReabrir()} />
@@ -275,6 +279,7 @@ export function TelaNovoChamado({ equipe, clienteInicial, aoCriar }: { equipe: b
   const [prioridade, setPrioridade] = useState<'baixa' | 'media' | 'alta' | 'urgente'>('media');
   const [setor, setSetor] = useState('');
   const [descricao, setDescricao] = useState('');
+  const [anexosNovo, setAnexosNovo] = useState<ArquivoEscolhido[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState('');
 
@@ -285,7 +290,7 @@ export function TelaNovoChamado({ equipe, clienteInicial, aoCriar }: { equipe: b
   async function abrir() {
     setEnviando(true); setErro('');
     try {
-      const r = await acaoPhp('api_acoes.php', { acao: 'abrir_chamado', cliente_id: clienteId, titulo, categoria, prioridade, setor_id: setor, descricao });
+      const r = await acaoPhp('api_acoes.php', { acao: 'abrir_chamado', cliente_id: clienteId, titulo, categoria, prioridade, setor_id: setor, descricao }, { 'anexos[]': anexosNovo });
       aoCriar(r.id ?? null);
     } catch (e) { setErro(e instanceof Error ? e.message : 'Não deu pra abrir agora.'); setEnviando(false); }
   }
@@ -308,6 +313,7 @@ export function TelaNovoChamado({ equipe, clienteInicial, aoCriar }: { equipe: b
         <Escolha rotulo="Prioridade" opcoes={[{ valor: 'baixa', rotulo: 'Baixa' }, { valor: 'media', rotulo: 'Média' }, { valor: 'alta', rotulo: 'Alta' }, { valor: 'urgente', rotulo: 'Urgente' }]} valor={prioridade} aoMudar={setPrioridade} />
         {opcoes.setores.length > 0 && <Escolha rotulo="Setor" opcoes={[{ valor: '', rotulo: equipe ? 'Sem setor' : 'Padrão' }, ...opcoes.setores.map((s) => ({ valor: String(s.id), rotulo: s.nome }))]} valor={setor} aoMudar={setSetor} />}
         <Entrada rotulo="Descrição *" valor={descricao} aoMudar={setDescricao} linhas={7} dica="Conte o que aconteceu, a rotina e a mensagem de erro." />
+        <SeletorAnexos arquivos={anexosNovo} aoMudar={setAnexosNovo} rotulo="Prints, vídeos ou arquivos (opcional)" />
         {!!erro && <T style={{ color: tema.perigo }}>{erro}</T>}
         <BotaoGradiente titulo={enviando ? 'Abrindo…' : 'Abrir chamado'} aoTocar={() => void abrir()} desativado={enviando || !pronto} />
       </ScrollView>
@@ -357,7 +363,7 @@ export function TelaClientes({ aoAbrir }: { aoAbrir: (id: number) => void }) {
   );
 }
 
-type AbaCliente = 'geral' | 'chamados' | 'setores' | 'pessoas' | 'documentos' | 'agenda';
+type AbaCliente = 'geral' | 'chamados' | 'setores' | 'pessoas' | 'documentos' | 'agenda' | 'equipe' | 'risco';
 
 export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, CartaoChamado }: {
   id: number; aoAbrirChamado: (id: number) => void; aoNovoChamado: () => void; aoAbrirSetor: (setorId: number) => void;
@@ -382,7 +388,7 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, C
   if (erro) return <Vazio>{erro}</Vazio>;
   if (!dados) return <View style={{ padding: 16, gap: 12 }}>{[130, 50, 110, 110].map((a, i) => <Esqueleto key={i} altura={a} />)}</View>;
   const c = dados.cliente;
-  const abas: [AbaCliente, string][] = [['geral', 'Visão geral'], ['chamados', 'Chamados'], ['setores', 'Setores'], ['pessoas', 'Usuários'], ['documentos', 'Documentos'], ['agenda', 'Agenda']];
+  const abas: [AbaCliente, string][] = [['geral', '📊 Geral'], ['chamados', '🎧 Chamados'], ['setores', '🗂️ Setores'], ['pessoas', '👥 Usuários'], ['documentos', '📄 Documentos'], ['agenda', '📅 Agenda'], ['equipe', '🤝 Equipe Prime'], ['risco', '⚠️ Risco & melhorias']];
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} colors={[tema.primaria]} />}>
@@ -398,14 +404,14 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, C
         </View>
         <BotaoGradiente titulo="＋ Abrir chamado para este cliente" aoTocar={aoNovoChamado} />
       </Cartao>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {abas.map(([v, r]) => (
           <Pressable key={v} onPress={() => setAba(v)} accessibilityRole="tab" accessibilityState={{ selected: aba === v }}
-            style={{ minHeight: 44, borderRadius: 99, paddingHorizontal: 16, justifyContent: 'center', backgroundColor: aba === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: aba === v ? tema.primaria : tema.borda }}>
+            style={{ minHeight: 40, borderRadius: 99, paddingHorizontal: 13, justifyContent: 'center', backgroundColor: aba === v ? tema.primaria : tema.superficie, borderWidth: 1, borderColor: aba === v ? tema.primaria : tema.borda }}>
             <T style={{ fontWeight: '700', fontSize: 14, color: aba === v ? tema.primariaTexto : tema.textoSuave }}>{r}</T>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
 
       {aba === 'geral' && (
         <>
@@ -428,28 +434,11 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, C
         </>
       )}
       {aba === 'chamados' && (!chamados?.itens.length ? <Vazio>Nenhum chamado.</Vazio> : chamados.itens.map((ch) => <CartaoChamado key={ch.id} c={ch} equipe aoAbrir={() => aoAbrirChamado(ch.id)} />))}
-      {aba === 'setores' && (!dados.setores.length ? <Vazio>Sem setores cadastrados.</Vazio> : dados.setores.map((s, i) => {
-        const cor = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#84cc16', '#d946ef'][i % 8] ?? '#0ea5e9';
-        return (
-          <Pressable key={s.id} onPress={() => aoAbrirSetor(s.id)} accessibilityRole="button" accessibilityLabel={`Setor ${s.nome}`}>
-            <Cartao style={{ flexDirection: 'row', gap: 12, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: cor }}>
-              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: cor, alignItems: 'center', justifyContent: 'center' }}><T style={{ color: '#FFFFFF', fontWeight: '800' }}>{s.nome.slice(0, 2).toUpperCase()}</T></View>
-              <View style={{ flex: 1 }}><T style={{ fontWeight: '700' }}>{s.nome}</T><T style={{ color: tema.textoSuave, fontSize: 14 }}>{s.ativo ? `${s.pendentes} pendente(s)` : 'Desativado'}</T></View>
-              <T style={{ color: tema.primaria, fontSize: 22 }}>›</T>
-            </Cartao>
-          </Pressable>
-        );
-      }))}
-      {aba === 'pessoas' && (!dados.pessoas.length ? <Vazio>Nenhum usuário cadastrado.</Vazio> : dados.pessoas.map((p) => (
-        <Cartao key={p.id}>
-          <T style={{ fontWeight: '700' }}>{p.nome}</T>
-          <T style={{ color: tema.textoSuave, fontSize: 14 }}>{p.setor ?? 'Sem setor'}{p.email ? ` · ${p.email}` : ''}</T>
-          <T style={{ color: p.portalAtivo ? tema.sucesso : tema.textoSuave, fontSize: 13, fontWeight: '700' }}>{p.portalAtivo ? 'Portal ativo' : 'Sem acesso ao portal'}</T>
-        </Cartao>
-      )))}
-      {aba === 'documentos' && (!dados.documentos.length ? <Vazio>Nenhum documento enviado.</Vazio> : dados.documentos.map((d) => (
-        <Cartao key={d.id}><T style={{ fontWeight: '700' }}>📄 {d.titulo}</T><T style={{ color: tema.textoSuave, fontSize: 14 }}>{[d.categoria, d.setor, dataBR(d.criadoEm)].filter(Boolean).join(' · ')}</T></Cartao>
-      )))}
+      {aba === 'setores' && <SecaoSetoresApp id={id} dados={dados} recarregar={() => void carregar()} aoAbrirSetor={aoAbrirSetor} />}
+      {aba === 'pessoas' && <SecaoPessoasApp id={id} dados={dados} recarregar={() => void carregar()} />}
+      {aba === 'documentos' && <SecaoDocumentosApp id={id} dados={dados} recarregar={() => void carregar()} />}
+      {aba === 'equipe' && <SecaoEquipePrimeApp id={id} dados={dados} recarregar={() => void carregar()} />}
+      {aba === 'risco' && <SecaoRiscoApp id={id} dados={dados} recarregar={() => void carregar()} />}
       {aba === 'agenda' && (!dados.treinamentos.length ? <Vazio>Nada agendado.</Vazio> : dados.treinamentos.map((t) => (
         <Cartao key={t.id}><T style={{ fontWeight: '700' }}>📅 {t.titulo}</T><T style={{ color: tema.textoSuave, fontSize: 14 }}>{[t.tipo, t.setor, dataBR(t.inicio, true), t.status].filter(Boolean).join(' · ')}</T></Cartao>
       )))}
@@ -507,7 +496,14 @@ export function TelaRelatorios() {
           {info.precisaCliente && <Escolha rotulo="Cliente *" opcoes={base.clientes.map((c) => ({ valor: String(c.id), rotulo: c.nome }))} valor={cliente} aoMudar={setCliente} />}
           {info.precisaUsuario && <Escolha rotulo="Colaborador *" opcoes={base.usuarios.map((u) => ({ valor: String(u.id), rotulo: u.nome }))} valor={usuario} aoMudar={setUsuario} />}
           <BotaoGradiente titulo={gerando ? 'Gerando…' : 'Ver relatório'} aoTocar={() => void gerar()} desativado={gerando || !!falta} />
-          <T style={{ color: tema.textoSuave, fontSize: 13 }}>PDF e Excel com o timbrado: pelo site, em Relatórios.</T>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {(['pdf', 'xlsx'] as const).map((f) => (
+              <View key={f} style={{ flex: 1 }}>
+                <BotaoContorno titulo={f === 'pdf' ? '📕 Baixar PDF' : '📗 Baixar Excel'} desativado={!!falta}
+                  aoTocar={() => void abrirArquivo(`/relatorios.php?${new URLSearchParams({ relatorio: tipo, ...(cliente ? { cliente_id: cliente } : {}), ...(usuario ? { usuario_id: usuario } : {}), formato: f }).toString()}`)} />
+              </View>
+            ))}
+          </View>
         </Cartao>
       )}
       {gerando && <Esqueleto altura={160} />}
