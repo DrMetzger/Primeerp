@@ -1,0 +1,47 @@
+# Diagnóstico do e-mail do código de acesso (2FA) na VM. Só LÊ. Não imprime
+# senha, código nem endereço de ninguém (o log do Actions é público).
+name: VM - diagnóstico do e-mail
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-diagnostico-email.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnosticar
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          mascara() { sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/***@***/g'; }
+          SQL() { docker exec primehub-db sh -c "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1; }
+          echo "== contêineres"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub
+          echo "== códigos de acesso pedidos nas últimas 24h (sem dados pessoais)"
+          SQL "SELECT tipo, criado_em, IF(usado_em IS NULL,'nao usado','usado'), tentativas FROM login_2fa WHERE criado_em > NOW() - INTERVAL 1 DAY ORDER BY criado_em DESC LIMIT 15"
+          echo "== configuração SMTP (sem usuário/senha)"
+          SQL "SELECT chave, IF(chave IN ('smtp_user','smtp_pass'), CONCAT('preenchido, ', CHAR_LENGTH(valor), ' caracteres'), valor) FROM configuracoes WHERE chave IN ('smtp_host','smtp_port','smtp_secure','smtp_user','smtp_pass','smtp_nome_remetente')"
+          echo "== log da API (últimas 24h, e-mails mascarados)"
+          docker logs primehub-api --since 24h 2>&1 | grep -iE 'smtp|mail|2fa|codigo|código|erro|error|econn|etimedout|auth' | mascara | tail -30
+          echo "== conexão da API com o servidor SMTP"
+          HOST=$(SQL "SELECT valor FROM configuracoes WHERE chave='smtp_host'" | tr -d '\r')
+          PORTA=$(SQL "SELECT valor FROM configuracoes WHERE chave='smtp_port'" | tr -d '\r')
+          echo "host=$HOST porta=$PORTA"
+          docker exec primehub-api node -e "
+            const tls = require('tls'), net = require('net');
+            const [h, p] = ['$HOST', Number('$PORTA') || 587];
+            const s = p === 465 ? tls.connect({ host: h, port: p, servername: h }) : net.connect({ host: h, port: p });
+            s.setTimeout(12000, () => { console.log('SMTP: TEMPO ESGOTADO (porta bloqueada?)'); process.exit(0); });
+            s.on('data', (d) => { console.log('SMTP respondeu:', String(d).split('\n')[0]); s.end(); process.exit(0); });
+            s.on('error', (e) => { console.log('SMTP: ERRO', e.code || e.message); process.exit(0); });
+          "
+          REMOTO
