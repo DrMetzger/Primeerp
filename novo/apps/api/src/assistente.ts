@@ -15,7 +15,7 @@ import { consulta, primeira } from './db';
  *    código, nunca contorna o sistema de chamados e sempre defende a Prime.
  */
 
-const MODELOS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
+const MODELOS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
 const LIMITE_DIA = { equipe: 200, cliente: 40 } as const;
 const usoHoje = new Map<string, { dia: string; n: number }>();
 
@@ -260,11 +260,11 @@ async function chamarGemini(chave: string, modelo: string, sistema: string, cont
       systemInstruction: { parts: [{ text: sistema }] },
       contents,
       tools: [{ functionDeclarations: ferramentas.map((f) => f.declaracao) }],
-      generationConfig: { maxOutputTokens: 4096, temperature: 0.6, thinkingConfig: { thinkingBudget: modelo.includes('lite') ? 0 : 768 } },
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.6, ...(modelo.includes('lite') ? {} : { thinkingConfig: { thinkingBudget: 1024 } }) },
     }),
-    signal: AbortSignal.timeout(22_000),
+    signal: AbortSignal.timeout(modelo.includes('lite') ? 25_000 : 45_000),
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200)}`);
   const d = (await r.json()) as { candidates?: { content?: { parts?: Parte[] } }[] };
   return d.candidates?.[0]?.content?.parts ?? [];
 }
