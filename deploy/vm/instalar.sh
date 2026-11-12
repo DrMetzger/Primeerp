@@ -19,6 +19,14 @@ if [ ! -f .env ]; then
   umask 077
   printf 'DB_PASS=%s\nDB_ROOT_PASS=%s\nSEM_NOTIFICACOES=1\nPRIMEHUB_CRON=0\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > .env
 fi
+# Depois do corte (arquivo deploy/vm/PRODUCAO no repositório): e-mail,
+# WhatsApp e cron ligados -- o servidor novo é o oficial.
+if [ -f app/deploy/vm/PRODUCAO ]; then
+  sed -i 's/^SEM_NOTIFICACOES=.*/SEM_NOTIFICACOES=0/; s/^PRIMEHUB_CRON=.*/PRIMEHUB_CRON=1/' .env
+  grep -q '^SEM_NOTIFICACOES=' .env || echo 'SEM_NOTIFICACOES=0' >> .env
+  grep -q '^PRIMEHUB_CRON=' .env || echo 'PRIMEHUB_CRON=1' >> .env
+  echo "== PRODUÇÃO: notificações e cron ligados"
+fi
 # Segredos do sistema novo (login da API e ponte com o PHP), gerados uma vez.
 grep -q '^JWT_SECRET=' .env || echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
 grep -q '^SSO_SECRET=' .env || echo "SSO_SECRET=$(openssl rand -hex 32)" >> .env

@@ -1,0 +1,3 @@
+Corte feito em 12/11/2026: o servidor novo (https://suporte.primeerp.com.br)
+é o oficial. Com este arquivo, o instalar.sh liga e-mail, WhatsApp e cron.
+A Hostinger só redireciona e repassa o webhook do WhatsApp (ver bootstrap.php).
