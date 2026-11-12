@@ -5,6 +5,7 @@ import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pres
 import { acaoPhp, api, arquivoPublico, linkArquivo, relatorioJson } from './api';
 import { Esqueleto } from './Esqueleto';
 import { useTema } from './tema';
+import { FotoPessoa } from './FotoPessoa';
 import { Cartao, T } from './ui';
 
 // ---------------------------------------------------------------- Peças
@@ -197,17 +198,23 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
         </Cartao>
 
         {dados.mensagens.map((m) => {
-          const minha = (m.autorTipo === 'equipe') === equipe;
+          const nosso = m.autorTipo === 'equipe';
+          const minha = nosso === equipe;
           return (
-            <View key={m.id} style={{ alignSelf: minha ? 'flex-end' : 'flex-start', maxWidth: '92%', borderRadius: 20, padding: 14, gap: 6,
-              backgroundColor: minha ? tema.superficieAlta : tema.superficie, borderWidth: 1, borderColor: minha ? tema.primaria : tema.borda }}>
-              <T style={{ color: tema.textoSuave, fontSize: 12, fontWeight: '700' }}>{m.autorNome} · {dataBR(m.criadoEm, true)}</T>
-              <T selectable style={{ fontSize: 15, lineHeight: 22 }}>{m.mensagem}</T>
-              {m.anexos.map((a) => (
-                <Pressable key={a.id} onPress={() => void abrirArquivo(`/download_anexo_chamado.php?id=${a.id}`)} accessibilityRole="link" style={{ minHeight: 40, justifyContent: 'center' }}>
-                  <T style={{ color: tema.primaria, fontSize: 14, fontWeight: '700' }}>📎 {a.nome}</T>
-                </Pressable>
-              ))}
+            <View key={m.id} style={{ flexDirection: minha ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8 }}>
+              <FotoPessoa caminho={m.autorFoto} nome={m.autorNome} tamanho={34} anel={nosso ? tema.primaria : tema.destaque} />
+              <View style={{ maxWidth: '82%', gap: 4, alignItems: minha ? 'flex-end' : 'flex-start' }}>
+                <T style={{ fontSize: 12, color: tema.textoSuave }}><T style={{ fontWeight: '800', fontSize: 13, color: tema.texto }}>{m.autorNome}</T>{m.autorPapel ? ` · ${m.autorPapel}` : ''} · {dataBR(m.criadoEm, true)}</T>
+                <View style={{ borderRadius: 20, padding: 14, gap: 6, backgroundColor: minha ? tema.superficieAlta : tema.superficie, borderWidth: 1, borderColor: minha ? tema.primaria : tema.borda }}>
+                  <T selectable style={{ fontSize: 15, lineHeight: 22 }}>{m.mensagem}</T>
+                  {m.anexos.map((a) => (
+                    <Pressable key={a.id} onPress={() => void abrirArquivo(`/download_anexo_chamado.php?id=${a.id}`)} accessibilityRole="link" style={{ minHeight: 40, justifyContent: 'center' }}>
+                      <T style={{ color: tema.primaria, fontSize: 14, fontWeight: '700' }}>{a.tipo === 'imagem' ? '🖼️' : a.tipo === 'video' ? '🎬' : a.tipo === 'pdf' ? '📕' : '📎'} {a.nome}</T>
+                    </Pressable>
+                  ))}
+                </View>
+                {minha && <T style={{ fontSize: 12, fontWeight: '700', color: m.vistoPor.length ? tema.sucesso : tema.textoSuave }}>{m.vistoPor.length ? `✓✓ Visto por ${m.vistoPor.map((v) => v.nome.split(' ')[0]).join(', ')}` : '✓ Enviado, ainda não visto'}</T>}
+              </View>
             </View>
           );
         })}
@@ -335,8 +342,8 @@ export function TelaClientes({ aoAbrir }: { aoAbrir: (id: number) => void }) {
 
 type AbaCliente = 'geral' | 'chamados' | 'setores' | 'pessoas' | 'documentos' | 'agenda';
 
-export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, CartaoChamado }: {
-  id: number; aoAbrirChamado: (id: number) => void; aoNovoChamado: () => void;
+export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, CartaoChamado }: {
+  id: number; aoAbrirChamado: (id: number) => void; aoNovoChamado: () => void; aoAbrirSetor: (setorId: number) => void;
   CartaoChamado: ComponentType<{ c: ListaChamados['itens'][number]; aoAbrir: () => void; equipe: boolean }>;
 }) {
   const { tema } = useTema();
@@ -404,9 +411,18 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, CartaoChamado }
         </>
       )}
       {aba === 'chamados' && (!chamados?.itens.length ? <Vazio>Nenhum chamado.</Vazio> : chamados.itens.map((ch) => <CartaoChamado key={ch.id} c={ch} equipe aoAbrir={() => aoAbrirChamado(ch.id)} />))}
-      {aba === 'setores' && (!dados.setores.length ? <Vazio>Sem setores cadastrados.</Vazio> : dados.setores.map((s) => (
-        <Cartao key={s.id}><T style={{ fontWeight: '700' }}>{s.nome}</T><T style={{ color: tema.textoSuave, fontSize: 14 }}>{s.ativo ? 'Ativo' : 'Desativado'} · {s.pendentes} pendente(s)</T></Cartao>
-      )))}
+      {aba === 'setores' && (!dados.setores.length ? <Vazio>Sem setores cadastrados.</Vazio> : dados.setores.map((s, i) => {
+        const cor = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#84cc16', '#d946ef'][i % 8] ?? '#0ea5e9';
+        return (
+          <Pressable key={s.id} onPress={() => aoAbrirSetor(s.id)} accessibilityRole="button" accessibilityLabel={`Setor ${s.nome}`}>
+            <Cartao style={{ flexDirection: 'row', gap: 12, alignItems: 'center', borderLeftWidth: 5, borderLeftColor: cor }}>
+              <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: cor, alignItems: 'center', justifyContent: 'center' }}><T style={{ color: '#FFFFFF', fontWeight: '800' }}>{s.nome.slice(0, 2).toUpperCase()}</T></View>
+              <View style={{ flex: 1 }}><T style={{ fontWeight: '700' }}>{s.nome}</T><T style={{ color: tema.textoSuave, fontSize: 14 }}>{s.ativo ? `${s.pendentes} pendente(s)` : 'Desativado'}</T></View>
+              <T style={{ color: tema.primaria, fontSize: 22 }}>›</T>
+            </Cartao>
+          </Pressable>
+        );
+      }))}
       {aba === 'pessoas' && (!dados.pessoas.length ? <Vazio>Nenhum usuário cadastrado.</Vazio> : dados.pessoas.map((p) => (
         <Cartao key={p.id}>
           <T style={{ fontWeight: '700' }}>{p.nome}</T>

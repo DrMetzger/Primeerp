@@ -1,23 +1,14 @@
 import type { Agenda, EquipePortal, EventoCliente, FonteArquivo, Perfil, TarefaAgenda, UsuarioEquipe } from '@primehub/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { Image, Linking, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
-import { acaoPhp, api, arquivoPublico, ErroApi, lerJsonPhp } from './api';
+import { Linking, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
+import { acaoPhp, api, ErroApi, lerJsonPhp } from './api';
 import { Esqueleto } from './Esqueleto';
 import { useTema } from './tema';
 import { abrirArquivo, BotaoContorno, BotaoGradiente, dataBR, Entrada, Escolha, LogoEmpresa, Vazio } from './Telas';
-import { SvgUri } from 'react-native-svg';
+import { FotoPessoa } from './FotoPessoa';
 import { Cartao, T } from './ui';
+export { FotoPessoa };
 
-/** Foto ou avatar (os avatares prontos são SVG, que o Image do Android não desenha). */
-export function FotoPessoa({ caminho, tamanho = 44, nome = '' }: { caminho: string | null | undefined; tamanho?: number; nome?: string }) {
-  const { tema } = useTema();
-  const uri = arquivoPublico(caminho);
-  if (!uri) {
-    return <View style={{ width: tamanho, height: tamanho, borderRadius: tamanho / 2, backgroundColor: tema.superficieAlta, alignItems: 'center', justifyContent: 'center' }}><T style={{ fontWeight: '800', fontSize: tamanho / 2.6 }}>{nome.slice(0, 1).toUpperCase() || '👤'}</T></View>;
-  }
-  if (/\.svg($|\?)/i.test(uri)) return <View style={{ width: tamanho, height: tamanho, borderRadius: tamanho / 2, overflow: 'hidden' }}><SvgUri uri={uri} width={tamanho} height={tamanho} /></View>;
-  return <Image source={{ uri }} style={{ width: tamanho, height: tamanho, borderRadius: tamanho / 2 }} accessibilityIgnoresInvertColors />;
-}
 
 type Resp = { ok: boolean; mensagens?: Record<string, string>; erro?: string | null };
 const acao = (arquivo: string, campos: Record<string, string>) => acaoPhp<Resp>(arquivo, campos);

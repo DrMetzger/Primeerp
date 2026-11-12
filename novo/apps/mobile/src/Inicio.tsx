@@ -9,11 +9,12 @@ import { Esqueleto, EsqueletoPainel } from './Esqueleto';
 import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
 import { FotoPessoa, TelaAgenda, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
+import { TelaSetor } from './TelaSetor';
 import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
 import { Cartao, T } from './ui';
 
 type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
-type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'novoChamado'; clienteId?: number }
+type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'setor'; clienteId: number; id: number } | { tipo: 'novoChamado'; clienteId?: number }
   | { tipo: 'clientes' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
 const TITULOS_TELA: Record<string, string> = {
   clientes: 'Clientes', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
@@ -142,9 +143,13 @@ function CartaoChamado({ c, aoAbrir, equipe }: { c: ChamadoResumo; aoAbrir: () =
           {equipe && <LogoEmpresa nome={c.cliente} logo={c.clienteLogo} tamanho={42} />}
           <View style={{ flex: 1, gap: 2 }}>
             <T style={{ fontWeight: '700', fontSize: 17 }} numberOfLines={3}>{c.titulo}</T>
-            <T style={{ color: tema.textoSuave, fontSize: 14 }} numberOfLines={1}>
-              {equipe ? `${c.cliente ?? 'Sem cliente'}${c.responsavel ? ` · ${c.responsavel}` : ''}` : `Aberto em ${c.criadoEm.slice(8, 10)}/${c.criadoEm.slice(5, 7)}/${c.criadoEm.slice(0, 4)}`}
-            </T>
+            {equipe && <T style={{ color: tema.textoSuave, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>{c.cliente ?? 'Sem cliente'}</T>}
+            {c.ultimo ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <FotoPessoa caminho={c.ultimo.foto} nome={c.ultimo.nome} tamanho={22} />
+                <T style={{ color: tema.textoSuave, fontSize: 14, flex: 1 }} numberOfLines={1}><T style={{ fontWeight: '800', fontSize: 14 }}>{c.ultimo.nome}</T> respondeu</T>
+              </View>
+            ) : <T style={{ color: tema.textoSuave, fontSize: 14 }}>Aberto em {c.criadoEm.slice(8, 10)}/{c.criadoEm.slice(5, 7)}, sem respostas ainda</T>}
           </View>
         </View>
         {equipe && c.horasEsperando !== null && <T style={{ color: tema.textoSuave, fontSize: 14 }}>⏱ esperando há {c.horasEsperando < 24 ? `${c.horasEsperando}h` : `${Math.floor(c.horasEsperando / 24)}d`}</T>}
@@ -314,7 +319,7 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   ];
   const titulos: Record<Aba, string> = { painel: 'Dashboard', chamados: equipe ? 'Chamados' : 'Meus chamados', assistente: 'Assistente PrimeERP', menu: 'Menu' };
   const atual = pilha[pilha.length - 1];
-  const tituloAtual = !atual ? titulos[aba] : atual.tipo === 'chamado' ? `Chamado #${atual.id}` : atual.tipo === 'cliente' ? 'Cliente'
+  const tituloAtual = !atual ? titulos[aba] : atual.tipo === 'chamado' ? `Chamado #${atual.id}` : atual.tipo === 'cliente' ? 'Cliente' : atual.tipo === 'setor' ? 'Setor'
     : atual.tipo === 'novoChamado' ? (equipe ? 'Novo chamado' : 'Abrir chamado') : TITULOS_TELA[atual.tipo] ?? '';
   const iniciais = usuario.nome.split(' ').slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase();
 
@@ -359,7 +364,8 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
       {atual && (
         <View style={{ flex: 1 }}>
           {atual.tipo === 'chamado' && <TelaChamado key={atual.id} id={atual.id} equipe={equipe} aoAbrirCliente={(id) => ir({ tipo: 'cliente', id })} />}
-          {atual.tipo === 'cliente' && <TelaCliente key={atual.id} id={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} aoNovoChamado={() => ir({ tipo: 'novoChamado', clienteId: atual.id })} />}
+          {atual.tipo === 'cliente' && <TelaCliente key={atual.id} id={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} aoNovoChamado={() => ir({ tipo: 'novoChamado', clienteId: atual.id })} aoAbrirSetor={(sid) => ir({ tipo: 'setor', clienteId: atual.id, id: sid })} />}
+          {atual.tipo === 'setor' && <TelaSetor key={atual.id} clienteId={atual.clienteId} setorId={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'clientes' && <TelaClientes aoAbrir={(id) => ir({ tipo: 'cliente', id })} />}
           {atual.tipo === 'relatorios' && <TelaRelatorios />}
           {atual.tipo === 'agenda' && <TelaAgenda aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
