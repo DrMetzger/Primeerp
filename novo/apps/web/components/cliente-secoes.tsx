@@ -347,7 +347,7 @@ export function SecaoRisco({ clienteId, dados, recarregar }: { clienteId: number
             <div className="ml-auto flex gap-1">
               <button type="button" onClick={() => void exportar(a)} className="toque inline-flex items-center gap-1 rounded-xl px-3 text-sm font-semibold text-primaria hover:bg-primaria/10"><Download size={16} aria-hidden="true" />PDF</button>
               <button type="button" onClick={() => setEditando({ id: a.id, texto: a.texto })} aria-label="Editar análise" className="toque flex items-center justify-center rounded-xl text-sky-500 hover:bg-sky-500/10"><Pencil size={16} /></button>
-              <button type="button" aria-label="Excluir análise" onClick={() => { if (confirm('Excluir esta análise?')) void enviarAcao(`cliente.php?id=${clienteId}`, { acao: 'excluir_analise_risco', id: String(a.id) }).then(recarregar); }} className="toque flex items-center justify-center rounded-xl text-suave hover:bg-perigo/10 hover:text-perigo"><Trash2 size={16} /></button>
+              <button type="button" aria-label="Excluir análise" onClick={() => { if (confirm('Excluir esta análise?')) void enviarAcao(`cliente.php?id=${clienteId}`, { acao: 'excluir_analise_risco', id: String(a.id) }).then(() => { setAviso({ t: 'Análise excluída.', e: false }); recarregar(); }).catch((e: unknown) => setAviso({ t: e instanceof Error ? e.message : 'Não deu para excluir.', e: true })); }} className="toque flex items-center justify-center rounded-xl text-suave hover:bg-perigo/10 hover:text-perigo"><Trash2 size={16} /></button>
             </div>
           </div>
           <div className="space-y-2 text-[15px] leading-relaxed text-texto">

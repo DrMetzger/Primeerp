@@ -51,6 +51,17 @@ function notificar_depois(callable $callback): void
  */
 function finalizar_resposta_e_notificar(): void
 {
+    // Sistema novo: devolve o JSON agora (o flash ainda está na sessão em
+    // memória) e só então encerra a resposta e segue com os avisos.
+    if (!empty($GLOBALS['__ponte_sistema_novo']) && empty($GLOBALS['__ponte_sistema_novo_respondida'])) {
+        $saida = '';
+        while (ob_get_level() > 0) {
+            $saida = ob_get_clean() . $saida;
+        }
+        $json = converter_resposta_ao_sistema_novo($saida);
+        ob_start();
+        echo $json;
+    }
     session_write_close();
 
     if (function_exists('litespeed_finish_request')) {
@@ -171,40 +182,52 @@ function responder_json_ao_sistema_novo(): void
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !requisicao_do_sistema_novo()) {
         return;
     }
+    $GLOBALS['__ponte_sistema_novo'] = true;
     ob_start();
     register_shutdown_function(static function (): void {
-        $saida = ob_get_clean();
-        $redirecionou = false;
-        foreach (headers_list() as $h) {
-            if (stripos($h, 'Location:') === 0) {
-                $redirecionou = true;
-            }
-        }
-        $tipo = '';
-        foreach (headers_list() as $h) {
-            if (stripos($h, 'Content-Type:') === 0) {
-                $tipo = $h;
-            }
-        }
-        // Resposta que já é JSON (ações "ajax") ou arquivo: passa direto.
-        if (!$redirecionou && ($tipo !== '' && stripos($tipo, 'text/html') === false)) {
-            echo $saida;
+        if (!empty($GLOBALS['__ponte_sistema_novo_respondida'])) {
             return;
         }
-        if (headers_sent()) {
-            echo $saida;
-            return;
+        $saida = '';
+        while (ob_get_level() > 0) {
+            $saida = ob_get_clean() . $saida;
         }
-        $flash = $_SESSION['flash'] ?? [];
-        unset($_SESSION['flash']);
-        $codigo = http_response_code();
-        header_remove('Location');
-        header('Content-Type: application/json; charset=utf-8');
-        header('Cache-Control: no-store');
-        $erro = $flash['erro'] ?? ($codigo >= 400 ? trim(strip_tags((string) $saida)) : null);
-        http_response_code($erro && $codigo < 400 ? 422 : ($codigo >= 300 && $codigo < 400 ? 200 : $codigo));
-        echo json_encode(['ok' => !$erro, 'mensagens' => $flash, 'erro' => $erro ?: null], JSON_UNESCAPED_UNICODE);
+        echo converter_resposta_ao_sistema_novo($saida);
     });
+}
+
+/**
+ * Converte o que a tela gerou (redirecionamento + mensagem "flash") em
+ * {ok, mensagens, erro}. Usada no fim da requisição e também por
+ * finalizar_resposta_e_notificar(), que encerra a resposta ANTES dos
+ * avisos (e-mail/WhatsApp) -- sem isso o sistema novo recebia o 302 cru.
+ */
+function converter_resposta_ao_sistema_novo(string $saida): string
+{
+    $GLOBALS['__ponte_sistema_novo_respondida'] = true;
+    $redirecionou = false;
+    $tipo = '';
+    foreach (headers_list() as $h) {
+        if (stripos($h, 'Location:') === 0) {
+            $redirecionou = true;
+        }
+        if (stripos($h, 'Content-Type:') === 0) {
+            $tipo = $h;
+        }
+    }
+    // Resposta que já é JSON (ações "ajax") ou arquivo: passa direto.
+    if ((!$redirecionou && ($tipo !== '' && stripos($tipo, 'text/html') === false)) || headers_sent()) {
+        return $saida;
+    }
+    $flash = $_SESSION['flash'] ?? [];
+    unset($_SESSION['flash']);
+    $codigo = http_response_code();
+    header_remove('Location');
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    $erro = $flash['erro'] ?? ($codigo >= 400 ? trim(strip_tags($saida)) : null);
+    http_response_code($erro && $codigo < 400 ? 422 : ($codigo >= 300 && $codigo < 400 ? 200 : $codigo));
+    return (string) json_encode(['ok' => !$erro, 'mensagens' => $flash, 'erro' => $erro ?: null], JSON_UNESCAPED_UNICODE);
 }
 
 function csrf_verify(): void
