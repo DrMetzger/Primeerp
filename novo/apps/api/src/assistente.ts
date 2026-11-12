@@ -262,7 +262,7 @@ async function chamarGemini(chave: string, modelo: string, sistema: string, cont
       tools: [{ functionDeclarations: ferramentas.map((f) => f.declaracao) }],
       generationConfig: { maxOutputTokens: 4096, temperature: 0.6, ...(modelo.includes('lite') ? {} : { thinkingConfig: { thinkingBudget: 1024 } }) },
     }),
-    signal: AbortSignal.timeout(modelo.includes('lite') ? 25_000 : 45_000),
+    signal: AbortSignal.timeout(modelo.includes('lite') ? 25_000 : 20_000),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200)}`);
   const d = (await r.json()) as { candidates?: { content?: { parts?: Parte[] } }[] };
