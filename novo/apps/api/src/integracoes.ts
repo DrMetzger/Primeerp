@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { primeira } from './db';
+import { ANEXO_LOGO, montarEmail } from './email-modelo';
 
 /**
  * Integrações externas do Prime Hub (WhatsApp Cloud API da Meta e e-mail
@@ -123,7 +124,11 @@ export async function enviarEmail(para: string, assunto: string, html: string, o
   try {
     const t = nodemailer.createTransport({ host, port: porta, secure: seguro === 'ssl' || porta === 465, auth: { user: usuario, pass: await configuracao('smtp_pass', process.env.SMTP_PASS ?? '') }, connectionTimeout: 15_000 });
     const remetente = await configuracao('smtp_nome_remetente', 'Prime Hub');
-    const r = await t.sendMail({ from: `"${remetente}" <${usuario}>`, to: para, subject: assunto, html, text: html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim() });
+    // Todo aviso sai no modelo da PrimeERP (logo, cartão); o link "Ver..." vira botão.
+    const link = /<p><a href="([^"]+)">([^<]+)<\/a><\/p>\s*$/.exec(html);
+    const corpo = link ? html.slice(0, link.index) : html;
+    const bonito = montarEmail({ previa: assunto, titulo: assunto, corpo, ...(link ? { botao: { texto: `${link[2]} →`, url: link[1] ?? '' } } : {}) });
+    const r = await t.sendMail({ from: `"${remetente}" <${usuario}>`, to: para, subject: assunto, html: bonito, attachments: [ANEXO_LOGO], text: html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim() });
     console.log(`E-mail aceito pelo servidor: ${assunto.slice(0, 60)} (${String(r.response ?? '').slice(0, 60)})`);
     return true;
   } catch (e) {

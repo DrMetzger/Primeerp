@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import nodemailer from 'nodemailer';
+import { ANEXO_LOGO, blocoCodigo, montarEmail } from './email-modelo';
 import type { UsuarioLogado } from '@primehub/shared';
 import { consulta, pool, primeira } from './db';
 
@@ -96,12 +97,14 @@ async function enviarEmail(para: string, nome: string, codigo: string): Promise<
     to: para,
     subject: 'Seu código de acesso ao Prime Hub',
     text: `Olá, ${primeiroNome}!\n\nSeu código de acesso ao Prime Hub é: ${codigo}\n\nEle vale por ${VALIDADE_MIN} minutos. Se não foi você que tentou entrar, ignore este e-mail e troque sua senha.\n\nPrimeERP Soluções em Tecnologia`,
-    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;color:#0E1630">
-      <p style="font-size:16px">Olá, ${primeiroNome}!</p>
-      <p style="font-size:16px">Seu código de acesso ao <b>Prime Hub</b> é:</p>
-      <p style="font-size:34px;font-weight:bold;letter-spacing:10px;background:#EEF4FD;border-radius:12px;padding:16px;text-align:center;color:#1E3FD8">${codigo}</p>
-      <p style="font-size:14px;color:#56627F">Ele vale por ${VALIDADE_MIN} minutos. Se não foi você que tentou entrar, ignore este e-mail e troque sua senha.</p>
-      <p style="font-size:13px;color:#56627F">PrimeERP Soluções em Tecnologia</p></div>`,
+    html: montarEmail({
+      previa: `${codigo} é o seu código de acesso ao Prime Hub`,
+      titulo: `Olá, ${primeiroNome}! 👋`,
+      corpo: `<p style="margin:0 0 18px">Use o código abaixo para entrar no <b>Prime Hub</b>:</p>${blocoCodigo(codigo)}
+        <p style="margin:16px 0 0;color:#6B7690;font-size:14px">⏱️ Vale por <b>${VALIDADE_MIN} minutos</b> e só funciona uma vez.</p>`,
+      nota: '🔒 Se não foi você que tentou entrar, ignore este e-mail e troque sua senha. A PrimeERP nunca pede esse código por telefone.',
+    }),
+    attachments: [ANEXO_LOGO],
   });
   // Sem endereço no log: só se o servidor aceitou.
   console.log(`2FA: e-mail aceito pelo servidor (${String(envio.response ?? '').slice(0, 80)})`);

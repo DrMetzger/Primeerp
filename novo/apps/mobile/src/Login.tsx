@@ -130,16 +130,22 @@ export function Login({ aoEntrar }: { aoEntrar: (s: Sessao) => void }) {
                   <T style={{ fontSize: 15 }}>Enviamos um código de 6 números para <T style={{ fontWeight: '800', fontSize: 15 }}>{desafio.destino}</T>. Ele vale por 10 minutos.</T>
                 </View>
                 {/* Um campo só (o Android preenche sozinho o código do SMS/e-mail), mostrado como 6 caixinhas. */}
-                <Pressable onPress={() => campoCodigo.current?.focus()} accessibilityLabel="Código de 6 números" style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-                  {Array.from({ length: 6 }, (_, i) => (
-                    <View key={i} style={{ flex: 1, height: 58, borderRadius: 12, borderWidth: 2, borderColor: i === codigo.length ? tema.primaria : tema.borda, backgroundColor: tema.fundo, alignItems: 'center', justifyContent: 'center' }}>
-                      <T style={{ fontSize: 26, fontWeight: '800' }}>{codigo[i] ?? ''}</T>
-                    </View>
-                  ))}
-                </Pressable>
-                <TextInput ref={campoCodigo} value={codigo} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="sms-otp" maxLength={6}
-                  onChangeText={(v) => { const d = v.replace(/\D/g, '').slice(0, 6); setCodigo(d); if (d.length === 6) void confirmar(d); }}
-                  style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }} accessibilityLabel="Código de verificação" />
+                {/* O campo de verdade fica transparente POR CIMA das caixinhas: o toque cai nele e o
+                    Android abre o teclado (campo invisível de 1px recebe foco mas não abre teclado). */}
+                <View style={{ position: 'relative' }}>
+                  <View pointerEvents="none" style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    {Array.from({ length: 6 }, (_, i) => (
+                      <View key={i} style={{ flex: 1, height: 58, borderRadius: 12, borderWidth: 2, borderColor: i === codigo.length ? tema.primaria : tema.borda, backgroundColor: tema.fundo, alignItems: 'center', justifyContent: 'center' }}>
+                        <T style={{ fontSize: 26, fontWeight: '800' }}>{codigo[i] ?? ''}</T>
+                      </View>
+                    ))}
+                  </View>
+                  <TextInput ref={campoCodigo} value={codigo} keyboardType="number-pad" inputMode="numeric" textContentType="oneTimeCode" autoComplete="sms-otp" maxLength={6}
+                    showSoftInputOnFocus caretHidden contextMenuHidden={false} autoCorrect={false}
+                    onChangeText={(v) => { const d = v.replace(/\D/g, '').slice(0, 6); setCodigo(d); if (d.length === 6) void confirmar(d); }}
+                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, color: 'transparent', backgroundColor: 'transparent', fontSize: 1, opacity: 0.02 }}
+                    accessibilityLabel="Código de 6 números" />
+                </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 48 }}>
                   <T style={{ flex: 1 }}>Lembrar este aparelho por 30 dias</T>
                   <Switch value={lembrar} onValueChange={setLembrar} trackColor={{ true: tema.primaria, false: tema.borda }} accessibilityLabel="Lembrar este aparelho por 30 dias" />
