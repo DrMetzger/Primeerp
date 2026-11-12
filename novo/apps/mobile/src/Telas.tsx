@@ -197,6 +197,23 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
           <T style={{ color: tema.textoSuave, fontSize: 14 }}>Responsável: {c.responsavel ?? (equipe ? 'ninguém ainda' : 'nossa equipe')}</T>
         </Cartao>
 
+        {dados.mensagens.some((m) => m.anexos.length) && (
+          <Cartao style={{ gap: 8 }}>
+            <T style={{ fontWeight: '800' }}>📎 Anexos do chamado ({dados.mensagens.reduce((n, m) => n + m.anexos.length, 0)})</T>
+            {dados.mensagens.flatMap((m) => m.anexos.map((a) => ({ ...a, autor: m.autorNome, em: m.criadoEm }))).reverse().map((a) => (
+              <Pressable key={a.id} onPress={() => void abrirArquivo(`/download_anexo_chamado.php?id=${a.id}`)} accessibilityRole="link" accessibilityLabel={`Abrir ${a.nome}`}
+                style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, padding: 8, backgroundColor: tema.superficieAlta }}>
+                <T style={{ fontSize: 22 }}>{a.tipo === 'imagem' ? '🖼️' : a.tipo === 'video' ? '🎬' : a.tipo === 'pdf' ? '📕' : '📄'}</T>
+                <View style={{ flex: 1 }}>
+                  <T style={{ fontWeight: '700', fontSize: 14 }} numberOfLines={1}>{a.nome}</T>
+                  <T style={{ color: tema.textoSuave, fontSize: 12 }}>{a.autor.split(' ')[0]} · {dataBR(a.em, true)}</T>
+                </View>
+                <T style={{ color: tema.primaria, fontSize: 20 }}>⬇</T>
+              </Pressable>
+            ))}
+          </Cartao>
+        )}
+
         {dados.mensagens.map((m) => {
           const nosso = m.autorTipo === 'equipe';
           const minha = nosso === equipe;

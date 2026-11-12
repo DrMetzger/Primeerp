@@ -163,12 +163,18 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
               </div>
             </Painel>
 
+            {dados.mensagens.some((m) => m.anexos.length) && (
+              <button type="button" onClick={() => document.getElementById('anexos-do-chamado')?.scrollIntoView({ behavior: 'smooth' })}
+                className="toque flex w-full items-center justify-center gap-2 rounded-2xl border border-primaria/40 bg-primaria/10 px-4 font-semibold text-primaria lg:hidden">
+                <Paperclip size={18} aria-hidden="true" /> Ver os {dados.mensagens.reduce((n, m) => n + m.anexos.length, 0)} anexos do chamado
+              </button>
+            )}
             <ol className="space-y-4" aria-label="Conversa do chamado">
               {dados.mensagens.map((m) => {
                 const nosso = m.autorTipo === 'equipe';
                 const minha = (visao === 'equipe') === nosso;
                 return (
-                  <li key={m.id} className={`flex items-end gap-2 ${minha ? 'flex-row-reverse' : ''}`}>
+                  <li key={m.id} id={`msg-${m.id}`} className={`flex scroll-mt-24 items-end gap-2 rounded-3xl transition-colors ${minha ? 'flex-row-reverse' : ''}`}>
                     <Avatar nome={m.autorNome} foto={m.autorFoto} tamanho={40} anel={nosso ? 'ring-primaria/60' : 'ring-destaque/60'} />
                     <div className={`max-w-[85%] sm:max-w-[75%] ${minha ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                       <p className={`flex flex-wrap items-baseline gap-x-2 px-1 text-xs ${minha ? 'justify-end text-right' : ''}`}>
@@ -286,7 +292,8 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
             </div>
           </div>
 
-          <aside className="space-y-4">
+          <aside className="space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7rem)] lg:self-start lg:overflow-y-auto lg:pb-4">
+            <PainelAnexos mensagens={dados.mensagens} />
             <Painel titulo="Detalhes">
               <dl className="space-y-3 text-sm">
                 <div><dt className="text-suave">Situação</dt><dd className="font-semibold text-texto">{rotuloStatus[dados.chamado.status]}</dd></div>
@@ -315,5 +322,54 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
         </div>
       )}
     </Casca>
+  );
+}
+
+
+/** Todos os anexos do chamado num lugar só (do mais novo pro mais antigo), com quem mandou e atalho pra mensagem. */
+function PainelAnexos({ mensagens }: { mensagens: ChamadoDetalhe['mensagens'] }) {
+  const [filtro, setFiltro] = useState<'todos' | 'imagem' | 'documento'>('todos');
+  const todos = mensagens.flatMap((m) => m.anexos.map((a) => ({ ...a, msgId: m.id, autor: m.autorNome, foto: m.autorFoto, em: m.criadoEm, equipe: m.autorTipo === 'equipe' }))).reverse();
+  if (!todos.length) return null;
+  const lista = todos.filter((a) => filtro === 'todos' || (filtro === 'imagem' ? a.tipo === 'imagem' || a.tipo === 'video' : a.tipo === 'pdf' || a.tipo === 'arquivo'));
+  const irPara = (id: number) => {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('bg-primaria/15');
+    setTimeout(() => el.classList.remove('bg-primaria/15'), 1800);
+  };
+  return (
+    <div id="anexos-do-chamado" className="scroll-mt-24">
+    <Painel titulo={`Anexos do chamado (${todos.length})`}>
+      <div className="mb-3 flex gap-1 rounded-xl bg-fundo p-1 text-xs font-semibold" role="tablist" aria-label="Filtrar anexos">
+        {([['todos', 'Todos'], ['imagem', 'Imagens e vídeos'], ['documento', 'Documentos']] as const).map(([v, r]) => (
+          <button key={v} type="button" role="tab" aria-selected={filtro === v} onClick={() => setFiltro(v)} className={`flex-1 rounded-lg px-2 py-1.5 ${filtro === v ? 'bg-primaria text-white' : 'text-suave hover:text-texto'}`}>{r}</button>
+        ))}
+      </div>
+      <ul className="space-y-2">
+        {lista.map((a) => (
+          <li key={a.id} className="flex items-center gap-2 rounded-2xl border border-borda bg-fundo p-2">
+            {a.tipo === 'imagem' ? (
+              <a href={`/download_anexo_chamado.php?id=${a.id}&ver=1`} target="_blank" rel="noopener noreferrer" className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-black/20" aria-label={`Ver ${a.nome}`}>
+                <img src={`/download_anexo_chamado.php?id=${a.id}&ver=1`} alt="" loading="lazy" className="h-full w-full object-cover" />
+              </a>
+            ) : (
+              <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-[10px] font-bold uppercase ${a.tipo === 'pdf' ? 'bg-perigo/15 text-perigo' : a.tipo === 'video' ? 'bg-fuchsia-500/15 text-fuchsia-500' : 'bg-primaria/15 text-primaria'}`}>
+                {a.nome.split('.').pop()?.slice(0, 4) ?? 'arq'}
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 break-all text-sm font-semibold leading-tight text-texto" title={a.nome}>{a.nome}</p>
+              <p className="truncate text-xs text-suave">{a.autor.split(' ')[0]} · {tempoRelativo(a.em)} · {tamanhoArquivo(a.tamanho)}</p>
+            </div>
+            <button type="button" onClick={() => irPara(a.msgId)} aria-label={`Ir para a mensagem de ${a.nome}`} title="Ver na conversa" className="toque flex h-9 w-9 items-center justify-center rounded-xl text-suave hover:bg-superficie-alta hover:text-texto">↥</button>
+            <a href={`/download_anexo_chamado.php?id=${a.id}`} aria-label={`Baixar ${a.nome}`} title="Baixar" className="toque flex h-9 w-9 items-center justify-center rounded-xl text-primaria hover:bg-primaria/10"><Download size={18} /></a>
+          </li>
+        ))}
+        {!lista.length && <li className="py-2 text-center text-sm text-suave">Nenhum anexo desse tipo.</li>}
+      </ul>
+    </Painel>
+    </div>
   );
 }
