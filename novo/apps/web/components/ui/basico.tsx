@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 export function Painel({ titulo, children, className = '', acao }: { titulo?: string | undefined; children: ReactNode; className?: string; acao?: ReactNode }) {
@@ -78,15 +81,22 @@ export function Modal({ titulo, aoFechar, children, largura = 'max-w-2xl' }: { t
 
 export const CLASSE_AREA = 'w-full rounded-xl border border-borda bg-fundo p-3 text-base text-texto outline-none focus:border-primaria';
 
-/** Botão de escolher arquivo (grande, bom no dedo). */
+/** Área de arquivo: arraste e solte, cole (Ctrl+V) ou toque para escolher. */
 export function EscolherArquivo({ rotulo, aceita, multiplo = false, aoEscolher, nomes = [] }: { rotulo: string; aceita?: string; multiplo?: boolean; aoEscolher: (f: File[]) => void; nomes?: string[] }) {
+  const [sobre, setSobre] = useState(false);
   return (
     <div className="space-y-1.5">
-      <label className="toque inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-primaria/60 bg-primaria/5 px-4 font-semibold text-texto hover:bg-primaria/10">
-        📎 {rotulo}
+      <label tabIndex={0}
+        onDragOver={(e) => { e.preventDefault(); setSobre(true); }} onDragLeave={() => setSobre(false)}
+        onDrop={(e) => { e.preventDefault(); setSobre(false); const f = Array.from(e.dataTransfer.files); if (f.length) aoEscolher(multiplo ? f : f.slice(0, 1)); }}
+        onPaste={(e) => { const f = Array.from(e.clipboardData.files); if (f.length) aoEscolher(multiplo ? f : f.slice(0, 1)); }}
+        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed px-4 py-5 text-center transition ${sobre ? 'border-primaria bg-primaria/15 scale-[1.01]' : 'border-primaria/40 bg-primaria/5 hover:bg-primaria/10'}`}>
+        <span aria-hidden="true" className="text-2xl">{sobre ? '📥' : '📎'}</span>
+        <span className="font-semibold text-texto">{rotulo}</span>
+        <span className="text-xs text-suave">Arraste e solte aqui, cole com Ctrl+V ou clique para escolher</span>
         <input type="file" className="sr-only" {...(aceita ? { accept: aceita } : {})} multiple={multiplo} onChange={(e) => { aoEscolher(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
       </label>
-      {nomes.length > 0 && <p className="text-sm text-suave">{nomes.join(', ')}</p>}
+      {nomes.length > 0 && <p className="text-sm font-medium text-sucesso">✓ {nomes.join(', ')}</p>}
     </div>
   );
 }

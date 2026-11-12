@@ -99,9 +99,9 @@ A ficha do cliente tem abas internas: Visão geral (indicadores e chamados recen
     titulo: '10. Setores do cliente',
     texto: `Cada cliente pode ser dividido em setores (Financeiro, Fiscal, Compras, etc.). Setores são independentes: a pessoa de um setor só vê os chamados do próprio setor, enquanto o master (contato principal, ou alguém marcado como master) vê a empresa toda.
 
-Na ficha do cliente, aba Setores, cada setor é um cartão colorido; o lápis edita ou exclui e o "+ Setor" cria. Tocando no cartão abre a PÁGINA DO SETOR, com abas próprias: Chamados (só os do setor), Pessoas (convite e retirada de acesso), Documentos, Calendário (treinamentos, reuniões, conversas e auxílios em calendário mensal, com agendamento), Vídeo aulas, Fontes ADVPL (enviar, editar, excluir), Propostas de desenvolvimento (com situação), Métricas (indicadores com meta e barra de progresso) e IA do setor (análise com diagnóstico e sugestões de melhoria).
+Na ficha do cliente, aba Setores, cada setor é um cartão colorido; o lápis edita ou exclui e o "+ Setor" cria. Tocando no cartão abre a PÁGINA DO SETOR, com abas próprias: Chamados (só os do setor), Usuários (convite e retirada de acesso), Documentos, Calendário (treinamentos, reuniões, conversas e auxílios em calendário mensal, com agendamento), Vídeo aulas, Fontes ADVPL (enviar, editar, excluir), Propostas de desenvolvimento (com situação), Métricas (indicadores com meta e barra de progresso) e IA do setor (análise com diagnóstico e sugestões de melhoria).
 
-As pessoas do cliente são cadastradas na aba Usuários da ficha: nome, e-mail, telefone, setores e se é master; ali também se envia convite, link de nova senha e se tira o acesso. Clientes liberados pela Prime também podem criar setores e cadastrar pessoas pelo item "Minha equipe" do portal; o cliente nunca consegue excluir nada.`,
+Os usuários do cliente são cadastrados na aba Usuários da ficha: nome, e-mail, telefone, setores e se é master; ali também se envia convite, link de nova senha e se tira o acesso. Clientes liberados pela Prime também podem criar setores e cadastrar usuários pelo item "Minha equipe" do portal; o cliente nunca consegue excluir nada.`,
   },
   {
     id: 'agenda',

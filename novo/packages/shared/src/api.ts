@@ -168,6 +168,7 @@ export interface Pessoa {
 export interface Documento {
   id: number;
   titulo: string;
+  descricao?: string | null;
   categoria: string | null;
   setor: string | null;
   arquivo: string;
@@ -192,6 +193,9 @@ export interface ClienteDetalhe {
   documentos: Documento[];
   treinamentos: Treinamento[];
   equipe: { id: number; nome: string; foto: string | null }[];
+  /** Pessoas da Prime vinculadas a este cliente (acesso restrito por cliente/setor). */
+  vinculos: { id: number; usuarioId: number; nome: string; foto: string | null; setor: string | null; restrito: boolean }[];
+  analises: { id: number; tipo: 'risco' | 'melhorias'; setor: string | null; texto: string; autor: string | null; criadoEm: string; atualizadoEm: string | null }[];
 }
 
 export interface Anexo { id: number; nome: string; tamanho: number; tipo: 'imagem' | 'video' | 'pdf' | 'arquivo' }
@@ -223,7 +227,8 @@ export interface TarefaAgenda {
   chamadoId: number | null; chamado: string | null; responsavelId: number | null; responsavel: string | null;
 }
 export interface EventoCliente { id: number; titulo: string; tipo: string | null; status: string; inicio: string | null; fim: string | null; link: string | null; cliente: string | null; clienteLogo: string | null; setor: string | null }
-export interface Agenda { tarefas: TarefaAgenda[]; eventos: EventoCliente[]; clientes: { id: number; nome: string }[]; equipe: { id: number; nome: string }[] }
+export interface HorarioTrabalho { expedienteInicio: string; expedienteFim: string; almocoInicio: string; almocoFim: string }
+export interface Agenda { tarefas: TarefaAgenda[]; eventos: EventoCliente[]; clientes: { id: number; nome: string }[]; equipe: { id: number; nome: string; foto?: string | null }[]; horario: HorarioTrabalho }
 
 export interface FonteArquivo { id: number; titulo: string; categoria: string | null; descricao: string | null; arquivo: string; tamanho: number; setor: string | null; setorId: number | null; criadoEm: string; autor: string | null }
 

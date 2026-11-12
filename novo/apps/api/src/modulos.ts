@@ -4,7 +4,7 @@ import { consulta, primeira } from './db';
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Agenda de trabalho da gestão + reuniões/treinamentos com clientes. */
-export async function montarAgenda(de: string, ate: string): Promise<Agenda> {
+export async function montarAgenda(de: string, ate: string, usuarioId = 0): Promise<Agenda> {
   const hoje = new Date();
   const inicio = DATA.test(de) ? de : new Date(hoje.getTime() - 7 * 864e5).toISOString().slice(0, 10);
   const fim = DATA.test(ate) ? ate : new Date(hoje.getTime() + 30 * 864e5).toISOString().slice(0, 10);
@@ -23,9 +23,13 @@ export async function montarAgenda(de: string, ate: string): Promise<Agenda> {
          FROM treinamentos t JOIN clientes c ON c.id = t.cliente_id LEFT JOIN setores s ON s.id = t.setor_id
         WHERE t.data_inicio BETWEEN ? AND ? ORDER BY t.data_inicio, t.hora_inicio`, [inicio, fim]),
     consulta<{ id: number; nome: string }>("SELECT id, nome FROM clientes WHERE status <> 'inativo' ORDER BY nome"),
-    consulta<{ id: number; nome: string }>('SELECT id, nome FROM usuarios WHERE ativo = 1 ORDER BY nome'),
+    consulta<{ id: number; nome: string; foto: string | null }>('SELECT id, nome, foto_perfil foto FROM usuarios WHERE ativo = 1 ORDER BY nome'),
   ]);
-  return { tarefas: tarefas.map((t) => ({ ...t, duracaoMinutos: t.duracaoMinutos === null ? null : Number(t.duracaoMinutos) })), eventos, clientes, equipe };
+  const h = await primeira<{ a: string | null; b: string | null; c: string | null; d: string | null }>(
+    'SELECT agenda_expediente_inicio a, agenda_expediente_fim b, agenda_almoco_inicio c, agenda_almoco_fim d FROM usuarios WHERE id = ?', [usuarioId]).catch(() => null);
+  const hm = (v: string | null | undefined, padrao: string) => (v ? String(v).slice(0, 5) : padrao);
+  const horario = { expedienteInicio: hm(h?.a, '08:00'), expedienteFim: hm(h?.b, '18:00'), almocoInicio: hm(h?.c, '12:00'), almocoFim: hm(h?.d, '13:00') };
+  return { horario, tarefas: tarefas.map((t) => ({ ...t, duracaoMinutos: t.duracaoMinutos === null ? null : Number(t.duracaoMinutos) })), eventos, clientes, equipe };
 }
 
 /** Biblioteca de fontes da Prime (fontes_globais). */

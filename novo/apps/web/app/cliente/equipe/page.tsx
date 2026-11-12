@@ -32,7 +32,7 @@ export default function PaginaEquipeCliente() {
 
   const acoes = dados?.podeGerenciar ? (
     <button type="button" onClick={() => setNova({ nome: '', email: '', telefone: '', documento: '', eh_master: false, setores: [] })} className="gradiente-marca toque inline-flex items-center gap-2 rounded-xl px-4 font-semibold text-white shadow">
-      <Plus size={20} aria-hidden="true" /> <span className="hidden sm:inline">Nova pessoa</span>
+      <Plus size={20} aria-hidden="true" /> <span className="hidden sm:inline">Novo usuário</span>
     </button>
   ) : undefined;
 
@@ -40,14 +40,14 @@ export default function PaginaEquipeCliente() {
     <Casca tipo="cliente" titulo="Minha equipe" acoes={acoes}>
       {!dados ? <EsqueletoLista /> : (
         <div className="space-y-4">
-          {!dados.podeGerenciar && <p className="text-sm text-suave">Para incluir ou alterar pessoas da sua equipe, peça para a Prime liberar esse recurso ou abra um chamado.</p>}
+          {!dados.podeGerenciar && <p className="text-sm text-suave">Para incluir ou alterar usuários da sua equipe, peça para a Prime liberar esse recurso ou abra um chamado.</p>}
           {aviso.texto && <Aviso texto={aviso.texto} erro={aviso.erro} />}
           <Painel titulo="Setores" acao={dados.podeGerenciar ? <BotaoSecundario onClick={() => setNovoSetor('')}><Plus size={16} aria-hidden="true" /> Setor</BotaoSecundario> : undefined}>
             {!dados.setores.length ? <Vazio>Nenhum setor ainda.</Vazio> : (
               <ul className="flex flex-wrap gap-2">{dados.setores.map((s) => <li key={s.id} className={`rounded-full border border-borda px-3 py-1.5 text-sm font-semibold ${s.ativo ? 'text-texto' : 'text-suave line-through'}`}>{s.nome}</li>)}</ul>
             )}
           </Painel>
-          {!dados.pessoas.length ? <Vazio>Nenhuma pessoa cadastrada.</Vazio> : (
+          {!dados.pessoas.length ? <Vazio>Nenhum usuário cadastrado.</Vazio> : (
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {dados.pessoas.map((p) => (
                 <li key={p.id} className="flex flex-col gap-3 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
@@ -75,7 +75,7 @@ export default function PaginaEquipeCliente() {
       )}
 
       {nova && dados && (
-        <Modal titulo="Nova pessoa da equipe" aoFechar={() => setNova(null)}>
+        <Modal titulo="Novo usuário" aoFechar={() => setNova(null)}>
           <form onSubmit={(e) => { e.preventDefault(); void agir({ acao: 'criar_usuario_cliente', nome: nova.nome, email: nova.email, telefone: nova.telefone, documento: nova.documento, ...(nova.eh_master ? { eh_master: '1' } : {}) }, { setor_ids: nova.setores.map(String) }); }} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Campo rotulo="Nome *"><input required value={nova.nome} onChange={(e) => setNova({ ...nova, nome: e.target.value })} className={CLASSE_ENTRADA} /></Campo>

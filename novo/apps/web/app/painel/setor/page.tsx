@@ -22,7 +22,7 @@ const COR_TIPO: Record<string, string> = { treinamento: '#10b981', reuniao: '#63
 
 type Formulario =
   | { tipo: 'documento'; titulo: string; descricao: string; categoria: string; arquivo: File | null }
-  | { tipo: 'video'; nome_rotina: string; arquivo: File | null }
+  | { tipo: 'video'; documento_id: string; nome_rotina: string; descricao: string; arquivo: File | null }
   | { tipo: 'fonte'; fonte_id: string; titulo: string; ponto_entrada: string; descricao: string; arquivo: File | null }
   | { tipo: 'proposta'; titulo: string; descricao: string; arquivo: File | null }
   | { tipo: 'kpi'; kpi_id: string; nome_kpi: string; valor: string; meta: string; unidade: string; periodo: string; direcao_melhor: string; observacoes: string }
@@ -84,7 +84,7 @@ export default function PaginaSetor() {
 
   const abas: AbaIcone<Aba>[] = d ? [
     { id: 'chamados', rotulo: 'Chamados', icone: LifeBuoy, cor: '#0ea5e9', contagem: chamados?.itens.filter((c) => c.status !== 'fechado').length ?? 0 },
-    { id: 'pessoas', rotulo: 'Pessoas', icone: Users, cor: '#8b5cf6', contagem: d.pessoas.length },
+    { id: 'pessoas', rotulo: 'Usuários', icone: Users, cor: '#8b5cf6', contagem: d.pessoas.length },
     { id: 'documentos', rotulo: 'Documentos', icone: FileText, cor: '#f59e0b', contagem: d.documentos.length },
     { id: 'treinamentos', rotulo: 'Calendário', icone: CalendarDays, cor: '#10b981', contagem: d.treinamentos.length },
     { id: 'videos', rotulo: 'Vídeo aulas', icone: Video, cor: '#f43f5e', contagem: d.videoaulas.length },
@@ -122,7 +122,7 @@ export default function PaginaSetor() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-suave">{d.cliente.nome}</p>
                 <h2 className="text-2xl font-bold text-texto">{d.setor.nome}</h2>
-                <p className="text-sm text-suave">{d.setor.ativo ? 'Setor ativo' : 'Setor desativado'} · {d.pessoas.length} pessoa(s)</p>
+                <p className="text-sm text-suave">{d.setor.ativo ? 'Setor ativo' : 'Setor desativado'} · {d.pessoas.length} usuário(s)</p>
               </div>
               <div className="flex -space-x-2">{d.pessoas.slice(0, 5).map((p) => <Avatar key={p.id} nome={p.nome} foto={p.foto} tamanho={36} />)}</div>
             </div>
@@ -153,7 +153,7 @@ export default function PaginaSetor() {
                 </li>
               ))}
             </ul>
-          ) : <Vazio>Ninguém neste setor ainda. Cadastre pessoas na aba Usuários da ficha do cliente.</Vazio>)}
+          ) : <Vazio>Nenhum usuário neste setor ainda. Cadastre na aba Usuários da ficha do cliente.</Vazio>)}
 
           {aba === 'documentos' && (
             <div className="space-y-3">
@@ -174,14 +174,19 @@ export default function PaginaSetor() {
 
           {aba === 'videos' && (
             <div className="space-y-3">
-              <div className="flex justify-end"><BotaoNovo rotulo="Enviar vídeo aula" aoTocar={() => setForm({ tipo: 'video', nome_rotina: '', arquivo: null })} /></div>
+              <div className="flex justify-end"><BotaoNovo rotulo="Enviar vídeo aula" aoTocar={() => setForm({ tipo: 'video', documento_id: '', nome_rotina: '', descricao: '', arquivo: null })} /></div>
               {d.videoaulas.length ? (
                 <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {d.videoaulas.map((v) => (
                     <li key={v.id} className="overflow-hidden rounded-3xl border border-borda bg-superficie shadow-sm">
                       <video controls preload="metadata" playsInline src={`/video_aula.php?id=${v.id}`} className="aspect-video w-full bg-black" />
-                      <div className="flex items-center gap-2 p-3">
-                        <p className="min-w-0 flex-1 truncate font-semibold text-texto">{v.titulo}</p>
+                      <div className="flex items-start gap-2 p-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-texto">{v.titulo}</p>
+                          {v.descricao && <p className="line-clamp-2 text-sm text-suave">{v.descricao}</p>}
+                          <p className="text-xs text-suave">{dataBR(v.criadoEm)} · {tamanhoArquivo(v.tamanho)}</p>
+                        </div>
+                        <button type="button" aria-label={`Editar ${v.titulo}`} onClick={() => setForm({ tipo: 'video', documento_id: String(v.id), nome_rotina: v.titulo, descricao: v.descricao ?? '', arquivo: null })} className="toque flex items-center justify-center rounded-xl text-sky-500"><Pencil size={18} /></button>
                         <button type="button" aria-label={`Excluir ${v.titulo}`} onClick={() => { if (confirm(`Excluir a vídeo aula "${v.titulo}"?`)) void agir({ acao: 'excluir_video_aula', documento_id: String(v.id) }); }} className="toque flex items-center justify-center rounded-xl text-suave hover:text-perigo"><Trash2 size={18} /></button>
                       </div>
                     </li>
@@ -278,11 +283,19 @@ export default function PaginaSetor() {
       )}
 
       {form && d && (
-        <Modal titulo={{ documento: 'Enviar documento', video: 'Enviar vídeo aula', fonte: form.tipo === 'fonte' && form.fonte_id ? 'Editar fonte' : 'Enviar fonte ADVPL', proposta: 'Nova proposta', kpi: 'Indicador do setor', treinamento: form.tipo === 'treinamento' && form.treinamento_id ? 'Editar agendamento' : 'Agendar' }[form.tipo]} aoFechar={() => setForm(null)}>
+        <Modal titulo={{ documento: 'Enviar documento', video: form.tipo === 'video' && form.documento_id ? 'Editar vídeo aula' : 'Enviar vídeo aula', fonte: form.tipo === 'fonte' && form.fonte_id ? 'Editar fonte' : 'Enviar fonte ADVPL', proposta: 'Nova proposta', kpi: 'Indicador do setor', treinamento: form.tipo === 'treinamento' && form.treinamento_id ? 'Editar agendamento' : 'Agendar' }[form.tipo]} aoFechar={() => setForm(null)}>
           <form className="space-y-4" onSubmit={(e) => {
             e.preventDefault();
             if (form.tipo === 'documento') void agir({ acao: 'upload_documento', titulo: form.titulo, descricao: form.descricao, categoria: form.categoria }, { arquivo: form.arquivo });
-            if (form.tipo === 'video') void agir({ acao: 'upload_video_aula', nome_rotina: form.nome_rotina }, { arquivo: form.arquivo });
+            if (form.tipo === 'video') {
+              const f = form;
+              if (f.documento_id && !f.arquivo) void agir({ acao: 'editar_video_aula', documento_id: f.documento_id, nome_rotina: f.nome_rotina, descricao: f.descricao });
+              else void (async () => {
+                // Trocar o vídeo: envia o novo e só então apaga o antigo.
+                await agir({ acao: 'upload_video_aula', nome_rotina: f.nome_rotina, descricao: f.descricao }, { arquivo: f.arquivo });
+                if (f.documento_id) await agir({ acao: 'excluir_video_aula', documento_id: f.documento_id }, {}, 'Vídeo aula atualizada.');
+              })();
+            }
             if (form.tipo === 'fonte') void agir({ acao: form.fonte_id ? 'atualizar_fonte_advpl' : 'upload_fonte_advpl', fonte_id: form.fonte_id, titulo: form.titulo, ponto_entrada: form.ponto_entrada, descricao: form.descricao }, { arquivo: form.arquivo });
             if (form.tipo === 'proposta') void agir({ acao: 'criar_proposta', titulo: form.titulo, descricao: form.descricao }, { arquivo: form.arquivo });
             if (form.tipo === 'kpi') { const { tipo: _t, kpi_id, ...k } = form; void _t; void agir({ acao: kpi_id ? 'editar_kpi' : 'criar_kpi', kpi_id, ...k }); }
@@ -298,8 +311,9 @@ export default function PaginaSetor() {
             )}
             {form.tipo === 'video' && (
               <>
-                <Campo rotulo="Nome da rotina / assunto *"><input required value={form.nome_rotina} onChange={(e) => setForm({ ...form, nome_rotina: e.target.value })} className={CLASSE_ENTRADA} placeholder="Ex.: MATA410 - Pedido de venda" /></Campo>
-                <EscolherArquivo rotulo="Escolher vídeo *" aceita="video/*" aoEscolher={(f) => setForm({ ...form, arquivo: f[0] ?? null })} nomes={form.arquivo ? [form.arquivo.name] : []} />
+                <Campo rotulo="Título (rotina / assunto) *"><input required value={form.nome_rotina} onChange={(e) => setForm({ ...form, nome_rotina: e.target.value })} className={CLASSE_ENTRADA} placeholder="Ex.: MATA410 - Pedido de venda" /></Campo>
+                <Campo rotulo="Descrição"><textarea rows={3} value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} className={CLASSE_AREA} placeholder="O que a pessoa aprende nesse vídeo" /></Campo>
+                <EscolherArquivo rotulo={form.documento_id ? 'Trocar o vídeo (opcional, MP4)' : 'Escolher vídeo (MP4) *'} aceita="video/mp4,video/*" aoEscolher={(f) => setForm({ ...form, arquivo: f[0] ?? null })} nomes={form.arquivo ? [form.arquivo.name] : []} />
               </>
             )}
             {form.tipo === 'fonte' && (

@@ -190,6 +190,37 @@ if ($acao === 'abrir_chamado') {
     exit;
 }
 
+if ($acao === 'mover_treinamento') {
+    // Arrastar reunião/treinamento na agenda: muda só dia e hora (o fim anda
+    // junto, mesma duração). Não mexe em destinatários, link nem descrição.
+    $treinamentoId = (int) ($_POST['treinamento_id'] ?? 0);
+    $novaData = $_POST['data'] ?? '';
+    $novaHora = $_POST['hora_inicio'] ?? '';
+    $st = $pdo->prepare('SELECT * FROM treinamentos WHERE id = ?');
+    $st->execute([$treinamentoId]);
+    $t = $st->fetch();
+    if (!$t || !Auth::podeAcessarCliente((int) $t['cliente_id']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $novaData) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $novaHora)) {
+        responder_json_acao(['erro' => 'Não deu para mover esse agendamento.'], 422);
+        exit;
+    }
+    $inicioAntigo = strtotime($t['data_inicio'] . ' ' . ($t['hora_inicio'] ?: '00:00:00'));
+    $inicioNovo = strtotime($novaData . ' ' . $novaHora . ':00');
+    $delta = $inicioNovo - $inicioAntigo;
+    $dataFim = $t['data_fim'];
+    $horaFim = $t['hora_fim'];
+    if ($t['data_fim'] && $t['hora_fim']) {
+        $fimNovo = strtotime($t['data_fim'] . ' ' . $t['hora_fim']) + $delta;
+        $dataFim = date('Y-m-d', $fimNovo);
+        $horaFim = date('H:i:s', $fimNovo);
+    } elseif ($t['data_fim']) {
+        $dataFim = date('Y-m-d', strtotime($t['data_fim']) + $delta);
+    }
+    $pdo->prepare('UPDATE treinamentos SET data_inicio = ?, hora_inicio = ?, data_fim = ?, hora_fim = ?, lembrete_enviado_em = NULL WHERE id = ?')
+        ->execute([$novaData, $novaHora . ':00', $dataFim, $horaFim, $treinamentoId]);
+    responder_json_acao(['ok' => true]);
+    exit;
+}
+
 if ($acao === 'salvar_cliente') {
     // Mesma regra de clientes.php: cadastro do cliente é coisa de admin.
     if (!Auth::isAdmin()) {

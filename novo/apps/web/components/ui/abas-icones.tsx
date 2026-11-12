@@ -4,10 +4,10 @@ import type { LucideIcon } from 'lucide-react';
 
 export interface AbaIcone<T extends string> { id: T; rotulo: string; icone: LucideIcon; cor: string; contagem?: number }
 
-/** Abas internas com ícone e cor própria de cada seção (rolam de lado no celular). */
+/** Abas internas com ícone e cor própria de cada seção (quebram linha: nada fica cortado). */
 export function AbasIcones<T extends string>({ abas, ativa, aoTrocar }: { abas: AbaIcone<T>[]; ativa: T; aoTrocar: (a: T) => void }) {
   return (
-    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" role="tablist">
+    <div className="flex flex-wrap gap-2" role="tablist">
       {abas.map((a) => {
         const sel = a.id === ativa;
         const Icone = a.icone;

@@ -445,6 +445,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VIDEO_AULA_MAX_SIZE,
                 false
             );
+            // Descrição opcional (sistema novo).
+            if ($idVideoNovo && trim($_POST['descricao'] ?? '') !== '') {
+                $pdo->prepare('UPDATE documentos SET descricao = ? WHERE id = ?')->execute([trim($_POST['descricao']), $idVideoNovo]);
+            }
             flash_set($idVideoNovo ? 'sucesso' : 'erro', $idVideoNovo ? 'Vídeo aula cadastrada.' : $erroUploadVideo);
         }
     }
@@ -456,6 +460,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->prepare("UPDATE documentos SET titulo = ? WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'")
                 ->execute([$novoTituloVideo, (int) $_POST['documento_id'], $clienteId]);
+            if (isset($_POST['descricao'])) {
+                $pdo->prepare("UPDATE documentos SET descricao = ? WHERE id = ? AND cliente_id = ? AND categoria = 'Vídeo aula'")
+                    ->execute([trim($_POST['descricao']) ?: null, (int) $_POST['documento_id'], $clienteId]);
+            }
             flash_set('sucesso', 'Vídeo aula atualizada.');
         }
     }

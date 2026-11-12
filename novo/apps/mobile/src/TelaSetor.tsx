@@ -10,7 +10,7 @@ import { Cartao, T } from './ui';
 
 type Secao = 'chamados' | 'pessoas' | 'documentos' | 'calendario' | 'videos' | 'fontes' | 'propostas' | 'metricas' | 'ia';
 const SECOES: [Secao, string, string, string][] = [
-  ['chamados', '🎧', 'Chamados', '#0ea5e9'], ['pessoas', '👥', 'Pessoas', '#8b5cf6'], ['documentos', '📄', 'Documentos', '#f59e0b'],
+  ['chamados', '🎧', 'Chamados', '#0ea5e9'], ['pessoas', '👥', 'Usuários', '#8b5cf6'], ['documentos', '📄', 'Documentos', '#f59e0b'],
   ['calendario', '📅', 'Calendário', '#10b981'], ['videos', '🎬', 'Vídeo aulas', '#f43f5e'], ['fontes', '💻', 'Fontes', '#06b6d4'],
   ['propostas', '💡', 'Propostas', '#f97316'], ['metricas', '📊', 'Métricas', '#84cc16'], ['ia', '✨', 'IA do setor', '#d946ef'],
 ];
@@ -91,7 +91,7 @@ export function TelaSetor({ clienteId, setorId, aoAbrirChamado, CartaoChamado }:
           <FotoPessoa caminho={p.foto} nome={p.nome} tamanho={44} />
           <View style={{ flex: 1 }}><T style={{ fontWeight: '700' }}>{p.nome}</T><T style={{ color: tema.textoSuave, fontSize: 13 }}>{p.email ?? 'sem e-mail'} · {p.portalAtivo ? 'acesso ativo' : 'sem acesso'}</T></View>
         </Cartao>
-      )) : <Vazio>Ninguém neste setor ainda.</Vazio>)}
+      )) : <Vazio>Nenhum usuário neste setor ainda.</Vazio>)}
       {secao === 'documentos' && (d.documentos.length ? d.documentos.map((x) => linha(`d${x.id}`, '📄', x.titulo, [x.categoria, dataBR(x.criadoEm)].filter(Boolean).join(' · '), () => void abrirArquivo(`/download.php?id=${x.id}`))) : <Vazio>Nenhum documento.</Vazio>)}
       {secao === 'calendario' && (d.treinamentos.length ? d.treinamentos.map((t) => linha(`t${t.id}`, { reuniao: '🤝', conversa: '💬', auxilio: '🛟' }[t.tipo ?? ''] ?? '🎓', t.titulo, [dataBR(t.inicio, true), t.status].filter(Boolean).join(' · '), t.link ? () => void Linking.openURL(t.link ?? '') : undefined)) : <Vazio>Nada agendado.</Vazio>)}
       {secao === 'videos' && (d.videoaulas.length ? d.videoaulas.map((v) => linha(`v${v.id}`, '🎬', v.titulo, dataBR(v.criadoEm), () => void abrirArquivo(`/video_aula.php?id=${v.id}`))) : <Vazio>Nenhuma vídeo aula.</Vazio>)}

@@ -111,7 +111,7 @@ app.get('/api/chamados/:id', exigirLogin(), async (c) => {
 });
 
 const ADMIN = ['admin', 'diretor', 'ceo'];
-app.get('/api/agenda', exigirLogin('equipe'), async (c) => c.json(await montarAgenda(c.req.query('de') ?? '', c.req.query('ate') ?? '')));
+app.get('/api/agenda', exigirLogin('equipe'), async (c) => c.json(await montarAgenda(c.req.query('de') ?? '', c.req.query('ate') ?? '', c.get('usuario').id)));
 app.get('/api/fontes', exigirLogin('equipe'), async (c) => c.json(await listarFontesGlobais()));
 app.get('/api/usuarios', exigirLogin('equipe'), async (c) => {
   if (!ADMIN.includes(c.get('usuario').perfil ?? '')) return c.json({ erro: 'Só admin, diretoria e CEO.' }, 403);

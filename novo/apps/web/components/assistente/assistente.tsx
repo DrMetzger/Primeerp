@@ -105,7 +105,9 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     if (mensagens.length === 0) {
       const oi = modo === 'login'
         ? 'Oi! Eu sou o assistente da PrimeERP. Posso te ajudar a entrar ou a baixar o app.'
-        : `Oi${primeiroNome ? `, ${primeiroNome}` : ''}! Sou o assistente do Prime Hub. Em que posso te ajudar?`;
+        : tipo === 'equipe'
+          ? `Fala${primeiroNome ? `, ${primeiroNome}` : ''}! Posso resumir a operação, achar chamados, abrir, encerrar ou passar chamados pra alguém (você confirma antes). Bora?`
+          : `Olá${primeiroNome ? `, ${primeiroNome}` : ''}! Aqui é da equipe da PrimeERP. Pode me perguntar qualquer coisa do Protheus ou sobre os seus chamados.`;
       robo.current?.agir('acenar', 1500);
       setTimeout(() => responder(oi), 600);
     }
@@ -172,7 +174,10 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
           className="pointer-events-auto absolute bottom-full right-0 mb-2 flex max-h-[min(78dvh,680px)] w-[min(94vw,440px)] flex-col overflow-hidden rounded-3xl border border-borda bg-superficie shadow-2xl">
           <header className="gradiente-marca flex items-center gap-2 px-4 py-3 text-white">
             <Sparkles size={18} aria-hidden="true" />
-            <p className="flex-1 font-semibold">Assistente PrimeERP</p>
+            <div className="flex-1">
+              <p className="font-semibold leading-tight">{tipo === 'equipe' ? 'Assistente da equipe' : 'Atendimento PrimeERP'}</p>
+              <p className="text-xs opacity-85">{tipo === 'equipe' ? 'Conhece o manual, consulta e age por você' : 'Especialista em TOTVS Protheus'}</p>
+            </div>
             <button type="button" onClick={() => setAberto(false)} className="toque -mr-2 flex items-center justify-center rounded-xl" aria-label="Minimizar conversa"><X size={20} /></button>
           </header>
           <div className="flex-1 space-y-2 overflow-y-auto p-4" aria-live="polite">

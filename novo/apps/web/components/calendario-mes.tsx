@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-export interface EventoCalendario { id: string; data: string; titulo: string; hora?: string | null; cor: string; aoClicar?: () => void }
+export interface EventoCalendario { id: string; data: string; titulo: string; hora?: string | null; cor: string; aoClicar?: () => void; aoMover?: (novoDia: string) => void }
 
 const SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -12,7 +12,9 @@ const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
  * Calendário mensal de verdade (grade de 6 semanas). No celular cada dia
  * vira bolinha com contagem e a lista do dia escolhido aparece embaixo.
  */
-export function CalendarioMes({ eventos, aoEscolherDia, inicial }: { eventos: EventoCalendario[]; aoEscolherDia?: (dia: string) => void; inicial?: Date }) {
+export function CalendarioMes({ eventos, aoEscolherDia, inicial, aoMudarMes, semCabecalho = false }: { eventos: EventoCalendario[]; aoEscolherDia?: (dia: string) => void; inicial?: Date; aoMudarMes?: (mes: Date) => void; semCabecalho?: boolean }) {
+  const [arrastando, setArrastando] = useState<string | null>(null);
+  const [alvo, setAlvo] = useState<string | null>(null);
   const [mes, setMes] = useState(() => { const d = inicial ? new Date(inicial) : new Date(); d.setDate(1); d.setHours(12); return d; });
   const [diaSel, setDiaSel] = useState(iso(new Date()));
   const hoje = iso(new Date());
@@ -28,17 +30,17 @@ export function CalendarioMes({ eventos, aoEscolherDia, inicial }: { eventos: Ev
     for (const l of m.values()) l.sort((a, b) => (a.hora ?? '').localeCompare(b.hora ?? ''));
     return m;
   }, [eventos]);
-  const navegar = (n: number) => setMes((m) => { const x = new Date(m); x.setMonth(x.getMonth() + n); return x; });
+  const navegar = (n: number) => setMes((m) => { const x = new Date(m); x.setMonth(x.getMonth() + n); aoMudarMes?.(x); return x; });
   const doDia = porDia.get(diaSel) ?? [];
 
   return (
     <div className="rounded-3xl border border-borda bg-superficie p-3 shadow-sm sm:p-4">
-      <div className="mb-3 flex items-center gap-2">
+      {!semCabecalho && <div className="mb-3 flex items-center gap-2">
         <button type="button" onClick={() => navegar(-1)} aria-label="Mês anterior" className="toque flex items-center justify-center rounded-xl border border-borda text-texto hover:bg-superficie-alta"><ChevronLeft size={20} /></button>
         <p className="flex-1 text-center text-lg font-bold capitalize text-texto">{mes.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</p>
         <button type="button" onClick={() => { const d = new Date(); d.setDate(1); setMes(d); setDiaSel(hoje); }} className="toque rounded-xl border border-borda px-3 text-sm font-semibold text-texto hover:bg-superficie-alta">Hoje</button>
         <button type="button" onClick={() => navegar(1)} aria-label="Próximo mês" className="toque flex items-center justify-center rounded-xl border border-borda text-texto hover:bg-superficie-alta"><ChevronRight size={20} /></button>
-      </div>
+      </div>}
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold uppercase text-suave">{SEMANA.map((d) => <span key={d} className="py-1">{d}</span>)}</div>
       <div className="grid grid-cols-7 gap-1">
         {dias.map((d) => {
@@ -46,17 +48,22 @@ export function CalendarioMes({ eventos, aoEscolherDia, inicial }: { eventos: Ev
           const lista = porDia.get(k) ?? [];
           const fora = d.getMonth() !== mes.getMonth();
           return (
-            <button key={k} type="button" onClick={() => { setDiaSel(k); aoEscolherDia?.(k); }} aria-label={`${d.toLocaleDateString('pt-BR')}, ${lista.length} evento(s)`} aria-pressed={diaSel === k}
-              className={`flex min-h-12 flex-col items-stretch gap-0.5 rounded-xl border p-1 text-left transition sm:min-h-24 ${diaSel === k ? 'border-primaria bg-primaria/10' : 'border-transparent hover:bg-superficie-alta'} ${fora ? 'opacity-40' : ''}`}>
+            <div key={k} role="button" tabIndex={0} onClick={() => { setDiaSel(k); aoEscolherDia?.(k); }} onKeyDown={(e) => { if (e.key === 'Enter') { setDiaSel(k); aoEscolherDia?.(k); } }}
+              aria-label={`${d.toLocaleDateString('pt-BR')}, ${lista.length} evento(s)`} aria-pressed={diaSel === k}
+              onDragOver={(e) => { if (arrastando) { e.preventDefault(); setAlvo(k); } }} onDragLeave={() => setAlvo((a) => (a === k ? null : a))}
+              onDrop={(e) => { e.preventDefault(); const ev = eventos.find((x) => x.id === arrastando); setArrastando(null); setAlvo(null); if (ev && ev.data !== k) ev.aoMover?.(k); }}
+              className={`flex min-h-12 cursor-pointer flex-col items-stretch gap-0.5 rounded-xl border p-1 text-left transition sm:min-h-28 ${alvo === k ? 'border-primaria bg-primaria/20 ring-2 ring-primaria' : diaSel === k ? 'border-primaria bg-primaria/10' : 'border-borda/40 hover:bg-superficie-alta'} ${fora ? 'opacity-40' : ''}`}>
               <span className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold sm:mx-0 ${k === hoje ? 'gradiente-marca text-white' : 'text-texto'}`}>{d.getDate()}</span>
               <span className="hidden flex-col gap-0.5 sm:flex">
-                {lista.slice(0, 3).map((e) => (
-                  <span key={e.id} className="truncate rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-white" style={{ background: e.cor }}>{e.hora ? `${e.hora} ` : ''}{e.titulo}</span>
+                {lista.slice(0, 4).map((e) => (
+                  <span key={e.id} draggable={!!e.aoMover} onDragStart={(ev) => { ev.stopPropagation(); ev.dataTransfer.effectAllowed = 'move'; setArrastando(e.id); }} onDragEnd={() => { setArrastando(null); setAlvo(null); }}
+                    onClick={(ev) => { ev.stopPropagation(); e.aoClicar?.(); }}
+                    className={`truncate rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-white shadow-sm ${e.aoMover ? 'cursor-grab active:cursor-grabbing' : ''} ${arrastando === e.id ? 'opacity-40' : ''}`} style={{ background: e.cor }}>{e.hora ? `${e.hora} ` : ''}{e.titulo}</span>
                 ))}
-                {lista.length > 3 && <span className="px-1 text-[11px] text-suave">+{lista.length - 3}</span>}
+                {lista.length > 4 && <span className="px-1 text-[11px] text-suave">+{lista.length - 4}</span>}
               </span>
               {lista.length > 0 && <span className="mx-auto flex gap-0.5 sm:hidden">{lista.slice(0, 3).map((e) => <span key={e.id} className="h-1.5 w-1.5 rounded-full" style={{ background: e.cor }} />)}</span>}
-            </button>
+            </div>
           );
         })}
       </div>

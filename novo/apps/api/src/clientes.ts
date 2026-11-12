@@ -52,7 +52,7 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
        JOIN clientes c2 ON c2.id = r.id LEFT JOIN usuarios u ON u.id = c2.responsavel_interno_id`, [...f.params, id]);
   if (!base) return null;
 
-  const [setores, pessoas, documentos, treinamentos, equipe] = await Promise.all([
+  const [setores, pessoas, documentos, treinamentos, equipe, vinculos, analises] = await Promise.all([
     consulta<ClienteDetalhe['setores'][number]>(
       `SELECT s.id, s.nome, s.ativo, (SELECT COUNT(*) FROM chamados ch WHERE ch.setor_id = s.id AND ch.status IN ('aberto','aguardando_equipe')) pendentes
          FROM setores s WHERE s.cliente_id = ? ORDER BY s.nome`, [id]),
@@ -69,6 +69,12 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
               CASE WHEN t.data_inicio IS NULL THEN NULL ELSE CONCAT(t.data_inicio, ' ', COALESCE(t.hora_inicio, '00:00:00')) END inicio, t.link_reuniao link
          FROM treinamentos t LEFT JOIN setores s ON s.id = t.setor_id WHERE t.cliente_id = ? ORDER BY t.data_inicio DESC LIMIT 100`, [id]),
     consulta<ClienteDetalhe['equipe'][number]>("SELECT id, nome, foto_perfil foto FROM usuarios WHERE ativo = 1 ORDER BY nome"),
+    consulta<ClienteDetalhe['vinculos'][number]>(
+      `SELECT v.id, v.usuario_id usuarioId, u.nome, u.foto_perfil foto, s.nome setor, u.acesso_restrito_por_cliente restrito
+         FROM usuario_cliente_setores v JOIN usuarios u ON u.id = v.usuario_id LEFT JOIN setores s ON s.id = v.setor_id WHERE v.cliente_id = ? ORDER BY u.nome, s.nome`, [id]).catch(() => []),
+    consulta<ClienteDetalhe['analises'][number]>(
+      `SELECT a.id, a.tipo, s.nome setor, a.analise texto, u.nome autor, a.criado_em criadoEm, a.atualizado_em atualizadoEm
+         FROM cliente_analise_risco a LEFT JOIN setores s ON s.id = a.setor_id LEFT JOIN usuarios u ON u.id = a.criado_por WHERE a.cliente_id = ? ORDER BY a.criado_em DESC LIMIT 30`, [id]).catch(() => []),
   ]);
 
   return {
@@ -78,6 +84,8 @@ export async function detalharCliente(usuario: UsuarioLogado, id: number): Promi
     documentos: documentos.map((d) => ({ ...d, tamanho: Number(d.tamanho) })),
     treinamentos,
     equipe,
+    vinculos: vinculos.map((v) => ({ ...v, restrito: Boolean(v.restrito) })),
+    analises,
   };
 }
 
@@ -146,7 +154,7 @@ export async function detalharSetor(usuario: UsuarioLogado, clienteId: number, s
       `SELECT sr.id, sr.nome, sr.email, sr.telefone, sr.foto_perfil foto, ? setor, sr.portal_ativo portalAtivo FROM setor_responsaveis sr
         WHERE sr.cliente_id = ? AND (sr.setor_id = ? OR sr.id IN (SELECT setor_responsavel_id FROM setor_responsavel_setores WHERE setor_id = ?)) ORDER BY sr.nome`, [setor.nome, clienteId, setorId, setorId]),
     consulta<SetorDetalhe['documentos'][number] & { categoria: string | null }>(
-      `SELECT d.id, d.titulo, d.categoria, NULL setor, d.arquivo_nome_original arquivo, d.arquivo_tamanho tamanho, d.criado_em criadoEm FROM documentos d WHERE d.cliente_id = ? AND d.setor_id = ? ORDER BY d.criado_em DESC`, [clienteId, setorId]),
+      `SELECT d.id, d.titulo, d.descricao, d.categoria, NULL setor, d.arquivo_nome_original arquivo, d.arquivo_tamanho tamanho, d.criado_em criadoEm FROM documentos d WHERE d.cliente_id = ? AND d.setor_id = ? ORDER BY d.criado_em DESC`, [clienteId, setorId]),
     consulta<SetorDetalhe['treinamentos'][number]>(
       `SELECT t.id, t.titulo, t.tipo, t.status, NULL setor, CONCAT(t.data_inicio, ' ', COALESCE(t.hora_inicio, '00:00:00')) inicio,
               CASE WHEN t.data_fim IS NULL THEN NULL ELSE CONCAT(t.data_fim, ' ', COALESCE(t.hora_fim, '00:00:00')) END fim, t.link_reuniao link, t.descricao, t.responsavel_id responsavelId, t.chamado_id chamadoId

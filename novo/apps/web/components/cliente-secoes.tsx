@@ -79,7 +79,7 @@ export function SecaoSetores({ clienteId, dados, recarregar }: { clienteId: numb
   );
 }
 
-// ---------------------------------------------------------------- Pessoas do cliente
+// ---------------------------------------------------------------- Usuários do cliente
 
 interface FormPessoa { responsavel_id: string; nome: string; email: string; telefone: string; documento: string; eh_master: boolean; setores: number[] }
 
@@ -94,7 +94,7 @@ export function SecaoPessoas({ clienteId, dados, recarregar }: { clienteId: numb
   };
   return (
     <div className="space-y-3">
-      <div className="flex justify-end"><BotaoPrimario onClick={() => setForm({ responsavel_id: '', nome: '', email: '', telefone: '', documento: '', eh_master: false, setores: [] })}><Plus size={18} aria-hidden="true" /> Pessoa</BotaoPrimario></div>
+      <div className="flex justify-end"><BotaoPrimario onClick={() => setForm({ responsavel_id: '', nome: '', email: '', telefone: '', documento: '', eh_master: false, setores: [] })}><Plus size={18} aria-hidden="true" /> Usuário</BotaoPrimario></div>
       {aviso.t && !form && <Aviso texto={aviso.t} erro={aviso.e} />}
       {dados.pessoas.length ? (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -120,9 +120,9 @@ export function SecaoPessoas({ clienteId, dados, recarregar }: { clienteId: numb
             </li>
           ))}
         </ul>
-      ) : <Vazio>Nenhuma pessoa cadastrada.</Vazio>}
+      ) : <Vazio>Nenhum usuário cadastrado.</Vazio>}
       {form && (
-        <Modal titulo={form.responsavel_id ? 'Editar pessoa' : 'Nova pessoa do cliente'} aoFechar={() => setForm(null)}>
+        <Modal titulo={form.responsavel_id ? 'Editar usuário' : 'Novo usuário do cliente'} aoFechar={() => setForm(null)}>
           <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); salvar(form); }}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Campo rotulo="Nome *"><input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} className={CLASSE_ENTRADA} /></Campo>
@@ -212,6 +212,156 @@ export function SecaoDocumentos({ clienteId, dados, recarregar }: { clienteId: n
             {aviso.e && <Aviso texto={aviso.t} erro />}
             <div className="flex justify-end gap-3"><BotaoSecundario onClick={() => setForm(null)}>Cancelar</BotaoSecundario><BotaoPrimario type="submit" disabled={ocupado || !form.arquivo}>Enviar</BotaoPrimario></div>
           </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Equipe da Prime vinculada ao cliente
+
+export function SecaoEquipePrime({ clienteId, dados, recarregar }: { clienteId: number; dados: Dados; recarregar: () => void }) {
+  const [form, setForm] = useState<{ usuario_id: string; setores: number[] } | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
+  async function agir(campos: Record<string, string>) {
+    setOcupado(true); setAviso({ t: '', e: false });
+    try {
+      const r = await enviarAcao('usuarios.php', campos);
+      setAviso({ t: r.mensagens.sucesso ?? 'Pronto!', e: false }); setForm(null); recarregar();
+    } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); }
+    setOcupado(false);
+  }
+  const porPessoa = new Map<number, Dados['vinculos']>();
+  for (const v of dados.vinculos) porPessoa.set(v.usuarioId, [...(porPessoa.get(v.usuarioId) ?? []), v]);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <p className="flex-1 text-sm text-suave">Quem da Prime atende este cliente. Colaboradores com "só enxerga os clientes vinculados" passam a ver este cliente (ou só os setores escolhidos).</p>
+        <BotaoPrimario onClick={() => setForm({ usuario_id: '', setores: [] })}><Plus size={18} aria-hidden="true" /> Vincular usuário</BotaoPrimario>
+      </div>
+      {aviso.t && !form && <Aviso texto={aviso.t} erro={aviso.e} />}
+      {porPessoa.size ? (
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {[...porPessoa.values()].map((l) => {
+            const p = l[0];
+            if (!p) return null;
+            return (
+              <li key={p.usuarioId} className="space-y-3 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <Avatar nome={p.nome} foto={p.foto} tamanho={48} anel="ring-primaria/60" />
+                  <div className="min-w-0 flex-1"><p className="truncate font-semibold text-texto">{p.nome}</p><p className="text-xs text-suave">{p.restrito ? 'Acesso restrito aos vínculos' : 'Acesso a todos os clientes'}</p></div>
+                </div>
+                <ul className="flex flex-wrap gap-2">
+                  {l.map((v) => (
+                    <li key={v.id} className="inline-flex items-center gap-1 rounded-full bg-primaria/10 py-1 pl-3 pr-1 text-sm font-semibold text-primaria">
+                      {v.setor ?? 'Cliente inteiro'}
+                      <button type="button" aria-label={`Remover vínculo ${v.setor ?? 'cliente inteiro'} de ${v.nome}`} disabled={ocupado} onClick={() => { if (confirm(`Remover ${v.nome} de ${v.setor ?? 'todo o cliente'}?`)) void agir({ acao: 'remover_vinculo_colaborador', vinculo_id: String(v.id), usuario_id: String(v.usuarioId) }); }} className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-perigo/20 hover:text-perigo">×</button>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            );
+          })}
+        </ul>
+      ) : <Vazio>Ninguém da equipe vinculado ainda.</Vazio>}
+      {form && (
+        <Modal titulo="Vincular usuário da Prime" aoFechar={() => setForm(null)} largura="max-w-lg">
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); const c: Record<string, string> = { acao: 'adicionar_vinculo_colaborador', usuario_id: form.usuario_id, cliente_id: String(clienteId) }; form.setores.forEach((s, i) => { c[`setor_ids[${i}]`] = String(s); }); void agir(c); }}>
+            <Campo rotulo="Usuário *">
+              <select required value={form.usuario_id} onChange={(e) => setForm({ ...form, usuario_id: e.target.value })} className={CLASSE_ENTRADA}>
+                <option value="">Escolha</option>{dados.equipe.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+              </select>
+            </Campo>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-semibold text-texto">Setores (nenhum = cliente inteiro)</legend>
+              <div className="flex flex-wrap gap-2">
+                {dados.setores.map((s, i) => {
+                  const marcado = form.setores.includes(s.id);
+                  const cor = CORES_SETOR[i % CORES_SETOR.length] ?? '#0ea5e9';
+                  return <button key={s.id} type="button" aria-pressed={marcado} onClick={() => setForm({ ...form, setores: marcado ? form.setores.filter((x) => x !== s.id) : [...form.setores, s.id] })}
+                    className="toque rounded-full border px-4 text-sm font-semibold" style={marcado ? { background: cor, borderColor: cor, color: '#fff' } : { borderColor: 'var(--borda)', color: 'var(--textoSuave)' }}>{s.nome}</button>;
+                })}
+              </div>
+            </fieldset>
+            {aviso.e && <Aviso texto={aviso.t} erro />}
+            <div className="flex justify-end gap-3"><BotaoSecundario onClick={() => setForm(null)}>Cancelar</BotaoSecundario><BotaoPrimario type="submit" disabled={ocupado}>Vincular</BotaoPrimario></div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Análise de risco de perda e melhorias (IA)
+
+export function SecaoRisco({ clienteId, dados, recarregar }: { clienteId: number; dados: Dados; recarregar: () => void }) {
+  const [setor, setSetor] = useState('');
+  const [gerando, setGerando] = useState<'' | 'risco' | 'melhorias'>('');
+  const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
+  const [editando, setEditando] = useState<{ id: number; texto: string } | null>(null);
+
+  async function gerar(tipo: 'risco' | 'melhorias') {
+    setGerando(tipo); setAviso({ t: tipo === 'risco' ? 'A IA está cruzando chamados, prazos, indicadores e humor das conversas…' : 'A IA está procurando oportunidades de melhoria…', e: false });
+    try {
+      const corpo = new FormData();
+      corpo.append('acao', 'gerar_analise_risco'); corpo.append('ajax', '1'); corpo.append('tipo', tipo); corpo.append('setor_id', setor);
+      const r = await fetch(`/cliente.php?id=${clienteId}`, { method: 'POST', body: corpo, credentials: 'same-origin', headers: { 'X-PrimeHub': '1' } });
+      const j = (await r.json()) as { sucesso?: boolean; mensagem?: string };
+      setAviso({ t: j.sucesso ? 'Análise pronta!' : (j.mensagem ?? 'Não deu para gerar agora.'), e: !j.sucesso });
+      recarregar();
+    } catch { setAviso({ t: 'Não deu para gerar agora. Tente de novo em instantes.', e: true }); }
+    setGerando('');
+  }
+  async function salvarEdicao() {
+    if (!editando) return;
+    try { await enviarAcao(`cliente.php?id=${clienteId}`, { acao: 'atualizar_analise_risco', id: String(editando.id), texto: editando.texto }); setEditando(null); recarregar(); } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); }
+  }
+  async function exportar(a: Dados['analises'][number]) {
+    const corpo = new FormData();
+    corpo.append('acao', 'exportar_pdf_analise_risco'); corpo.append('texto', a.texto); corpo.append('label', a.tipo === 'risco' ? 'Análise de Risco' : 'Sugestões de Melhoria');
+    const r = await fetch(`/cliente.php?id=${clienteId}`, { method: 'POST', body: corpo, credentials: 'same-origin', headers: { 'X-PrimeHub': '1' } });
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = `${a.tipo === 'risco' ? 'analise-de-risco' : 'melhorias'}-${dados.cliente.nome}.pdf`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 rounded-3xl border border-borda bg-superficie p-4 shadow-sm md:grid-cols-[1fr_auto_auto] md:items-end">
+        <Campo rotulo="Escopo da análise">
+          <select value={setor} onChange={(e) => setSetor(e.target.value)} className={CLASSE_ENTRADA}>
+            <option value="">Cliente inteiro (todos os setores)</option>{dados.setores.map((s) => <option key={s.id} value={s.id}>Setor {s.nome}</option>)}
+          </select>
+        </Campo>
+        <BotaoPrimario onClick={() => void gerar('risco')} disabled={!!gerando} className="!bg-none" style={{ background: 'linear-gradient(135deg,#f43f5e,#be123c)' }}>🛡️ {gerando === 'risco' ? 'Analisando…' : 'Risco de perda'}</BotaoPrimario>
+        <BotaoPrimario onClick={() => void gerar('melhorias')} disabled={!!gerando} className="!bg-none" style={{ background: 'linear-gradient(135deg,#10b981,#047857)' }}>💡 {gerando === 'melhorias' ? 'Analisando…' : 'Sugerir melhorias'}</BotaoPrimario>
+      </div>
+      {aviso.t && <Aviso texto={aviso.t} erro={aviso.e} />}
+      {dados.analises.length ? dados.analises.map((a) => (
+        <article key={a.id} className={`rounded-3xl border p-5 shadow-sm ${a.tipo === 'risco' ? 'border-rose-500/40 bg-rose-500/5' : 'border-emerald-500/40 bg-emerald-500/5'}`}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${a.tipo === 'risco' ? 'bg-rose-500' : 'bg-emerald-500'}`}>{a.tipo === 'risco' ? '🛡️ Risco de perda' : '💡 Melhorias'}</span>
+            <span className="text-sm text-suave">{a.setor ? `Setor ${a.setor}` : 'Cliente inteiro'} · {dataBR(a.criadoEm, true)}{a.autor ? ` · ${a.autor}` : ''}</span>
+            <div className="ml-auto flex gap-1">
+              <button type="button" onClick={() => void exportar(a)} className="toque inline-flex items-center gap-1 rounded-xl px-3 text-sm font-semibold text-primaria hover:bg-primaria/10"><Download size={16} aria-hidden="true" />PDF</button>
+              <button type="button" onClick={() => setEditando({ id: a.id, texto: a.texto })} aria-label="Editar análise" className="toque flex items-center justify-center rounded-xl text-sky-500 hover:bg-sky-500/10"><Pencil size={16} /></button>
+              <button type="button" aria-label="Excluir análise" onClick={() => { if (confirm('Excluir esta análise?')) void enviarAcao(`cliente.php?id=${clienteId}`, { acao: 'excluir_analise_risco', id: String(a.id) }).then(recarregar); }} className="toque flex items-center justify-center rounded-xl text-suave hover:bg-perigo/10 hover:text-perigo"><Trash2 size={16} /></button>
+            </div>
+          </div>
+          <div className="space-y-2 text-[15px] leading-relaxed text-texto">
+            {a.texto.split('\n').filter((l) => l.trim()).map((l, i) => {
+              const t = l.replace(/\*\*/g, '').replace(/^#+\s*/, '');
+              return /^#/.test(l) || /^\*\*.*\*\*$/.test(l.trim()) ? <p key={i} className="pt-2 font-bold">{t}</p> : <p key={i} className={/^\s*[-*•]/.test(l) ? 'pl-4' : ''}>{t.replace(/^\s*[-*]\s*/, '• ')}</p>;
+            })}
+          </div>
+        </article>
+      )) : <Vazio>Nenhuma análise ainda. Gere a primeira acima.</Vazio>}
+      {editando && (
+        <Modal titulo="Editar análise" aoFechar={() => setEditando(null)} largura="max-w-3xl">
+          <textarea rows={16} value={editando.texto} onChange={(e) => setEditando({ ...editando, texto: e.target.value })} className={CLASSE_AREA} />
+          <div className="mt-3 flex justify-end gap-3"><BotaoSecundario onClick={() => setEditando(null)}>Cancelar</BotaoSecundario><BotaoPrimario onClick={() => void salvarEdicao()}>Salvar</BotaoPrimario></div>
         </Modal>
       )}
     </div>
