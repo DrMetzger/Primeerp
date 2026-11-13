@@ -16,7 +16,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { SignJWT, jwtVerify } from 'jose';
-import { baixarVpn, ErroCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
+import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
 const app = new Hono<{ Variables: Variaveis }>();
 
@@ -211,7 +211,21 @@ app.get('/api/app/versao', async (c) => {
 
 app.get('/downloads/primehub.apk', () => respostaApk());
 
-void garantirEstrutura();
-serve({ fetch: app.fetch, port: config.porta }, (info) => {
-  console.log(`API do Prime Hub ouvindo na porta ${info.port}`);
-});
+// Comandos de manutenção (rodados com `node index.mjs --...` dentro do contêiner):
+// não sobem o servidor, só fazem a tarefa e saem. Nunca imprimem senha nem chave.
+const comando = process.argv.find((a) => a.startsWith('--') && ['--recifrar-cofre', '--conferir-cofre'].includes(a));
+if (comando === '--recifrar-cofre') {
+  recifrarCofre(process.env.CHAVE_ANTIGA ?? '', process.env.CHAVE_NOVA ?? '')
+    .then((r) => { console.log(`cofre: ${r.total} senha(s); recifradas ${r.recifradas}; já na chave nova ${r.jaNaNova}; ilegíveis ${r.ilegiveis}`); process.exit(0); })
+    .catch((e: unknown) => { console.error('cofre: ERRO, nada foi alterado:', e instanceof Error ? e.message : e); process.exit(1); });
+} else if (comando === '--conferir-cofre') {
+  conferirCofre()
+    .then((r) => { console.log(`cofre: ${r.abrem} de ${r.total} senha(s) abrem com a chave atual`); process.exit(r.abrem === r.total ? 0 : 2); })
+    .catch((e: unknown) => { console.error('cofre: ERRO', e instanceof Error ? e.message : e); process.exit(1); });
+}
+if (!comando) void garantirEstrutura();
+if (!comando) {
+  serve({ fetch: app.fetch, port: config.porta }, (info) => {
+    console.log(`API do Prime Hub ouvindo na porta ${info.port}`);
+  });
+}

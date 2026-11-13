@@ -3,7 +3,8 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import type { CofreCliente, UsuarioLogado } from '@primehub/shared';
 import { filtroClientes } from './clientes';
-import { consulta, primeira } from './db';
+import type { RowDataPacket } from 'mysql2/promise';
+import { consulta, pool, primeira } from './db';
 import { executar } from './regras-chamado';
 
 /**
@@ -70,26 +71,26 @@ async function registrar(u: UsuarioLogado, tipo: string, acao: string, referenci
 
 // ---------------------------------------------------------------- Cifra (compatível com o PHP)
 
-function chave(): Buffer {
-  const k = Buffer.from(process.env.CREDENCIAIS_CIFRA_CHAVE ?? '', 'base64');
+function chave(b64 = process.env.CREDENCIAIS_CIFRA_CHAVE ?? ''): Buffer {
+  const k = Buffer.from(b64, 'base64');
   if (k.length !== 32) throw new ErroCofre('Cofre sem chave de cifra configurada no servidor.', 400);
   return k;
 }
 
-export function cifrar(texto: string | null | undefined): string | null {
+export function cifrar(texto: string | null | undefined, chaveB64?: string): string | null {
   if (!texto) return null;
   const iv = randomBytes(12);
-  const c = createCipheriv('aes-256-gcm', chave(), iv);
+  const c = createCipheriv('aes-256-gcm', chave(chaveB64), iv);
   const cifrado = Buffer.concat([c.update(texto, 'utf8'), c.final()]);
   return Buffer.concat([iv, c.getAuthTag(), cifrado]).toString('base64');
 }
 
-export function decifrar(valor: string | null | undefined): string | null {
+export function decifrar(valor: string | null | undefined, chaveB64?: string): string | null {
   if (!valor) return null;
   try {
     const bruto = Buffer.from(valor, 'base64');
     if (bruto.length <= 28) return null;
-    const d = createDecipheriv('aes-256-gcm', chave(), bruto.subarray(0, 12));
+    const d = createDecipheriv('aes-256-gcm', chave(chaveB64), bruto.subarray(0, 12));
     d.setAuthTag(bruto.subarray(12, 28));
     return Buffer.concat([d.update(bruto.subarray(28)), d.final()]).toString('utf8');
   } catch (e) {
@@ -260,4 +261,48 @@ export async function excluirVscode(u: UsuarioLogado, clienteId: number, id: num
   await exigirDono(u, p, 'cliente_tcloud_vscode', id, clienteId);
   await executar('DELETE FROM cliente_tcloud_vscode WHERE id = ? AND cliente_id = ?', [id, clienteId]);
   return 'Acesso pelo VSCode removido.';
+}
+
+// ---------------------------------------------------------------- Troca da chave (manutenção)
+
+/**
+ * Recifra todas as senhas do cofre da chave antiga para a nova, numa
+ * transação só. Pode rodar mais de uma vez: senha que já abre com a nova é
+ * pulada; a que abre com a antiga é recifrada e conferida antes de gravar;
+ * a que não abre com nenhuma fica como está (e entra na contagem).
+ * Nunca imprime senha nem chave.
+ */
+export async function recifrarCofre(antiga: string, nova: string): Promise<{ total: number; recifradas: number; jaNaNova: number; ilegiveis: number }> {
+  chave(antiga); chave(nova);
+  if (antiga === nova) throw new Error('A chave nova é igual à antiga.');
+  const conn = await pool.getConnection();
+  const r = { total: 0, recifradas: 0, jaNaNova: 0, ilegiveis: 0 };
+  try {
+    await conn.beginTransaction();
+    const [linhas] = await conn.query<RowDataPacket[]>("SELECT id, senha_cifrada FROM cliente_credenciais WHERE senha_cifrada IS NOT NULL AND senha_cifrada <> '' FOR UPDATE");
+    for (const l of linhas) {
+      r.total++;
+      const valor = String(l.senha_cifrada);
+      if (decifrar(valor, nova) !== null) { r.jaNaNova++; continue; }
+      const texto = decifrar(valor, antiga);
+      if (texto === null) { r.ilegiveis++; continue; }
+      const novoValor = cifrar(texto, nova);
+      if (!novoValor || decifrar(novoValor, nova) !== texto) throw new Error(`Conferência falhou na credencial ${String(l.id)}.`);
+      await conn.query('UPDATE cliente_credenciais SET senha_cifrada = ?, atualizado_em = atualizado_em WHERE id = ?', [novoValor, l.id]);
+      r.recifradas++;
+    }
+    await conn.commit();
+    return r;
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+/** Quantas senhas abrem com a chave atual do servidor (conferência depois da troca). */
+export async function conferirCofre(): Promise<{ total: number; abrem: number }> {
+  const linhas = await consulta<{ s: string }>("SELECT senha_cifrada s FROM cliente_credenciais WHERE senha_cifrada IS NOT NULL AND senha_cifrada <> ''");
+  return { total: linhas.length, abrem: linhas.filter((l) => decifrar(l.s) !== null).length };
 }
