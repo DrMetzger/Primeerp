@@ -84,6 +84,9 @@ class IaChamados
     public static function modo(PDO $pdo): string
     {
         $modo = Configuracoes::get($pdo, 'ia_chamados_modo', 'sugestao');
+        if ($modo === 'automatico' && self::motorClaude($pdo)) {
+            return 'sugestao'; // nunca envia sozinho: quem atende é o agente Claude, revisado pela equipe
+        }
 
         return in_array($modo, self::MODOS, true) ? $modo : 'sugestao';
     }
@@ -130,10 +133,21 @@ class IaChamados
      * Chamado novo aberto pelo CLIENTE (portal/WhatsApp): coloca a análise
      * na fila do cron_ia_chamados.php (roda a cada 5 minutos).
      */
+    /**
+     * O atendimento automático dos chamados passou para o agente Claude
+     * (Mesa do agente, sempre revisado pela equipe). Com isso o Gemini não
+     * entra mais sozinho em chamado nenhum; só o botão "Sugerir resposta",
+     * que nunca envia nada.
+     */
+    public static function motorClaude(PDO $pdo): bool
+    {
+        return Configuracoes::get($pdo, 'ia_chamados_motor', '') === 'claude';
+    }
+
     public static function agendar(PDO $pdo, int $chamadoId): void
     {
         try {
-            if (self::modo($pdo) === 'desligado' || !AiSugestoes::configurada()) {
+            if (self::motorClaude($pdo) || self::modo($pdo) === 'desligado' || !AiSugestoes::configurada()) {
                 return;
             }
             // Só entra na fila: quem processa é o cron_ia_chamados.php (linha
@@ -436,6 +450,9 @@ class IaChamados
     /** Análises que ficaram pra trás: pendentes ou paradas no meio (usado pelo cron). */
     public static function processarPendentes(PDO $pdo, int $limite = 5): int
     {
+        if (self::motorClaude($pdo)) {
+            return 0;
+        }
         $ids = $pdo->query("SELECT chamado_id FROM chamado_ia_analises
             WHERE (status = 'pendente'
                     AND (tentativas = 0 OR atualizado_em < DATE_SUB(NOW(), INTERVAL 10 MINUTE)))

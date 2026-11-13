@@ -9,6 +9,7 @@ import { FotoPessoa } from './FotoPessoa';
 import { Cartao, SeletorAnexos, T } from './ui';
 import type { ArquivoEscolhido } from './arquivos';
 import { SecaoAcessosApp } from './ClienteAcessos';
+import { CartaoPropostaApp } from './MesaAgente';
 import { SecaoDocumentosApp, SecaoEquipePrimeApp, SecaoPessoasApp, SecaoRiscoApp, SecaoSetoresApp } from './ClienteSecoes';
 
 // ---------------------------------------------------------------- Peças
@@ -240,6 +241,7 @@ export function TelaChamado({ id, equipe, aoAbrirCliente }: { id: number; equipe
           );
         })}
 
+        {equipe && dados.agente && <CartaoPropostaApp p={dados.agente} aoMudar={() => void carregar()} />}
         <Cartao style={{ gap: 12 }}>
           <T style={{ fontWeight: '800', fontSize: 17 }}>{c.status === 'fechado' ? 'Encerrado — responder reabre' : 'Responder'}</T>
           {equipe && <BotaoContorno titulo={ia.rodando ? '✨ Analisando…' : '✨ Sugerir resposta com IA'} aoTocar={() => void sugerir()} desativado={ia.rodando} />}

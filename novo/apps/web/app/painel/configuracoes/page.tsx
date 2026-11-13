@@ -6,7 +6,7 @@ import { Casca } from '@/components/casca';
 import { Esqueleto } from '@/components/esqueleto';
 import { CampoSenha } from '@/components/ui/campo-senha';
 import { Aviso, BotaoPrimario, CLASSE_AREA, CLASSE_ENTRADA, Campo, EscolherArquivo, Painel } from '@/components/ui/basico';
-import { arquivoPublico, enviarAcao, lerJsonPhp } from '@/lib/api';
+import { api, arquivoPublico, enviarAcao, lerJsonPhp } from '@/lib/api';
 
 interface Config {
   valores: Record<string, string>;
@@ -83,7 +83,10 @@ export default function PaginaConfiguracoes() {
             <div className="sm:col-span-2"><Campo rotulo="E-mails da equipe que recebem aviso de todo chamado/treinamento novo" dica="Um e-mail por linha."><textarea rows={3} {...campo('notificacao_emails_equipe')} className={CLASSE_AREA} /></Campo></div>
           </Secao>
 
-          <Secao icone={<Bot size={20} />} titulo="IA nos chamados (Gemini)" texto="Primeiro procura chamados parecidos já resolvidos; só se não achar pesquisa no TDN/User Function, que é a etapa mais cara. Passou do limite, a IA para até o dia seguinte.">
+          <Secao icone={<Bot size={20} />} titulo="Agente Claude (Mesa do agente)" texto="Sessões do Claude passam pelos chamados em horário comercial, preparam análise, plano, fontes e resposta, e deixam tudo na Mesa do agente. Nada vai ao cliente sem alguém da equipe aprovar.">
+            <TokenAgente />
+          </Secao>
+          <Secao icone={<Bot size={20} />} titulo="IA nos chamados (Gemini)" texto="Só o botão Sugerir resposta dentro do chamado (nunca envia). O atendimento automático agora é o agente Claude, revisado pela equipe.">
             {senha('gemini_api_key', 'Chave de análise')}
             {senha('gemini_api_key_busca', 'Chave de busca')}
             <Campo rotulo="Modo">
@@ -120,5 +123,31 @@ export default function PaginaConfiguracoes() {
         </form>
       )}
     </Casca>
+  );
+}
+
+/** Gera o token que as sessões do agente usam (mostrado uma vez só). */
+function TokenAgente() {
+  const [token, setToken] = useState('');
+  const [erro, setErro] = useState('');
+  const [copiado, setCopiado] = useState(false);
+  async function gerar() {
+    if (!confirm('Gerar um token novo? O anterior para de funcionar na hora.')) return;
+    setErro('');
+    try { setToken((await api<{ token: string }>('/api/agente/token', { method: 'POST', body: '{}' })).token); } catch (e) { setErro(e instanceof Error ? e.message : 'Não deu.'); }
+  }
+  return (
+    <div className="space-y-3">
+      {token ? (
+        <div className="space-y-2 rounded-2xl border border-alerta/50 bg-alerta/10 p-3">
+          <p className="text-sm font-semibold text-texto">Copie agora e cole no formulário seguro do Claude (ele não aparece de novo):</p>
+          <div className="flex gap-2">
+            <input readOnly value={token} className={`${CLASSE_ENTRADA} font-mono text-xs`} onFocus={(e) => e.currentTarget.select()} aria-label="Token do agente" />
+            <BotaoPrimario onClick={() => { void navigator.clipboard.writeText(token).then(() => setCopiado(true)); }}>{copiado ? 'Copiado' : 'Copiar'}</BotaoPrimario>
+          </div>
+        </div>
+      ) : <BotaoPrimario onClick={() => void gerar()}>Gerar token do agente</BotaoPrimario>}
+      <Aviso texto={erro} erro />
+    </div>
   );
 }

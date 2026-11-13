@@ -2,6 +2,7 @@ import type { ChamadoDetalhe, ClienteDetalhe, ClienteResumo, SetorDetalhe, Usuar
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { SQL_CHAMADO_RESUMO } from './dashboard';
 import { consulta, primeira } from './db';
+import { propostaDoChamado } from './agente';
 import { JOINS_AUTOR_RESPOSTA, registrarLeitura, SQL_AUTOR_RESPOSTA, tipoAnexo } from './pessoas';
 
 const PERFIS_ADMIN = ['admin', 'diretor', 'ceo'];
@@ -133,7 +134,8 @@ export async function detalharChamado(usuario: UsuarioLogado, id: number): Promi
     : null;
   const { aberturaNome: _n, aberturaFoto: _f, ...resto } = chamado;
   void _n; void _f;
-  return { chamado: { ...resto, horasEsperando: resto.horasEsperando === null ? null : Number(resto.horasEsperando) }, mensagens, ia };
+  const agente = usuario.tipo === 'equipe' ? await propostaDoChamado(id).catch(() => null) : null;
+  return { chamado: { ...resto, horasEsperando: resto.horasEsperando === null ? null : Number(resto.horasEsperando) }, mensagens, ia, agente };
 }
 
 /** Tudo de um setor do cliente (a "pasta" do setor, como no sistema de sempre). */

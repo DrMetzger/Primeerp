@@ -1,5 +1,6 @@
 'use client';
 
+import { CartaoProposta } from './proposta-agente';
 import { rotuloStatus, type ChamadoDetalhe, type ClienteDetalhe } from '@primehub/shared';
 import { ArrowLeft, Bot, Check, CheckCheck, CheckCircle2, Download, FileText, Lock, Paperclip, RotateCcw, Send, Sparkles, UploadCloud, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -243,7 +244,8 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
                   {ia.erro && <p className="text-suave">{ia.erro}</p>}
                 </div>
               )}
-              {visao === 'equipe' && dados.ia?.resposta && !mensagem && !ia.rodando && (
+              {visao === 'equipe' && dados.agente && <div className="mb-4"><CartaoProposta p={dados.agente} mostrarChamado={false} aoMudar={() => void carregar(id)} /></div>}
+              {visao === 'equipe' && !dados.agente && dados.ia?.resposta && !mensagem && !ia.rodando && (
                 <button type="button" onClick={() => setMensagem(dados.ia?.resposta ?? '')} className="toque mb-3 flex w-full items-start gap-2 rounded-2xl border border-destaque/40 bg-destaque/10 p-3 text-left text-sm text-texto">
                   <Sparkles size={18} className="mt-0.5 shrink-0 text-destaque" aria-hidden="true" />
                   <span><b>A IA já deixou uma sugestão pronta</b> ({dados.ia.status}). Toque para usar no campo e revisar.</span>

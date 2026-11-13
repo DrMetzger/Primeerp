@@ -9,6 +9,7 @@ import { Esqueleto, EsqueletoPainel } from './Esqueleto';
 import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
 import { TelaAgenda } from './TelaAgenda';
+import { TelaMesaAgente } from './MesaAgente';
 import { FotoPessoa, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
 import { TelaSetor } from './TelaSetor';
 import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
@@ -16,9 +17,9 @@ import { Cartao, T } from './ui';
 
 type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
 type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'setor'; clienteId: number; id: number } | { tipo: 'novoChamado'; clienteId?: number }
-  | { tipo: 'clientes' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
+  | { tipo: 'clientes' | 'agente' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
 const TITULOS_TELA: Record<string, string> = {
-  clientes: 'Clientes', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
+  clientes: 'Clientes', agente: 'Mesa do agente', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
   perfil: 'Meu perfil', calendario: 'Calendário', videoaulas: 'Videoaulas', fontesCliente: 'Fontes ADVPL', equipeCliente: 'Minha equipe',
 };
 const ADMIN = ['admin', 'diretor', 'ceo'];
@@ -300,6 +301,7 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   const admin = ADMIN.includes(usuario.perfil ?? '');
   const itensMenu: ItemMenu[] = equipe ? [
     modulo('👥', 'Clientes', 'clientes'),
+    modulo('🤖', 'Mesa do agente', 'agente'),
     ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), modulo('⚙️', 'Configurações', 'configuracoes')] : []),
     modulo('👤', 'Meu perfil', 'perfil'),
     { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
@@ -378,6 +380,7 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
           {atual.tipo === 'setor' && <TelaSetor key={atual.id} clienteId={atual.clienteId} setorId={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'clientes' && <TelaClientes aoAbrir={(id) => ir({ tipo: 'cliente', id })} />}
           {atual.tipo === 'relatorios' && <TelaRelatorios />}
+          {atual.tipo === 'agente' && <TelaMesaAgente aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'agenda' && <TelaAgenda aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'fontes' && <TelaFontes />}
           {atual.tipo === 'usuarios' && <TelaUsuarios />}

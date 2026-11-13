@@ -17,6 +17,7 @@ interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; cor?: stri
 const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Dashboard', icone: LayoutDashboard, cor: '#6366f1', href: '/painel' },
   { rotulo: 'Chamados', icone: LifeBuoy, cor: '#0ea5e9', href: '/painel/chamados' },
+  { rotulo: 'Mesa do agente', icone: Bot, cor: '#a855f7', href: '/painel/agente' },
   { rotulo: 'Clientes', icone: Users, cor: '#10b981', href: '/painel/clientes' },
   { rotulo: 'Agenda', icone: CalendarDays, cor: '#f43f5e', href: '/painel/agenda', somenteAdmin: true },
   { rotulo: 'Relatórios', icone: BarChart3, cor: '#84cc16', href: '/painel/relatorios', somenteAdmin: true },

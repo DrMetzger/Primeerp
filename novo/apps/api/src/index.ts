@@ -15,6 +15,7 @@ import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -152,6 +153,53 @@ app.post('/api/clientes/:id/acessos/vscode', exigirLogin('equipe'), (c) => cofre
 app.put('/api/clientes/:id/acessos/vscode/:sid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarVscode(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('sid')), await corpoJson(c)) })));
 app.delete('/api/clientes/:id/acessos/vscode/:sid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await excluirVscode(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('sid'))) })));
 
+// ---------------------------------------------------------------- Agente Claude dos chamados
+// O agente (sessões do Claude que a equipe acompanha) usa o cabeçalho
+// X-Agente-Token; a equipe revisa e aprova pela Mesa do agente. Nada vai
+// ao cliente sem uma pessoa aprovar.
+const agenteResp = async (c: Context, f: () => Promise<unknown>) => {
+  try { return c.json((await f()) as object); }
+  catch (e) {
+    if (e instanceof ErroAgente) return c.json({ erro: e.message }, e.status);
+    console.error('agente:', e instanceof Error ? e.message : e);
+    return c.json({ erro: 'Não deu certo agora. Tente de novo em instantes.' }, 500);
+  }
+};
+const soAgente = async (c: Context, f: () => Promise<unknown>) => agenteResp(c, async () => { await conferirTokenAgente(c.req.header('x-agente-token')); return f(); });
+const arquivoResp = (a: { nome: string; bytes: Buffer }) => new Response(new Uint8Array(a.bytes), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${a.nome.replace(/["\r\n]/g, '')}"`, 'cache-control': 'private, no-store' } });
+
+app.get('/api/agente/fila', (c) => soAgente(c, () => filaAgente(Number(c.req.query('limite') ?? 3))));
+app.get('/api/agente/chamados/:id', (c) => soAgente(c, () => detalheAgente(idDe(c.req.param('id')))));
+app.get('/api/agente/anexos/:id', async (c) => {
+  try { await conferirTokenAgente(c.req.header('x-agente-token')); return arquivoResp(await anexoAgente(idDe(c.req.param('id')))); }
+  catch (e) { return c.json({ erro: e instanceof Error ? e.message : 'erro' }, e instanceof ErroAgente ? e.status : 500); }
+});
+app.post('/api/agente/chamados/:id/proposta', (c) => soAgente(c, async () => registrarProposta(idDe(c.req.param('id')), (await corpoJson(c)) as unknown as Proposta)));
+
+app.get('/api/agente/mesa', exigirLogin('equipe'), (c) => agenteResp(c, () => mesaDoAgente()));
+app.post('/api/agente/propostas/:pid/enviar', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
+  const b = await corpoJson(c);
+  return enviarProposta(idDe(c.req.param('pid')), c.get('usuario'), typeof b.mensagem === 'string' ? b.mensagem : null, typeof b.status === 'string' ? b.status : null, b.comoAtendente !== false);
+}));
+app.post('/api/agente/propostas/:pid/executar', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
+  const b = await corpoJson(c);
+  await aprovarExecucao(idDe(c.req.param('pid')), c.get('usuario'), String(b.tipo ?? ''), String(b.instrucoes ?? ''));
+  return { mensagem: 'Aprovado. O agente vai executar na próxima rodada e devolver para você revisar.' };
+}));
+app.post('/api/agente/propostas/:pid/descartar', exigirLogin('equipe'), (c) => agenteResp(c, async () => { await descartarProposta(idDe(c.req.param('pid'))); return { mensagem: 'Proposta descartada.' }; }));
+app.post('/api/agente/arquivos/:aid/link', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
+  const t = await new SignJWT({ a: idDe(c.req.param('aid')) }).setProtectedHeader({ alg: 'HS256' }).setSubject('agente-arquivo').setExpirationTime('2m').sign(config.jwtSegredo);
+  return { url: `/api/agente/arquivo?t=${encodeURIComponent(t)}` };
+}));
+app.get('/api/agente/arquivo', async (c) => {
+  try { const { payload } = await jwtVerify(c.req.query('t') ?? '', config.jwtSegredo, { subject: 'agente-arquivo' }); return arquivoResp(await arquivoDaProposta(Number(payload.a))); }
+  catch { return c.text('Link expirado. Volte e toque em baixar de novo.', 403); }
+});
+app.post('/api/agente/token', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
+  if (!['admin', 'diretor', 'ceo'].includes(c.get('usuario').perfil ?? '')) throw new ErroAgente('Só administrador gera o token do agente.', 403);
+  return { token: await gerarTokenAgente() };
+}));
+
 app.get('/api/chamados/:id', exigirLogin(), async (c) => {
   const d = await detalharChamado(c.get('usuario'), Number(c.req.param('id')));
   return d ? c.json(d) : c.json({ erro: 'Chamado não encontrado.' }, 404);
@@ -223,7 +271,7 @@ if (comando === '--recifrar-cofre') {
     .then((r) => { console.log(`cofre: ${r.abrem} de ${r.total} senha(s) abrem com a chave atual`); process.exit(r.abrem === r.total ? 0 : 2); })
     .catch((e: unknown) => { console.error('cofre: ERRO', e instanceof Error ? e.message : e); process.exit(1); });
 }
-if (!comando) void garantirEstrutura();
+if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); }
 if (!comando) {
   serve({ fetch: app.fetch, port: config.porta }, (info) => {
     console.log(`API do Prime Hub ouvindo na porta ${info.port}`);

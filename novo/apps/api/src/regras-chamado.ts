@@ -88,6 +88,8 @@ export async function duplicadoRecente(clienteId: number, titulo: string, descri
 
 /** Põe o chamado na fila da IA (o cron processa). */
 export async function agendarIa(chamadoId: number): Promise<void> {
+  // Atendimento automático agora é o agente Claude (sempre revisado pela equipe): o Gemini não entra sozinho.
+  if ((await configuracao('ia_chamados_motor', '')) === 'claude') return;
   if ((await configuracao('ia_chamados_modo', 'sugestao')) === 'desligado' || !(await configuracao('gemini_api_key', process.env.GEMINI_API_KEY ?? ''))) return;
   await executar("INSERT IGNORE INTO chamado_ia_analises (chamado_id, status) VALUES (?, 'pendente')", [chamadoId]).catch(() => undefined);
 }

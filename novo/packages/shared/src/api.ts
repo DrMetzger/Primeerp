@@ -218,6 +218,7 @@ export interface ChamadoDetalhe {
   chamado: ChamadoResumo & { descricao: string; categoria: string | null; setor: string | null; responsavelId: number | null; origem: string | null };
   mensagens: MensagemChamado[];
   ia: { status: string; resposta: string | null; fonte: string | null; statusSugerido: string | null } | null;
+  agente?: PropostaAgente | null;
 }
 
 export interface TarefaAgenda {
@@ -264,3 +265,15 @@ export interface CofreCliente {
   tcloud: { tipo: string; linkProtheus: string | null; linkRest: string | null; linkSchedule: string | null; linkExclusivo: string | null; atualizadoEm: string | null }[];
   vscode: { id: number; titulo: string; link: string | null; porta: string | null; ambiente: string | null; meu: boolean }[];
 }
+
+/** Proposta do agente Claude para um chamado (sempre revisada pela equipe antes de ir ao cliente). */
+export interface PropostaAgente {
+  id: number; chamadoId: number; chamadoTitulo: string; cliente: string; prioridade: string;
+  status: string; etapa: string; tipo: string; plano: string | null; instrucoes: string | null;
+  resposta: string; statusSugerido: string | null; confianca: string; fontes: { titulo: string; url: string }[];
+  resumoInterno: string | null; motivo: string | null; atendente: string | null; arquivos: { id: number; nome: string }[]; criadoEm: string; sessao: string | null;
+}
+export const TIPOS_CASO_AGENTE: Record<string, string> = {
+  resposta: 'Resposta / orientação', duvida: 'Dúvida (falta informação)', correcao: 'Correção', melhoria: 'Melhoria',
+  proposta: 'Proposta / orçamento', desenvolvimento: 'Desenvolvimento', outro: 'Outro',
+};
