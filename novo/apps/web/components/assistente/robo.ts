@@ -181,7 +181,8 @@ export class Robo {
 
     const brilho = img('brilho', 520, 40, 'mix-blend-mode:screen;opacity:0;');
 
-    corpo.append(jato, base, tronco, objeto, bracoE, bracoD, cabeca, brilho);
+    // Ordem: braço que segura, objeto por cima dele, braço da caneta por cima de tudo.
+    corpo.append(jato, base, tronco, bracoD, objeto, bracoE, cabeca, brilho);
     raiz.append(corpo);
     container.append(raiz);
 
@@ -252,10 +253,12 @@ export class Robo {
         pose.olhos = 'pensando';
         pose.boca = 'neutra';
         pose.objeto = this.acao?.nome === 'escrever' ? 'tablet' : 'prancheta';
-        pose.bracoD = 'relaxado';
-        pose.anguloD = -16;
+        // Mão direita apoia a prancheta inclinada; a ponta da caneta fica no
+        // papel e só rabisca curto (sem escrever no ar).
+        pose.bracoD = 'curvado';
+        pose.anguloD = -24;
         pose.bracoE = 'caneta';
-        pose.anguloE = -36 + Math.sin(t * 12) * 3 + Math.sin(t * 2.3) * 4;
+        pose.anguloE = -50 + Math.sin(t * 19) * 1.1 + Math.sin(t * 3.1) * 0.9;
         pose.inclinacao = 8;
         break;
       case 'pensar':
@@ -340,8 +343,10 @@ export class Robo {
     p.imgBracoE.style.top = `${-PIVO[pose.bracoE].y}px`;
     p.imgBracoD.style.left = `${-PIVO[pose.bracoD].x}px`;
     p.imgBracoD.style.top = `${-PIVO[pose.bracoD].y}px`;
-    const balancoE = Math.sin(t * 1.6 + 0.6) * 3 * m;
-    const balancoD = Math.sin(t * 1.6 + 1.4) * 3 * m;
+    // Escrevendo: braços firmes na prancheta (o balanço tiraria a caneta do papel).
+    const firme = pose.objeto !== 'nenhum' ? 0 : 1;
+    const balancoE = Math.sin(t * 1.6 + 0.6) * 3 * m * firme;
+    const balancoD = Math.sin(t * 1.6 + 1.4) * 3 * m * firme;
     p.bracoE.style.transform = `rotate(${pose.anguloE + balancoE}deg) scale(0.86)`;
     // Braço do outro lado: a mesma peça espelhada.
     p.bracoD.style.transform = `scaleX(-1) rotate(${pose.anguloD + balancoD}deg) scale(0.86)`;
@@ -352,11 +357,14 @@ export class Robo {
     } else {
       this.trocar(p.objeto, 'objeto', pose.objeto);
       p.objeto.style.display = 'block';
-      // Na frente da barriga, levemente inclinado na direção da caneta.
-      p.objeto.style.left = pose.objeto === 'tablet' ? '282px' : '290px';
-      p.objeto.style.top = pose.objeto === 'tablet' ? '668px' : '650px';
-      p.objeto.style.width = pose.objeto === 'tablet' ? '170px' : '160px';
-      p.objeto.style.transform = 'rotate(-6deg)';
+      // Apoiado na mão direita e deitado na direção do robô (achatado e
+      // inclinado), com a ponta da caneta encostando no papel.
+      p.objeto.style.left = '315px';
+      p.objeto.style.top = '655px';
+      p.objeto.style.width = '185px';
+      p.objeto.style.height = '128px';
+      p.objeto.style.transformOrigin = '50% 50%';
+      p.objeto.style.transform = 'rotate(-16deg) skewX(-16deg)';
     }
 
     // Jato pulsando + brilho quando está pensando/comemorando.

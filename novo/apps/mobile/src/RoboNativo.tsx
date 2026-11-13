@@ -70,6 +70,7 @@ export function RoboNativo({ altura, acao }: { altura: number; acao: AcaoRobo })
   const balanco = useRef(new Animated.Value(0)).current;
   const aceno = useRef(new Animated.Value(0)).current;
   const jato = useRef(new Animated.Value(0)).current;
+  const rabisco = useRef(new Animated.Value(0)).current;
   const [olhos, setOlhos] = useState<Olhos>('aberto');
   const [boca, setBoca] = useState<Boca>('sorriso');
 
@@ -82,11 +83,11 @@ export function RoboNativo({ altura, acao }: { altura: number; acao: AcaoRobo })
         Animated.timing(v, { toValue: 1, duration: ms, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
         Animated.timing(v, { toValue: 0, duration: ms, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
       ]));
-      animacoes = [vaiVem(flutua, 1900), vaiVem(balanco, 2600), vaiVem(jato, 90)];
+      animacoes = [vaiVem(flutua, 1900), vaiVem(balanco, 2600), vaiVem(jato, 90), vaiVem(rabisco, 160)];
       animacoes.forEach((a) => a.start());
     });
     return () => animacoes.forEach((a) => a.stop());
-  }, [flutua, balanco, jato]);
+  }, [flutua, balanco, jato, rabisco]);
 
   // Aceno (e comemoração) balança o braço rápido.
   useEffect(() => {
@@ -137,7 +138,13 @@ export function RoboNativo({ altura, acao }: { altura: number; acao: AcaoRobo })
   if (acao === 'comemorar') { bracoE = 'aberto'; bracoD = 'aberto'; anguloE = anguloAceno; anguloD = aceno.interpolate({ inputRange: [0, 1], outputRange: ['-165deg', '-135deg'] }); }
   if (acao === 'falar') { bracoD = 'curvado'; anguloD = anguloRepouso(-24); }
   if (acao === 'pensar') { bracoE = 'curvado'; anguloE = anguloRepouso(-150); }
-  if (acao === 'anotar') { bracoE = 'caneta'; anguloE = anguloRepouso(-42); anguloD = anguloRepouso(30); }
+  // Anotar: a mão direita apoia a prancheta inclinada (deitada na direção do
+  // robô) e a outra escreve com a ponta da caneta NO papel, rabiscando curto.
+  if (acao === 'anotar') {
+    bracoE = 'caneta'; bracoD = 'curvado';
+    anguloE = rabisco.interpolate({ inputRange: [0, 1], outputRange: ['-51.2deg', '-48.8deg'] });
+    anguloD = balanco.interpolate({ inputRange: [0, 1], outputRange: ['24deg', '24deg'] });
+  }
 
   const [lb, ab] = TAM_BOCA[boca];
   const eb = 0.72;
@@ -148,9 +155,9 @@ export function RoboNativo({ altura, acao }: { altura: number; acao: AcaoRobo })
         <Animated.Image source={P.jato} style={{ position: 'absolute', left: 299, top: 975, width: 103, height: 138, opacity: 0.9, transformOrigin: [51, 0, 0], transform: [{ scaleY: jatoEscala }] }} />
         <Image source={P.base} style={{ position: 'absolute', left: 163, top: 728, width: 374, height: 264 }} />
         <Image source={P.tronco} style={{ position: 'absolute', left: TRONCO.x, top: TRONCO.y, width: 466, height: 413 }} />
-        {acao === 'anotar' && <Image source={P.prancheta} style={{ position: 'absolute', left: 310, top: 520, width: 150, height: 205, transform: [{ rotate: '-10deg' }] }} />}
-        <BracoAnimado lado="e" tipo={bracoE} angulo={anguloE} />
         <BracoAnimado lado="d" tipo={bracoD} angulo={anguloD} />
+        {acao === 'anotar' && <Image source={P.prancheta} resizeMode="stretch" style={{ position: 'absolute', left: 315, top: 655, width: 185, height: 128, transform: [{ rotate: '-16deg' }, { skewX: '-16deg' }] }} />}
+        <BracoAnimado lado="e" tipo={bracoE} angulo={anguloE} />
         <Animated.View style={{ position: 'absolute', left: CAPACETE.x, top: CAPACETE.y, width: 454, height: 355, transformOrigin: [227, 345, 0], transform: [{ rotate: inclina }] }}>
           <Image source={P.capacete} style={{ width: 454, height: 355 }} />
           <Image source={P.olhos[olhos][0]} style={{ position: 'absolute', left: TELA.x - CAPACETE.x - 105, top: TELA.y - CAPACETE.y - 62, width: 84, height: olhos === 'fechado' ? 20 : 87, marginTop: olhos === 'fechado' ? 34 : 0 }} resizeMode="contain" />
