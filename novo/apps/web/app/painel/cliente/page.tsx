@@ -1,11 +1,12 @@
 'use client';
 
 import type { ClienteDetalhe, ListaChamados as Lista } from '@primehub/shared';
-import { ArrowLeft, Building2, CalendarDays, FileText, LayoutDashboard, LifeBuoy, Mail, Pencil, Phone, Plus, ShieldCheck, Siren, Users } from 'lucide-react';
+import { ArrowLeft, Building2, CalendarDays, FileText, KeyRound, LayoutDashboard, LifeBuoy, Mail, Pencil, Phone, Plus, ShieldCheck, Siren, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { SecaoAgendaCliente, SecaoDocumentos, SecaoEquipePrime, SecaoPessoas, SecaoRisco, SecaoSetores } from '@/components/cliente-secoes';
 import { AbasIcones } from '@/components/ui/abas-icones';
+import { AtalhosProtheus, SecaoAcessos } from '@/components/cliente-acessos';
 import { ListaChamados } from '@/components/chamados';
 import { Esqueleto, EsqueletoLista } from '@/components/esqueleto';
 import { FormCliente } from '@/components/form-cliente';
@@ -15,8 +16,8 @@ import { LogoEmpresa } from '@/components/ui/logo-empresa';
 import { api } from '@/lib/api';
 import { usuarioSalvo } from '@/lib/sessao';
 
-type Aba = 'geral' | 'chamados' | 'setores' | 'pessoas' | 'equipe' | 'documentos' | 'agenda' | 'risco';
-const IDS_ABAS: Aba[] = ['geral', 'chamados', 'setores', 'pessoas', 'equipe', 'documentos', 'agenda', 'risco'];
+type Aba = 'geral' | 'chamados' | 'acessos' | 'setores' | 'pessoas' | 'equipe' | 'documentos' | 'agenda' | 'risco';
+const IDS_ABAS: Aba[] = ['geral', 'chamados', 'acessos', 'setores', 'pessoas', 'equipe', 'documentos', 'agenda', 'risco'];
 
 
 export default function PaginaCliente() {
@@ -83,6 +84,7 @@ export default function PaginaCliente() {
           <AbasIcones ativa={aba} aoTrocar={trocarAba} abas={[
             { id: 'geral', rotulo: 'Visão geral', icone: LayoutDashboard, cor: '#6366f1' },
             { id: 'chamados', rotulo: 'Chamados', icone: LifeBuoy, cor: '#0ea5e9', contagem: c.pendentes },
+            { id: 'acessos', rotulo: 'Acessos', icone: KeyRound, cor: '#eab308' },
             { id: 'setores', rotulo: 'Setores', icone: Building2, cor: '#10b981', contagem: dados.setores.length },
             { id: 'pessoas', rotulo: 'Usuários do cliente', icone: Users, cor: '#8b5cf6', contagem: dados.pessoas.length },
             { id: 'equipe', rotulo: 'Equipe Prime', icone: ShieldCheck, cor: '#06b6d4', contagem: new Set(dados.vinculos.map((v) => v.usuarioId)).size },
@@ -91,6 +93,7 @@ export default function PaginaCliente() {
             { id: 'risco', rotulo: 'Risco & melhorias (IA)', icone: Siren, cor: '#f43f5e', contagem: dados.analises.length },
           ]} />
 
+          {aba === 'geral' && <AtalhosProtheus clienteId={id} aoVerTudo={() => trocarAba('acessos')} />}
           {aba === 'geral' && (
             <div className="grid gap-4 lg:grid-cols-3">
               <div className="grid grid-cols-2 gap-3 lg:col-span-2 sm:grid-cols-4">
@@ -132,6 +135,7 @@ export default function PaginaCliente() {
             </>
           ))}
 
+          {aba === 'acessos' && <SecaoAcessos clienteId={id} />}
           {aba === 'setores' && <SecaoSetores clienteId={id} dados={dados} recarregar={() => recarregarCliente()} />}
 
           {aba === 'pessoas' && <SecaoPessoas clienteId={id} dados={dados} recarregar={() => recarregarCliente()} />}

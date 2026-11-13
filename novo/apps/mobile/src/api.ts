@@ -91,3 +91,11 @@ export async function lerJsonPhp<T>(caminho: string): Promise<T> {
   if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) throw new ErroApi('Essa área é só para admin, diretoria e CEO.', r.status);
   return (await r.json()) as T;
 }
+
+/** Envio com arquivo (multipart) para a API do sistema novo. */
+export async function apiForm<T>(caminho: string, corpo: FormData): Promise<T> {
+  const r = await fetch(`${URL_SERVIDOR}${caminho}`, { method: 'POST', body: corpo, headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const dados = (await r.json().catch(() => ({}))) as T & { erro?: string };
+  if (!r.ok) throw new ErroApi(dados.erro ?? 'Não deu certo agora.', r.status);
+  return dados;
+}

@@ -7,7 +7,7 @@ import { JOINS_AUTOR_RESPOSTA, registrarLeitura, SQL_AUTOR_RESPOSTA, tipoAnexo }
 const PERFIS_ADMIN = ['admin', 'diretor', 'ceo'];
 
 /** Clientes que a pessoa da equipe pode ver (mesma regra do PHP). */
-async function filtroClientes(usuario: UsuarioLogado): Promise<{ sql: string; params: unknown[] }> {
+export async function filtroClientes(usuario: UsuarioLogado): Promise<{ sql: string; params: unknown[] }> {
   if (PERFIS_ADMIN.includes(usuario.perfil ?? '')) return { sql: '1=1', params: [] };
   const restrito = await primeira<{ r: number }>('SELECT acesso_restrito_por_cliente r FROM usuarios WHERE id = ?', [usuario.id]);
   if (!restrito?.r) return { sql: '1=1', params: [] };

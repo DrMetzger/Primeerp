@@ -26,6 +26,7 @@ services:
       ADMINPRIME_SSO_SECRET: ${SSO_SECRET:?}
       # Mesmo segredo do login da API: o PHP aceita o login do sistema novo.
       ADMINPRIME_JWT_SECRET: ${JWT_SECRET:?}
+      ADMINPRIME_CREDENCIAIS_CIFRA_CHAVE: ${CREDENCIAIS_CIFRA_CHAVE:-}
       TZ: America/Sao_Paulo
     volumes:
       - ./dados/uploads:/var/www/html/uploads
@@ -54,6 +55,7 @@ services:
       URL_BASE: https://suporte.primeerp.com.br
       DOWNLOADS_DIR: /downloads
       UPLOADS_DIR: /uploads
+      CREDENCIAIS_CIFRA_CHAVE: ${CREDENCIAIS_CIFRA_CHAVE:-}
       SEM_NOTIFICACOES: ${SEM_NOTIFICACOES:-1}
       TZ: America/Sao_Paulo
     volumes:

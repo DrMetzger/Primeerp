@@ -30,6 +30,13 @@ fi
 # Segredos do sistema novo (login da API e ponte com o PHP), gerados uma vez.
 grep -q '^JWT_SECRET=' .env || echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
 grep -q '^SSO_SECRET=' .env || echo "SSO_SECRET=$(openssl rand -hex 32)" >> .env
+# Chave da cifra das senhas do cofre de acessos: a MESMA que já cifrou as
+# senhas gravadas (lida da configuração de produção do sistema de sempre),
+# guardada só no .env da VM -- o servidor novo e o antigo leem daqui.
+if ! grep -q '^CREDENCIAIS_CIFRA_CHAVE=' .env; then
+  CHAVE_COFRE=$(grep -A2 "define('CREDENCIAIS_CIFRA_CHAVE'" app/config/config.php | grep -o "'[A-Za-z0-9+/=]\{44\}'" | tail -1 | tr -d "'")
+  [ -n "$CHAVE_COFRE" ] && echo "CREDENCIAIS_CIFRA_CHAVE=$CHAVE_COFRE" >> .env && echo "== chave do cofre configurada"
+fi
 chmod 600 .env
 set -a; . ./.env; set +a
 mkdir -p dados/downloads

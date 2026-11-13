@@ -8,6 +8,7 @@ import { useTema } from './tema';
 import { FotoPessoa } from './FotoPessoa';
 import { Cartao, SeletorAnexos, T } from './ui';
 import type { ArquivoEscolhido } from './arquivos';
+import { SecaoAcessosApp } from './ClienteAcessos';
 import { SecaoDocumentosApp, SecaoEquipePrimeApp, SecaoPessoasApp, SecaoRiscoApp, SecaoSetoresApp } from './ClienteSecoes';
 
 // ---------------------------------------------------------------- Peças
@@ -363,7 +364,7 @@ export function TelaClientes({ aoAbrir }: { aoAbrir: (id: number) => void }) {
   );
 }
 
-type AbaCliente = 'geral' | 'chamados' | 'setores' | 'pessoas' | 'documentos' | 'agenda' | 'equipe' | 'risco';
+type AbaCliente = 'geral' | 'chamados' | 'acessos' | 'setores' | 'pessoas' | 'documentos' | 'agenda' | 'equipe' | 'risco';
 
 export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, CartaoChamado }: {
   id: number; aoAbrirChamado: (id: number) => void; aoNovoChamado: () => void; aoAbrirSetor: (setorId: number) => void;
@@ -388,7 +389,7 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, C
   if (erro) return <Vazio>{erro}</Vazio>;
   if (!dados) return <View style={{ padding: 16, gap: 12 }}>{[130, 50, 110, 110].map((a, i) => <Esqueleto key={i} altura={a} />)}</View>;
   const c = dados.cliente;
-  const abas: [AbaCliente, string][] = [['geral', '📊 Geral'], ['chamados', '🎧 Chamados'], ['setores', '🗂️ Setores'], ['pessoas', '👥 Usuários'], ['documentos', '📄 Documentos'], ['agenda', '📅 Agenda'], ['equipe', '🤝 Equipe Prime'], ['risco', '⚠️ Risco & melhorias']];
+  const abas: [AbaCliente, string][] = [['geral', '📊 Geral'], ['chamados', '🎧 Chamados'], ['acessos', '🔑 Acessos'], ['setores', '🗂️ Setores'], ['pessoas', '👥 Usuários'], ['documentos', '📄 Documentos'], ['agenda', '📅 Agenda'], ['equipe', '🤝 Equipe Prime'], ['risco', '⚠️ Risco & melhorias']];
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} colors={[tema.primaria]} />}>
@@ -434,6 +435,7 @@ export function TelaCliente({ id, aoAbrirChamado, aoNovoChamado, aoAbrirSetor, C
         </>
       )}
       {aba === 'chamados' && (!chamados?.itens.length ? <Vazio>Nenhum chamado.</Vazio> : chamados.itens.map((ch) => <CartaoChamado key={ch.id} c={ch} equipe aoAbrir={() => aoAbrirChamado(ch.id)} />))}
+      {aba === 'acessos' && <SecaoAcessosApp clienteId={id} />}
       {aba === 'setores' && <SecaoSetoresApp id={id} dados={dados} recarregar={() => void carregar()} aoAbrirSetor={aoAbrirSetor} />}
       {aba === 'pessoas' && <SecaoPessoasApp id={id} dados={dados} recarregar={() => void carregar()} />}
       {aba === 'documentos' && <SecaoDocumentosApp id={id} dados={dados} recarregar={() => void carregar()} />}

@@ -252,3 +252,15 @@ export interface SetorDetalhe {
   sugestoesIa: { id: number; texto: string; criadoEm: string }[];
   equipe: { id: number; nome: string; foto: string | null }[];
 }
+
+/** Cofre de acessos do cliente (senhas nunca vêm aqui: só sob pedido, com registro). */
+export interface CofreCliente {
+  podeVer: boolean;
+  veTudo: boolean;
+  tipos: Record<string, string>;
+  ambientesTcloud: Record<string, string>;
+  credenciais: { id: number; tipo: string; titulo: string; host: string | null; porta: string | null; usuario: string | null; temSenha: boolean; observacoes: string | null; autor: string | null; atualizadoEm: string; meu: boolean }[];
+  vpn: { id: number; titulo: string; arquivo: string; tamanho: number; autor: string | null; criadoEm: string; meu: boolean }[];
+  tcloud: { tipo: string; linkProtheus: string | null; linkRest: string | null; linkSchedule: string | null; linkExclusivo: string | null; atualizadoEm: string | null }[];
+  vscode: { id: number; titulo: string; link: string | null; porta: string | null; ambiente: string | null; meu: boolean }[];
+}

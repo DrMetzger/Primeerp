@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { emitirSessao, exigirLogin, verificarCredenciais, type Variaveis, clienteForaDoHorario, MSG_FORA_HORARIO } from './auth';
 import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositivo } from './dois-fatores';
@@ -15,6 +15,8 @@ import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
+import { SignJWT, jwtVerify } from 'jose';
+import { baixarVpn, ErroCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
 const app = new Hono<{ Variables: Variaveis }>();
 
@@ -105,6 +107,50 @@ app.get('/api/clientes/:id/setores/:setor', exigirLogin('equipe'), async (c) => 
   const d = await detalharSetor(c.get('usuario'), Number(c.req.param('id')), Number(c.req.param('setor')));
   return d ? c.json(d) : c.json({ erro: 'Setor não encontrado.' }, 404);
 });
+
+// ---------------------------------------------------------------- Cofre de acessos do cliente
+// (senhas, VPN, links T-Cloud) -- só no sistema novo, sem PHP.
+const cofre = async (c: Context, f: () => Promise<unknown>) => {
+  try { return c.json((await f()) as object); }
+  catch (e) {
+    if (e instanceof ErroCofre) return c.json({ erro: e.message }, e.status);
+    console.error('cofre:', e instanceof Error ? e.message : e);
+    return c.json({ erro: 'Não deu certo agora. Tente de novo em instantes.' }, 500);
+  }
+};
+const idDe = (v: string | undefined) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : 0; };
+const corpoJson = async (c: { req: { json: () => Promise<unknown> } }) => ((await c.req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
+
+app.get('/api/clientes/:id/acessos', exigirLogin('equipe'), (c) => cofre(c, () => lerCofre(c.get('usuario'), idDe(c.req.param('id')))));
+app.post('/api/clientes/:id/acessos/credenciais/:cid/senha', exigirLogin('equipe'), (c) => cofre(c, async () => ({ senha: await revelarSenha(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('cid'))) })));
+app.post('/api/clientes/:id/acessos/credenciais', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarCredencial(c.get('usuario'), idDe(c.req.param('id')), null, await corpoJson(c)) })));
+app.put('/api/clientes/:id/acessos/credenciais/:cid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarCredencial(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('cid')), await corpoJson(c)) })));
+app.delete('/api/clientes/:id/acessos/credenciais/:cid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await excluirCredencial(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('cid'))) })));
+app.post('/api/clientes/:id/acessos/vpn', exigirLogin('equipe'), (c) => cofre(c, async () => {
+  const f = await c.req.parseBody();
+  const id = idDe(typeof f.id === 'string' ? f.id : undefined) || null;
+  const arquivo = f.arquivo instanceof File && f.arquivo.size > 0 ? f.arquivo : null;
+  return { mensagem: await salvarVpn(c.get('usuario'), idDe(c.req.param('id')), id, typeof f.titulo === 'string' ? f.titulo : '', arquivo) };
+}));
+app.delete('/api/clientes/:id/acessos/vpn/:vid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await excluirVpn(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('vid'))) })));
+// Download: link de 2 minutos (funciona no navegador e no celular), permissão conferida de novo na hora de baixar.
+app.post('/api/clientes/:id/acessos/vpn/:vid/link', exigirLogin('equipe'), (c) => cofre(c, async () => {
+  const token = await new SignJWT({ u: c.get('usuario'), cl: idDe(c.req.param('id')), v: idDe(c.req.param('vid')) }).setProtectedHeader({ alg: 'HS256' }).setSubject('vpn').setExpirationTime('2m').sign(config.jwtSegredo);
+  return { url: `/api/arquivo-vpn?t=${encodeURIComponent(token)}` };
+}));
+app.get('/api/arquivo-vpn', async (c) => {
+  try {
+    const { payload } = await jwtVerify(c.req.query('t') ?? '', config.jwtSegredo, { subject: 'vpn' });
+    const a = await baixarVpn(payload.u as UsuarioLogado, Number(payload.cl), Number(payload.v));
+    return new Response(new Uint8Array(a.bytes), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${a.nome.replace(/["\r\n]/g, '')}"`, 'cache-control': 'private, no-store' } });
+  } catch (e) {
+    return c.text(e instanceof ErroCofre ? e.message : 'Link expirado. Volte e toque em baixar de novo.', e instanceof ErroCofre ? e.status : 403);
+  }
+});
+app.put('/api/clientes/:id/acessos/tcloud/:tipo', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarAmbienteTcloud(c.get('usuario'), idDe(c.req.param('id')), c.req.param('tipo'), await corpoJson(c)) })));
+app.post('/api/clientes/:id/acessos/vscode', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarVscode(c.get('usuario'), idDe(c.req.param('id')), null, await corpoJson(c)) })));
+app.put('/api/clientes/:id/acessos/vscode/:sid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await salvarVscode(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('sid')), await corpoJson(c)) })));
+app.delete('/api/clientes/:id/acessos/vscode/:sid', exigirLogin('equipe'), (c) => cofre(c, async () => ({ mensagem: await excluirVscode(c.get('usuario'), idDe(c.req.param('id')), idDe(c.req.param('sid'))) })));
 
 app.get('/api/chamados/:id', exigirLogin(), async (c) => {
   const d = await detalharChamado(c.get('usuario'), Number(c.req.param('id')));
