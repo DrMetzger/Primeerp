@@ -1,0 +1,94 @@
+# Troca a chave que cifra as senhas do cofre de acessos dos clientes.
+# A chave nova é gerada NA VM e fica só no .env de lá (nunca no repositório
+# nem neste log). As senhas gravadas são recifradas numa transação, com
+# backup antes; se a conferência final falhar, volta tudo sozinho.
+# O log é público: aqui só aparecem contagens, nunca chave nem senha.
+name: VM - trocar a chave do cofre
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-trocar-chave-cofre.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-trocar-chave-cofre
+  cancel-in-progress: false
+
+jobs:
+  trocar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Trocar a chave e recifrar as senhas
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          set -euo pipefail
+          umask 077
+          cd /opt/primehub
+          contar() { echo "$1" | grep -o '[0-9]\+ de [0-9]\+' | head -1 | cut -d' ' -f1; }
+          api_no_ar() { for i in $(seq 1 60); do docker exec primehub-api wget -qO- http://localhost:3000/api/saude >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
+
+          echo "== 1/6 conferindo o ambiente"
+          # Não roda junto com uma implantação.
+          for i in $(seq 1 90); do pgrep -f instalar.sh >/dev/null || break; echo "implantação em andamento, aguardando..."; sleep 10; done
+          grep -q '^CREDENCIAIS_CIFRA_CHAVE=.\+' .env || { echo "ERRO: .env sem a chave atual"; exit 1; }
+          docker exec primehub-api grep -q -- '--recifrar-cofre' /app/index.mjs || { echo "ERRO: a API ainda não tem o comando de troca (implante antes)"; exit 1; }
+          export CHAVE_ANTIGA; CHAVE_ANTIGA=$(grep '^CREDENCIAIS_CIFRA_CHAVE=' .env | head -1 | cut -d= -f2-)
+          ANTES=$(docker exec primehub-api node index.mjs --conferir-cofre 2>&1 || true)
+          echo "antes da troca: $ANTES"
+          ABREM_ANTES=$(contar "$ANTES"); [ -n "$ABREM_ANTES" ] || { echo "ERRO: não consegui conferir o cofre"; exit 1; }
+
+          echo "== 2/6 backup (só na VM)"
+          TS=$(date +%Y%m%d-%H%M%S)
+          mkdir -p backups && chmod 700 backups
+          docker exec primehub-db sh -c 'mariadb-dump -uprimehub -p"$MARIADB_PASSWORD" --single-transaction primehub cliente_credenciais' > "backups/cofre-$TS.sql"
+          [ -s "backups/cofre-$TS.sql" ] || { echo "ERRO: backup vazio"; exit 1; }
+          cp .env "backups/env-$TS"
+          echo "backup feito ($(du -h "backups/cofre-$TS.sql" | cut -f1))"
+
+          voltar() {
+            set +e
+            echo "== VOLTANDO tudo como estava"
+            cp "backups/env-$TS" .env
+            docker exec -i primehub-db sh -c 'mariadb -uprimehub -p"$MARIADB_PASSWORD" primehub' < "backups/cofre-$TS.sql"
+            docker compose up -d api web >/dev/null 2>&1 || true
+            api_no_ar || true
+            echo "voltado: $(docker exec primehub-api node index.mjs --conferir-cofre 2>&1 || true)"
+          }
+
+          echo "== 3/6 chave nova (gerada aqui, não sai da VM)"
+          export CHAVE_NOVA; CHAVE_NOVA=$(openssl rand -base64 32)
+          [ "${#CHAVE_NOVA}" = 44 ] || { echo "ERRO ao gerar a chave"; exit 1; }
+          printf '%s\n' "$CHAVE_NOVA" > "backups/chave-nova-$TS"
+
+          echo "== 4/6 recifrando as senhas"
+          docker exec -e CHAVE_ANTIGA -e CHAVE_NOVA primehub-api node index.mjs --recifrar-cofre || { echo "ERRO na recifragem: nada foi alterado"; exit 1; }
+
+          echo "== 5/6 servidor passa a usar a chave nova"
+          sed -i "s|^CREDENCIAIS_CIFRA_CHAVE=.*|CREDENCIAIS_CIFRA_CHAVE=${CHAVE_NOVA}|" .env
+          docker compose up -d api web >/dev/null
+          api_no_ar || { echo "ERRO: a API não voltou"; voltar; exit 1; }
+          # 2ª passada: pega qualquer senha cadastrada durante a troca.
+          docker exec -e CHAVE_ANTIGA -e CHAVE_NOVA primehub-api node index.mjs --recifrar-cofre || { voltar; exit 1; }
+
+          echo "== 6/6 conferindo"
+          DEPOIS=$(docker exec primehub-api node index.mjs --conferir-cofre 2>&1 || true)
+          echo "depois da troca: $DEPOIS"
+          ABREM_DEPOIS=$(contar "$DEPOIS")
+          if [ -z "$ABREM_DEPOIS" ] || [ "$ABREM_DEPOIS" -lt "$ABREM_ANTES" ]; then echo "ERRO: menos senhas abrindo do que antes"; voltar; exit 1; fi
+          H_API=$(docker exec primehub-api sh -c 'printf %s "$CREDENCIAIS_CIFRA_CHAVE" | sha256sum')
+          H_WEB=$(docker exec primehub-web sh -c 'printf %s "$ADMINPRIME_CREDENCIAIS_CIFRA_CHAVE" | sha256sum')
+          H_NOVA=$(printf %s "$CHAVE_NOVA" | sha256sum)
+          if [ "$H_API" != "$H_NOVA" ] || [ "$H_WEB" != "$H_NOVA" ]; then echo "ERRO: API e tela antiga não estão com a mesma chave nova"; voltar; exit 1; fi
+          rm -f "backups/chave-nova-$TS"
+          echo "OK: chave trocada; $ABREM_DEPOIS senha(s) abrindo com a chave nova (antes: $ABREM_ANTES). Backup da troca em /opt/primehub/backups ($TS)."
+          REMOTO
