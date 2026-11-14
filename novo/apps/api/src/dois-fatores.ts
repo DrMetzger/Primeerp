@@ -42,7 +42,17 @@ async function garantirTabelas(): Promise<void> {
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_usuario (tipo, usuario_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS whatsapp_janela (
+    telefone VARCHAR(20) PRIMARY KEY,
+    ultima_msg_em DATETIME NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
   tabelasProntas = true;
+}
+
+/** Guarda quando cada número escreveu para nós (janela de 24h da Meta). */
+export async function registrarMensagemRecebida(telefone: string): Promise<void> {
+  await garantirTabelas();
+  await consulta('INSERT INTO whatsapp_janela (telefone, ultima_msg_em) VALUES (?, NOW()) ON DUPLICATE KEY UPDATE ultima_msg_em = NOW()', [telefone.replace(/\D/g, '').slice(0, 20)]);
 }
 
 export async function dispositivoConfiavel(usuario: UsuarioLogado, token: string | undefined): Promise<boolean> {
@@ -121,21 +131,42 @@ async function telefoneDe(u: UsuarioLogado): Promise<string> {
   return d.length === 10 || d.length === 11 ? `55${d}` : d;
 }
 
-/** Código pelo WhatsApp oficial da PrimeERP (mesma conta do bot). */
+/**
+ * Código pelo WhatsApp oficial da PrimeERP. A Meta só ENTREGA texto livre
+ * para quem falou com o número nas últimas 24h; fora disso aceita o pedido
+ * e descarta calada. Por isso: com o modelo de autenticação aprovado
+ * (Configurações: whatsapp_template_codigo) usa o modelo, que chega sempre;
+ * sem modelo, só manda se a pessoa escreveu nas últimas 24h -- e se não
+ * der, avisa a verdade em vez de dizer que enviou.
+ */
 async function enviarWhatsApp(telefone: string, nome: string, codigo: string): Promise<void> {
   const token = await config('whatsapp_access_token', 'WHATSAPP_ACCESS_TOKEN');
   const numeroId = await config('whatsapp_phone_number_id', 'WHATSAPP_PHONE_NUMBER_ID');
   if (!token || !numeroId) throw new Error('O WhatsApp da PrimeERP não está configurado. Use o e-mail.');
+  const modelo = await config('whatsapp_template_codigo', 'WHATSAPP_TEMPLATE_CODIGO');
+  const corpo = modelo
+    ? { messaging_product: 'whatsapp', to: telefone, type: 'template', template: { name: modelo, language: { code: 'pt_BR' }, components: [
+        { type: 'body', parameters: [{ type: 'text', text: codigo }] },
+        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: codigo }] },
+      ] } }
+    : { messaging_product: 'whatsapp', to: telefone, type: 'text', text: { body: `Olá, ${nome.split(' ')[0] ?? ''}! Seu código de acesso ao Prime Hub é: *${codigo}*\n\nVale por ${VALIDADE_MIN} minutos. Não compartilhe com ninguém.` } };
+  if (!modelo && !(await falouNasUltimas24h(telefone))) {
+    throw new Error('Pelo WhatsApp o código só chega se você mandou uma mensagem para o WhatsApp da PrimeERP nas últimas 24 horas. Mande um "oi" para o nosso WhatsApp e toque de novo em "Receber o código pelo WhatsApp", ou use o código do e-mail.');
+  }
   const r = await fetch(`https://graph.facebook.com/v21.0/${numeroId}/messages`, {
-    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: telefone, type: 'text', text: { body: `Olá, ${nome.split(' ')[0] ?? ''}! Seu código de acesso ao Prime Hub é: *${codigo}*\n\nVale por ${VALIDADE_MIN} minutos. Não compartilhe com ninguém.` } }),
-    signal: AbortSignal.timeout(15_000),
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(corpo), signal: AbortSignal.timeout(15_000),
   });
   if (!r.ok) {
-    console.error(`2FA: WhatsApp recusou (HTTP ${r.status})`);
-    // Fora da janela de 24h a Meta só aceita modelo aprovado: a pessoa manda um "oi" e tenta de novo.
-    throw new Error('Não deu para mandar pelo WhatsApp. Mande um "oi" para o WhatsApp da PrimeERP e toque em "Receber por WhatsApp" de novo.');
+    console.error(`2FA: WhatsApp recusou (HTTP ${r.status}) ${(await r.text().catch(() => '')).slice(0, 200)}`);
+    throw new Error('O WhatsApp não aceitou enviar agora. Use o código do e-mail (o mais recente ou um anterior, ambos valem por 10 minutos).');
   }
+}
+
+/** A pessoa escreveu para o WhatsApp da PrimeERP nas últimas 24h? (janela em que a Meta entrega texto livre) */
+async function falouNasUltimas24h(telefone: string): Promise<boolean> {
+  const fim = telefone.slice(-8);
+  const l = await primeira<{ n: number }>('SELECT COUNT(*) n FROM whatsapp_janela WHERE telefone LIKE ? AND ultima_msg_em > NOW() - INTERVAL 23 HOUR', [`%${fim}`]).catch(() => null);
+  return Number(l?.n ?? 0) > 0;
 }
 
 /** Cria o desafio e manda o código. Retorna o id do desafio e o e-mail mascarado. */
@@ -150,29 +181,40 @@ export async function iniciarDesafio(usuario: UsuarioLogado, canal: 'email' | 'w
   const desafio = randomBytes(16).toString('hex');
   await consulta(`INSERT INTO login_2fa (id, tipo, usuario_id, usuario_json, codigo_hash, expira_em) VALUES (?, ?, ?, ?, ?, NOW() + INTERVAL ${VALIDADE_MIN} MINUTE)`,
     [desafio, usuario.tipo, usuario.id, JSON.stringify(usuario), hash(`${desafio}:${codigo}`)]);
+  // Se não deu para enviar, o pedido não conta no limite nem fica valendo.
+  const desfazer = async (e: unknown) => { await consulta('DELETE FROM login_2fa WHERE id = ?', [desafio]).catch(() => undefined); throw e; };
   if (canal === 'whatsapp') {
     const tel = await telefoneDe(usuario);
-    if (tel.length < 12) throw new Error('Seu cadastro está sem telefone/WhatsApp. Use o e-mail ou peça para a PrimeERP cadastrar.');
-    await enviarWhatsApp(tel, usuario.nome, codigo);
+    if (tel.length < 12) await desfazer(new Error('Seu cadastro está sem telefone/WhatsApp. Use o e-mail ou peça para a PrimeERP cadastrar.'));
+    await enviarWhatsApp(tel, usuario.nome, codigo).catch(desfazer);
     return { desafio, destino: `WhatsApp final ${tel.slice(-4)}` };
   }
-  await enviarEmail(usuario.email, usuario.nome, codigo);
+  await enviarEmail(usuario.email, usuario.nome, codigo).catch(desfazer);
   return { desafio, destino: mascarar(usuario.email) };
 }
 
-/** Confere o código. Sucesso devolve a pessoa; erro devolve a mensagem. */
+/**
+ * Confere o código. Vale QUALQUER código ainda válido que a pessoa pediu
+ * para o mesmo login (o e-mail que chegou atrasado depois de um "Reenviar"
+ * ou o do WhatsApp): e-mail lento não pode trancar ninguém do lado de fora.
+ */
 export async function conferirCodigo(desafio: string, codigo: string): Promise<{ usuario: UsuarioLogado } | { erro: string }> {
   await garantirTabelas();
-  const linha = await primeira<{ usuario_json: string; codigo_hash: string; tentativas: number; vencido: number; usado_em: string | null }>(
-    'SELECT usuario_json, codigo_hash, tentativas, expira_em < NOW() vencido, usado_em FROM login_2fa WHERE id = ?', [desafio]);
+  const linha = await primeira<{ tipo: string; usuario_id: number; usuario_json: string; codigo_hash: string; tentativas: number; vencido: number; usado_em: string | null }>(
+    'SELECT tipo, usuario_id, usuario_json, codigo_hash, tentativas, expira_em < NOW() vencido, usado_em FROM login_2fa WHERE id = ?', [desafio]);
   if (!linha || linha.usado_em) return { erro: 'Código inválido. Entre de novo.' };
-  if (Number(linha.vencido)) return { erro: 'O código venceu. Toque em "Reenviar código".' };
   if (linha.tentativas >= TENTATIVAS) return { erro: 'Muitas tentativas erradas. Entre de novo.' };
-  if (hash(`${desafio}:${codigo.replace(/\D/g, '')}`) !== linha.codigo_hash) {
+  const digitos = codigo.replace(/\D/g, '');
+  const validos = await consulta<{ id: string; codigo_hash: string }>(
+    'SELECT id, codigo_hash FROM login_2fa WHERE tipo = ? AND usuario_id = ? AND usado_em IS NULL AND expira_em > NOW() ORDER BY criado_em DESC LIMIT 10', [linha.tipo, linha.usuario_id]);
+  const certo = validos.find((v) => hash(`${v.id}:${digitos}`) === v.codigo_hash);
+  if (!certo) {
     await consulta('UPDATE login_2fa SET tentativas = tentativas + 1 WHERE id = ?', [desafio]);
+    if (Number(linha.vencido) && !validos.length) return { erro: 'O código venceu. Toque em "Reenviar código".' };
     const restam = TENTATIVAS - linha.tentativas - 1;
     return { erro: restam > 0 ? `Código incorreto. Restam ${restam} tentativa(s).` : 'Muitas tentativas erradas. Entre de novo.' };
   }
-  await consulta('UPDATE login_2fa SET usado_em = NOW() WHERE id = ?', [desafio]);
+  // Login feito: todos os códigos pendentes desse login deixam de valer.
+  await consulta('UPDATE login_2fa SET usado_em = NOW() WHERE tipo = ? AND usuario_id = ? AND usado_em IS NULL', [linha.tipo, linha.usuario_id]);
   return { usuario: JSON.parse(linha.usuario_json) as UsuarioLogado };
 }

@@ -1,4 +1,5 @@
 import { consulta, primeira } from './db';
+import { registrarMensagemRecebida } from './dois-fatores';
 import { assinaturaValida, avisarEquipeWhatsapp, baixarMidia, enviarBotoes, enviarLista, enviarTexto, type Linha } from './integracoes';
 import {
   agendarIa, ANEXO_TIPOS, avisarMensagemWhatsapp, avisarNovoChamado, CATEGORIAS_CHAMADO, duplicadoRecente, executar,
@@ -423,6 +424,7 @@ export async function processarWebhook(corpo: string): Promise<void> {
       for (const m of v.messages) {
         const tel = typeof m.from === 'string' ? m.from : '';
         if (!tel) continue;
+        await registrarMensagemRecebida(tel).catch(() => undefined);
         const nome = nomes.get(tel) ?? '';
         try {
           if (m.type === 'text') await processarTexto(tel, nome, String((m.text as { body?: string } | undefined)?.body ?? ''));
