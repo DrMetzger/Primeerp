@@ -200,7 +200,7 @@ export function TelaLogin({ tipo: tipoInicial }: { tipo: TipoLogin }) {
           )}
         </div>
 
-        {!desafio && <CartaoApk />}
+        <CartaoApk />
       </div>
     </main>
   );

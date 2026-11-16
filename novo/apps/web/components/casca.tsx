@@ -3,9 +3,9 @@
 import type { UsuarioLogado } from '@primehub/shared';
 import {
   BarChart3, BookOpen, Bot, CalendarDays, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
-  Settings, UserCircle, Users, UsersRound, Video, X, type LucideIcon,
-} from 'lucide-react';
+  Settings, UserCircle, Users, UsersRound, Video, X, Smartphone, type LucideIcon } from 'lucide-react';
 import { usePathname } from 'next/navigation';
+import { JanelaApk } from './cartao-apk';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Assistente, chamarAssistente } from './assistente/assistente';
 import { sair, usuarioSalvo } from '@/lib/sessao';
@@ -48,6 +48,7 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
   const caminho = usePathname();
   const [usuario, setUsuario] = useState<UsuarioLogado | null>(null);
   const [aberto, setAberto] = useState(false);
+  const [janelaApp, setJanelaApp] = useState(false);
   const [abrindo, setAbrindo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,6 +103,14 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
             </li>
           );
         })}
+        <li>
+          <button type="button" onClick={() => { setAberto(false); setJanelaApp(true); }}
+            className="toque flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-suave transition hover:bg-superficie-alta hover:text-texto">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#10b98122', color: '#10b981' }}><Smartphone size={18} aria-hidden="true" /></span>
+            <span className="flex-1">Baixar o app</span>
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-500">Android</span>
+          </button>
+        </li>
         <li>
           <button type="button" onClick={() => { setAberto(false); chamarAssistente(); }}
             className="toque flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-suave transition hover:bg-superficie-alta hover:text-texto">
@@ -166,6 +175,7 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
         <main className="mx-auto max-w-7xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6 sm:px-6">{children}</main>
       </div>
       {usuario && <Assistente />}
+      {janelaApp && <JanelaApk aoFechar={() => setJanelaApp(false)} />}
     </div>
   );
 }
