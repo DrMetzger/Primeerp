@@ -8,8 +8,8 @@ umask 022
 
 echo "== 1/5 pacotes"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq postgresql postgresql-contrib unixodbc odbc-postgresql syncthing jq unzip >/dev/null
+FALTA=""; for pk in postgresql postgresql-contrib unixodbc odbc-postgresql syncthing jq unzip; do dpkg -s $pk >/dev/null 2>&1 || FALTA="$FALTA $pk"; done
+if [ -n "$FALTA" ]; then apt-get update -qq; apt-get install -y -qq $FALTA >/dev/null; fi
 echo "PostgreSQL $(psql --version | awk '{print $3}') | unixODBC $(odbcinst --version | awk '{print $2}') | Syncthing $(syncthing --version | awk '{print $2}')"
 
 echo "== 2/5 usuário e pastas"
@@ -107,6 +107,7 @@ echo "pastas recebidas do PC:"; ls -1 $BASE/sync 2>/dev/null | sed 's/^/  - /'
 echo "arquivos recebidos: $(find $BASE/sync -type f 2>/dev/null | wc -l) ($(du -sh $BASE/sync 2>/dev/null | cut -f1))"
 echo "instaladores TOTVS encontrados:"; find $BASE/sync $BASE/instaladores -maxdepth 3 -type f \( -iname '*APPSERVER*LINUX*' -o -iname '*DBACCESS*LINUX*' -o -iname '*TOTVSLICENSE*LINUX*' -o -iname '*INSTALADOR_PROTHEUS_LINUX*' \) 2>/dev/null | sed 's|.*/|  - |' || true
 echo "fontes na VM: FONTES_PROTHEUS=$(find $BASE/fontes/FONTES_PROTHEUS -type f | wc -l) arquivos ($(du -sh $BASE/fontes/FONTES_PROTHEUS | cut -f1)) | Fontes_2510=$(find $BASE/fontes/Fontes_2510 -type f | wc -l) arquivos ($(du -sh $BASE/fontes/Fontes_2510 | cut -f1))"
+if [ ! -d $BASE/protheus12 ]; then
 echo "== instaladores (tamanho e o que tem dentro)"
 for f in $BASE/instaladores/*; do
   [ -f "$f" ] || continue
@@ -116,6 +117,8 @@ for f in $BASE/instaladores/*; do
     *.tar.gz|*.tgz) tar -tzf "$f" 2>/dev/null | awk -F/ '{print $1"/"$2}' | sort -u | head -25 ;;
   esac
 done
+fi
+if [ ! -d $BASE/protheus12 ] || [ ! -d $BASE/licenseserver ]; then
 echo "== instaladores Java: modelo de respostas (instalação sem tela)"
 command -v java >/dev/null || apt-get install -y -qq openjdk-17-jre-headless >/dev/null
 echo "Java: $(java -version 2>&1 | head -1)"
@@ -136,5 +139,6 @@ for par in "protheus:installer_lnx.jar" "license:installer.jar"; do
 done
 echo "--- License: script install (resumo)"
 ( grep -vE '^\s*#|^\s*$' $TRAB/license/install | grep -viE 'senha|password' | head -60 ) || true
+fi
 echo "== disco agora"; df -h / | tail -1
 echo "== memória agora"; free -h | head -2
