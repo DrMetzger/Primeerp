@@ -69,8 +69,9 @@ chmod 644 /etc/odbc.ini
 echo "SELECT 'conexao ODBC ok';" | isql -b protheus protheus "$PG_SENHA" 2>&1 | grep -q 'conexao ODBC ok' && echo "ODBC: conectou no banco protheus" || { echo "ERRO: ODBC não conectou"; exit 1; }
 
 echo "== 5/5 Syncthing (PC do Kleber <-> VM)"
-systemctl enable syncthing@totvs >/dev/null 2>&1
-systemctl restart syncthing@totvs
+ls /lib/systemd/system/ | grep -i syncthing || echo "sem unidade systemd do syncthing"
+systemctl enable syncthing@totvs 2>&1 || echo "aviso: enable falhou"
+systemctl restart syncthing@totvs 2>&1 || { echo "ERRO ao iniciar"; systemctl --no-pager status syncthing@totvs 2>&1 | tail -15; journalctl -u syncthing@totvs -n 20 --no-pager 2>&1 | tail -20; exit 1; }
 ST() { sudo -u totvs -H syncthing cli "$@"; }
 for i in $(seq 1 45); do ST show system >/dev/null 2>&1 && break; sleep 2; done
 if ! ST show system >/dev/null 2>&1; then
