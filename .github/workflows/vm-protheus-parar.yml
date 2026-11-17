@@ -1,0 +1,31 @@
+# Para a pilha do Protheus na VM (AppServer, DBAccess, License, PostgreSQL),
+# na mesma ordem do botão "Parar todos" do painel. Não mexe no Prime Hub.
+name: VM - parar Protheus
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-protheus-parar.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parar serviços do Protheus
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do
+            timeout 150 systemctl stop $u; echo "$u: $(systemctl is-active $u)"
+          done
+          pgrep -fl appsrvlinux || echo "nenhum appsrvlinux rodando"
+          echo "Prime Hub (containers):"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub
+          REMOTO
