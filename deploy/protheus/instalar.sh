@@ -11,7 +11,8 @@ umask 022
 # Serviço systemd para um AppServer (o instalador TOTVS só registra serviço em Red Hat/Oracle/SUSE).
 servico() {  # nome  pasta_do_binário  memória_máx  descrição
   local nome=$1 dir=$2 mem=$3 desc=$4 bin
-  bin=$(ls "$dir"/appsrvlinux "$dir"/dbaccess64 2>/dev/null | head -1)
+  bin=""
+  for b in "$dir"/appsrvlinux "$dir"/dbaccess64; do [ -f "$b" ] && { bin=$b; break; }; done
   [ -n "$bin" ] || { echo "AVISO: binário não encontrado em $dir"; return 0; }
   chmod +x "$bin"
   cat > /etc/systemd/system/$nome.service <<UNIT
