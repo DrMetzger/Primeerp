@@ -116,22 +116,24 @@ for f in $BASE/instaladores/*; do
     *.tar.gz|*.tgz) tar -tzf "$f" 2>/dev/null | awk -F/ '{print $1"/"$2}' | sort -u | head -25 ;;
   esac
 done
-echo "== por dentro dos instaladores Java"
-TMPI=$(mktemp -d)
+echo "== instaladores Java: modelo de respostas (instalação sem tela)"
+command -v java >/dev/null || apt-get install -y -qq openjdk-17-jre-headless >/dev/null
+echo "Java: $(java -version 2>&1 | head -1)"
+TRAB=$BASE/trabalho; mkdir -p $TRAB/protheus $TRAB/license
 Z=$(ls $BASE/instaladores/*INSTALADOR_PROTHEUS_LINUX*.ZIP 2>/dev/null | head -1)
-if [ -n "$Z" ]; then
-  unzip -p "$Z" installer_lnx.jar > $TMPI/p.jar 2>/dev/null || true
-  unzip -p "$Z" TOTVS12.sh 2>/dev/null | grep -vE 'senha|password' | head -30
-  echo "--- installer_lnx.jar: arquivos grandes e pastas"
-  unzip -l $TMPI/p.jar 2>/dev/null | awk 'NR>3 && $1>5000000 {printf "%8d MB  %s\n", $1/1048576, $4}' | head -40
-  unzip -l $TMPI/p.jar 2>/dev/null | awk 'NR>3 {print $4}' | awk -F/ 'NF>1 {print $1"/"$2"/"$3}' | sort -u | head -60
-  unzip -l $TMPI/p.jar 2>/dev/null | grep -iE '\.rpo|systemload|sxsbra|menus|webapp|\.xnu|install.*properties|auto.*xml' | awk '{print $1, $4}' | head -30
-fi
+[ -f $TRAB/protheus/installer_lnx.jar ] || unzip -o -q "$Z" -d $TRAB/protheus
 L=$(ls $BASE/instaladores/*TOTVSLICENSE*LINUX*.TAR.GZ 2>/dev/null | head -1)
-if [ -n "$L" ]; then
-  echo "--- License Server"; tar -tzf "$L" | head -40
-fi
-rm -rf $TMPI
-echo "Java: $(java -version 2>&1 | head -1 || echo 'não instalado')"
+[ -f $TRAB/license/installer.jar ] || tar -xzf "$L" -C $TRAB/license
+echo "--- License: arquivo install = $(file -b $TRAB/license/install | cut -c1-80)"
+for par in "protheus:installer_lnx.jar" "license:installer.jar"; do
+  IFS=: read -r nome jar <<<"$par"
+  echo "--- $nome: modelo de respostas"
+  ( cd $TRAB/$nome && timeout 120 java -Djava.awt.headless=true -jar "$jar" -options-template $TRAB/$nome-modelo.properties </dev/null >$TRAB/$nome-saida.txt 2>&1 ) || true
+  if [ -s $TRAB/$nome-modelo.properties ]; then grep -viE 'senha|password' $TRAB/$nome-modelo.properties | head -60
+  else echo "(sem modelo; saída do instalador:)"; grep -viE 'senha|password' $TRAB/$nome-saida.txt | head -25; fi
+  echo "--- $nome: painéis do instalador"
+  unzip -l $TRAB/$nome/$jar 2>/dev/null | awk '{print $4}' | grep -E '^resources/|install\.xml|panelsOrder|userInputSpec' | head -20
+  unzip -p $TRAB/$nome/$jar resources/userInputSpec.xml 2>/dev/null | grep -oE '(variable|id)="[^"]+"' | sort -u | head -40
+done
 echo "== disco agora"; df -h / | tail -1
 echo "== memória agora"; free -h | head -2
