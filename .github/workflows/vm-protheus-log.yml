@@ -25,11 +25,8 @@ jobs:
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           F='senha|password|psw|passwd|secret|token'
           echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
-          echo "== chaves de login/interface no appserver (webapp.so + appsrvlinux)"
-          for bin in $APP/webapp.so $APP/appsrvlinux; do
-            grep -aoE "[[:print:]]{5,}" "$bin" 2>/dev/null
-          done | grep -iE "newlogin|loginpage|po[-_ ]?ui|oldlogin|classiclogin|legacylogin|smartclient html|firstaccess|primeiro acesso|disablenewui|newui|login_page|htmlwizard" | sort -u | head -40
-          echo "== SIGACFG/usuários: bases SIX/SYS no banco"; sudo -u postgres psql -d protheus -tAc "select table_name from information_schema.tables where table_schema='public' and (table_name ilike 'sys_user%' or table_name ilike 'sys_comp%' or table_name='six010') order by 1" 2>/dev/null | head
-          echo "== quantos usuários em SYS_USR (se existir)"; sudo -u postgres psql -d protheus -tAc "select count(*) from sys_usr" 2>/dev/null || echo "sem SYS_USR"
+          echo "== chaves de login/interface (só webapp.so)"
+          grep -aoE "[[:print:]]{5,}" $APP/webapp.so 2>/dev/null | grep -iE "newlogin|loginpage|old_login|oldlogin|classic|legacy|login_page|firstaccess|new_?ui|htmlwizard|disable.*login|login.*disable" | sort -u | head -30 | cut -c1-120
+          echo "== usuários no banco"; sudo -u postgres psql -d protheus -tAc "select count(*) from sys_usr" 2>/dev/null || echo "sem tabela SYS_USR (nenhum usuário cadastrado ainda)"
           echo "== webapp.log"; tail -40 $APP/webapp.log 2>/dev/null
           REMOTO
