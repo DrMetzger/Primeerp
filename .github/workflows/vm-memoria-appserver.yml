@@ -1,0 +1,31 @@
+# Sobe o limite de memória do AppServer COM ELE RODANDO (sem reiniciar
+# nada): usado quando o Protheus está inicializando e não pode cair.
+# Só mexe no limite (cgroup) do totvsappserver; não toca em outro serviço.
+name: VM - memória do AppServer (sem reiniciar)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-memoria-appserver.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Subir o limite para 3 GB sem reiniciar
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          echo "antes: $(systemctl show totvsappserver -p MemoryMax -p MemoryCurrent -p ActiveEnterTimestamp -p MainPID | tr '\n' ' ')"
+          systemctl set-property totvsappserver MemoryMax=3G
+          echo "depois: $(systemctl show totvsappserver -p MemoryMax -p MemoryCurrent -p ActiveEnterTimestamp -p MainPID | tr '\n' ' ')"
+          echo "AppServer: $(systemctl is-active totvsappserver) (mesmo PID = não reiniciou)"
+          REMOTO

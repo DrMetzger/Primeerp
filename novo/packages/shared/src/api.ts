@@ -281,7 +281,7 @@ export const TIPOS_CASO_AGENTE: Record<string, string> = {
 /** Painel de serviços da VM (Protheus e companhia). */
 export interface ServicoVm {
   id: string; nome: string; descricao: string; unidade: string; critico: boolean;
-  estado: string; subestado: string; desde: string | null; memoriaMB: number | null; cpuSegundos: number | null;
+  estado: string; subestado: string; desde: string | null; memoriaMB: number | null; limiteMB?: number | null; cpuSegundos: number | null;
   pid: number | null; reinicios: number; iniciaComVM: boolean; portas: { porta: number; aberta: boolean }[];
 }
 export interface VersoesProtheus {
@@ -310,6 +310,9 @@ export function alertasVm(d: PainelVm): AlertaVm[] {
       a.push({ nivel: s.critico && s.estado !== 'activating' ? 'erro' : 'aviso', servico: s.id, titulo: `${s.nome} ${estado[s.estado] ?? `está ${s.estado}`}`,
         detalhe: s.estado === 'failed' ? 'Veja o Log do serviço e tente Iniciar de novo.' : s.estado === 'activating' || s.estado === 'deactivating' ? 'Aguarde alguns segundos: a tela atualiza sozinha.' : `${s.descricao}: use o botão Iniciar.` });
       continue;
+    }
+    if (s.memoriaMB !== null && s.limiteMB && s.memoriaMB > s.limiteMB * 0.9) {
+      a.push({ nivel: 'aviso', servico: s.id, titulo: `${s.nome} no limite de memória (${Math.round(s.memoriaMB)} de ${s.limiteMB} MB)`, detalhe: 'Perto do limite ele fica lento e pesa o processador. Reiniciar o serviço libera; se repetir, o limite precisa subir.' });
     }
     for (const p of s.portas.filter((x) => !x.aberta)) {
       a.push({ nivel: 'aviso', servico: s.id, titulo: `${s.nome} no ar, mas a porta ${p.porta} está fechada`, detalhe: `${PORTA_USO[p.porta] ?? 'esse acesso não funciona'}. Se acabou de ligar, aguarde; senão, Reiniciar ${s.nome}.` });

@@ -66,24 +66,24 @@ export default function PaginaProtheus() {
         {!d ? (erro ? null : <div className="space-y-3"><Esqueleto className="h-40" /><Esqueleto className="h-64" /></div>) : (
           <>
             <section className="relative overflow-hidden rounded-3xl border border-borda bg-superficie p-6 shadow-sm">
-              <div className="flex flex-wrap items-center gap-4">
-                <span className="flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-lg" style={{ background: 'linear-gradient(135deg,#0ea5e9,#1e3fd8)' }}><Server size={28} aria-hidden="true" /></span>
+              <div className="flex items-start gap-4">
+                <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg" style={{ background: 'linear-gradient(135deg,#0ea5e9,#1e3fd8)' }}><Server size={28} aria-hidden="true" /></span>
                 <div className="min-w-0 flex-1">
                   <h2 className="text-2xl font-bold text-texto">Protheus {v.protheus ?? '12.1.2510'}</h2>
                   <p className="text-sm text-suave">Ambiente <b className="text-texto">{v.ambiente ?? 'PRIMEERP'}</b> · base de desenvolvimento na VM</p>
+                  <a href="#atencao" className={`mt-2 inline-flex max-w-full items-center gap-2 rounded-full px-3 py-1 text-sm font-bold ${!alertas.length ? 'bg-sucesso/15 text-sucesso' : temErro ? 'bg-perigo/15 text-perigo' : 'bg-alerta/15 text-alerta'}`}>
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${!alertas.length ? 'bg-sucesso' : temErro ? 'bg-perigo' : 'bg-alerta'} animate-pulse`} aria-hidden="true" />
+                    <span className="truncate">{!alertas.length ? 'Tudo no ar' : `${alertas[0]?.titulo}${alertas.length > 1 ? ` (+${alertas.length - 1})` : ''}`}</span>
+                  </a>
                 </div>
-                <a href="#atencao" className={`inline-flex max-w-full items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold ${!alertas.length ? 'bg-sucesso/15 text-sucesso' : temErro ? 'bg-perigo/15 text-perigo' : 'bg-alerta/15 text-alerta'}`}>
-                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${!alertas.length ? 'bg-sucesso' : temErro ? 'bg-perigo' : 'bg-alerta'} animate-pulse`} aria-hidden="true" />
-                  <span className="truncate">{!alertas.length ? 'Tudo no ar' : `${alertas[0]?.titulo}${alertas.length > 1 ? ` (+${alertas.length - 1})` : ''}`}</span>
-                </a>
-                <div className="flex flex-wrap gap-2">
-                  {!todosNoAr && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'iniciar')} className="text-sucesso"><Power size={16} aria-hidden="true" /> Iniciar todos</BotaoSecundario>}
-                  <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> Reiniciar todos</BotaoSecundario>
-                  <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'parar')} className="text-perigo"><PowerOff size={16} aria-hidden="true" /> Parar todos</BotaoSecundario>
-                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                {!todosNoAr && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'iniciar')} className="text-sucesso"><Power size={16} aria-hidden="true" /> Iniciar todos</BotaoSecundario>}
+                <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> Reiniciar todos</BotaoSecundario>
+                <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'parar')} className="text-perigo"><PowerOff size={16} aria-hidden="true" /> Parar todos</BotaoSecundario>
                 <a href={v.webappUrl ?? 'https://protheus.primeerp.com.br'} target="_blank" rel="noopener noreferrer" className="gradiente-marca toque inline-flex items-center gap-2 rounded-xl px-4 font-semibold text-white shadow"><ExternalLink size={18} aria-hidden="true" /> Abrir o Protheus</a>
               </div>
-              <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:grid-cols-6">
                 {([['RPO', `${v.protheus ?? '—'}${v.rpoData ? ` · ${v.rpoData}` : ''}`], ['AppServer', `${v.appserver ?? '—'}${v.appserverBuild ? ` (${v.appserverBuild})` : ''}`], ['Webapp', v.webapp || '—'], ['DBAccess', v.dbaccess || '—'], ['License Server', v.licenseServer || '—'], ['PostgreSQL', v.postgresql || '—']] as const).map(([r, x]) => (
                   <div key={r} className="rounded-2xl bg-superficie-alta/60 px-3 py-2"><dt className="text-xs font-semibold uppercase text-suave">{r}</dt><dd className="truncate font-mono text-sm text-texto" title={x}>{x}</dd></div>
                 ))}
