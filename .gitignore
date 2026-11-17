@@ -19,3 +19,4 @@ Thumbs.db
 
 # Exportação do banco pra migração (fica só no servidor, nunca no git)
 /config/migracao/
+__pycache__/
