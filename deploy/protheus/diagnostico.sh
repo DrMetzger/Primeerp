@@ -9,7 +9,8 @@ DBA=$BASE/protheus12/dbaccess
 ver() { strings "$1" 2>/dev/null | grep -m1 -oE "$2" ; }
 APPBUILD=$(grep -m1 -oE 'Build 7\.00\.[0-9]+[A-Z]?' $APP/console.log 2>/dev/null | awk '{print $2}')
 APPVER=$(grep -m1 -oE 'Build Version: [0-9.]+' $APP/console.log 2>/dev/null | awk '{print $3}')
-WEBAPP=$(ver $APP/webapp.so '7\.00\.[0-9]{6}[A-Z]?')
+WEBAPP=$(ls $APP/.webapp-* 2>/dev/null | head -1 | sed 's/.*\.webapp-//')
+[ -n "$WEBAPP" ] || WEBAPP=$(ver $APP/webapp.so '7\.00\.[0-9]{6}[A-Z]?')
 DBAVER=$(journalctl -u totvsdbaccess --no-pager 2>/dev/null | grep -oE 'Build Version: [0-9.]+' | tail -1 | awk '{print $3}')
 [ -n "$DBAVER" ] || DBAVER=$(ver $DBA/dbaccess64 '[0-9]{2}\.[0-9]\.[0-9]\.[0-9]+')
 LICVER=$(ls $BASE/instaladores/*TOTVSLICENSE* 2>/dev/null | grep -oE '[0-9]+_[0-9]+_[0-9]+' | head -1 | tr _ .)

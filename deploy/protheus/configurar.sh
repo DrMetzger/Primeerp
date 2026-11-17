@@ -40,7 +40,26 @@ if [ ! -f $APP/.build-26.3.0.1 ]; then
   touch $APP/.build-26.3.0.1
 fi
 INI=$APP/appserver.ini
-ANTES=$(md5sum $INI $APP/appsrvlinux /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
+ANTES=$(md5sum $INI $APP/appsrvlinux $APP/webapp.so /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
+# Webapp (SmartClient HTML) do mesmo nível do AppServer 26.x, quando estiver nos instaladores.
+WTAR=$(ls $BASE/instaladores/*SMARTCLIENT_WEBAPP*LINUX*.TAR.GZ 2>/dev/null | sort | tail -1)
+if [ -n "$WTAR" ]; then
+  WVER=$(basename "$WTAR" | grep -oE 'WEBAPP_[0-9.]+' | cut -d_ -f2 | sed 's/\.$//')
+  if [ ! -f $APP/.webapp-$WVER ]; then
+    echo "--- Webapp $WVER: conteúdo do pacote"; tar -tzf "$WTAR" | head -20
+    TMPW=$(mktemp -d); tar -xzf "$WTAR" -C $TMPW
+    SO=$(find $TMPW -name 'webapp*.so' | head -1)
+    if [ -n "$SO" ]; then
+      cp -f $APP/webapp.so $APP/webapp.so.anterior 2>/dev/null || true
+      cp -f "$SO" $APP/webapp.so
+      # demais arquivos do pacote que acompanham o .so (ex.: pasta web/), sem sobrescrever o ini
+      find $TMPW -mindepth 1 -maxdepth 1 ! -name '*.so' ! -iname '*.ini' -exec cp -rf {} $APP/ \;
+      rm -f $APP/.webapp-*; touch $APP/.webapp-$WVER
+      echo "Webapp $WVER instalado (o anterior ficou como webapp.so.anterior)"
+    else echo "AVISO: pacote do Webapp sem webapp.so"; fi
+    rm -rf $TMPW
+  fi
+fi
 sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
 ini() { local sec=$1 k=$2 v=$3
@@ -91,7 +110,7 @@ TasksMax=4096
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1
-DEPOIS=$(md5sum $INI $APP/appsrvlinux /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
+DEPOIS=$(md5sum $INI $APP/appsrvlinux $APP/webapp.so /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
 # Só reinicia se algo mudou (ou se estiver parado): o log do AppServer fica guardado para diagnóstico.
 if [ "$ANTES" != "$DEPOIS" ] || ! systemctl is-active -q totvsappserver; then
   echo "AppServer: configuração mudou, reiniciando"
