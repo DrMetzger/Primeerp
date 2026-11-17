@@ -103,7 +103,10 @@ if [ -n "$GW" ] && [ -f /etc/systemd/system/totvsappserver.service ]; then
 	header Content-Security-Policy "upgrade-insecure-requests"
 	# Os arquivos do login (app-root) saem da porta multiprotocolo (1234).
 	handle /app-root/* {
-		reverse_proxy ${GW}:1234
+		# o AppServer devolve 401 quando o pedido traz Origin (scripts do login)
+		reverse_proxy ${GW}:1234 {
+			header_up -Origin
+		}
 	}
 	handle {
 		reverse_proxy ${GW}:8089
