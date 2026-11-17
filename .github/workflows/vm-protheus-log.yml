@@ -25,15 +25,13 @@ jobs:
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           F='senha|password|psw|passwd|secret|token'
           echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
-          echo "== AppServer: erros e avisos (últimas 2h)"
-          grep -nE 'ERROR|FATAL|THREAD ERROR|error|Erro|Invalid|not found|denied|refused|License|LICENSE|Licen' $APP/console.log 2>/dev/null | grep -viE "$F|Server not found, ID|Monitored Calls|Hub|SSL values" | tail -40
-          echo "== AppServer: últimas 60 linhas"
-          tail -400 $APP/console.log 2>/dev/null | grep -vE 'Memory|memory|\[\.|\[=|PID +MEM|tot +lim|Percentages|Turn on|^\s*$|^ *[0-9]+\*? +[0-9]+ +[0-9]+d' | grep -viE "$F" | tail -60
-          echo "== DBAccess (últimas)"; journalctl -u totvsdbaccess -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | tail -20
-          echo "== License (últimas)"; journalctl -u licenseVirtual -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|licen|slot|denied|refus|client' | tail -15
-          echo "== onde existe language.ini"; find /opt/totvs -iname 'language*.ini' 2>/dev/null | head
-          for f in /opt/totvs/instaladores/*APPSERVER*LINUX*.TAR.GZ /opt/totvs/instaladores/*SMARTCLIENT_WEBAPP*; do [ -f "$f" ] && tar -tzf "$f" 2>/dev/null | grep -i language | sed "s|^|  $(basename $f): |"; done
-          unzip -l /opt/totvs/trabalho/protheus/installer_lnx.jar 2>/dev/null | grep -i language | head -5
-          echo "== detalhe do FWMenuToDB"; grep -n -A4 'FWMenuToDB Error' $APP/console.log 2>/dev/null | grep -viE "$F" | head -24
-          echo "== tabelas no banco protheus"; sudo -u postgres psql -d protheus -tAc "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null
+          echo "== AppServer: tudo dos últimos 25 min (sem ruído de memória)"
+          desde=$(date -d '-25 min' '+%Y-%m-%dT%H:%M')
+          awk -v d="$desde" 'substr($0,1,16)>=d{p=1} p' $APP/console.log 2>/dev/null | grep -vE 'Memory|memory|\[\.|\[=|PID +MEM|tot +lim|Percentages|Turn on|^\s*$|^ *[0-9]+\*? +[0-9]+ +[0-9]+d' | grep -viE "$F" | cut -c1-260 | tail -150
+          echo "== FWMenuToDB cru (linhas seguintes)"; n=$(grep -n 'FWMenuToDB Error' $APP/console.log | tail -1 | cut -d: -f1); [ -n "$n" ] && sed -n "$((n-3)),$((n+6))p" $APP/console.log | cut -c1-300 | cat -A | cut -c1-300
+          echo "== arquivos de log/erro recentes no protheus_data"; find /opt/totvs/protheus12/protheus_data -mmin -60 -type f \( -iname '*.log' -o -iname 'error*' \) 2>/dev/null | head; f=$(find /opt/totvs/protheus12/protheus_data/system -mmin -60 -iname 'error*.log' 2>/dev/null | head -1); [ -n "$f" ] && tail -60 "$f" | grep -viE "$F"
+          echo "== Webapp responde localmente?"; curl -s -o /dev/null -w 'http %{http_code} em %{time_total}s\n' http://127.0.0.1:8089/ ; curl -sk -o /dev/null -w 'externo http %{http_code}\n' https://protheus.primeerp.com.br/
+          echo "== Caddy: erros para o protheus (últimos)"; docker logs --since 40m vanguard-web-1 2>&1 | grep -i protheus | grep -iE 'error|websocket|502|504|timeout|EOF' | cut -c1-300 | tail -15
+          echo "== conexões abertas na 8089 e 1234"; ss -tnH state established '( sport = :8089 or sport = :1234 )' | wc -l
+          echo "== License (últimas)"; journalctl -u licenseVirtual --since '-25 min' --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|fatal|denied|refus|slot|usu|user' | tail -15
           REMOTO
