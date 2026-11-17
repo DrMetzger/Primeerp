@@ -1,0 +1,33 @@
+# SÓ LEITURA: confere se o token do agente está salvo no banco e se a API
+# publicada tem a rota. Não imprime o hash nem senha.
+name: VM - conferir token do agente
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-conferir-token.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir token
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          echo "== containers"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub
+          echo "== hash do token no banco (só presença e tamanho)"
+          docker exec primehub-db sh -lc 'mariadb -uprimehub -p"$MARIADB_PASSWORD" primehub -N -e "SELECT chave, CHAR_LENGTH(valor) AS tam, DATE_FORMAT(COALESCE(atualizado_em, criado_em), \"%Y-%m-%d %H:%i\") FROM configuracoes WHERE chave IN (\"agente_token_hash\",\"ia_chamados_motor\",\"ia_chamados_usuario_id\")"' 2>&1 | grep -viE 'password|warning'
+          echo "== a API publicada tem a rota do token?"
+          docker exec primehub-api sh -lc 'grep -c "agente_token_hash" /app/index.mjs; grep -c "/api/agente/token" /app/index.mjs' 2>&1
+          echo "== o proxy manda o cabeçalho? (o container vê o header que chega)"
+          docker exec primehub-api sh -lc 'wc -c < /app/index.mjs' 2>&1
+          REMOTO
