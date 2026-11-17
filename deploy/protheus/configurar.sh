@@ -62,30 +62,69 @@ if [ -n "$WTAR" ]; then
 fi
 sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
-ini() { local sec=$1 k=$2 v=$3
-  grep -q "^\[$sec\]" $INI || printf '\n[%s]\n' "$sec" >> $INI
-  if awk -v s="[$sec]" -v k="$k" 'BEGIN{IGNORECASE=1} $0==s{f=1;next} /^\[/{f=0} f && tolower($0) ~ "^"tolower(k)"=" {e=1} END{exit !e}' $INI; then
-    awk -v s="[$sec]" -v k="$k" -v v="$v" 'BEGIN{IGNORECASE=1} $0==s{f=1;print;next} /^\[/{f=0} f && tolower($0) ~ "^"tolower(k)"=" {print k"="v;next} {print}' $INI > $INI.tmp && mv $INI.tmp $INI
-  else
-    awk -v s="[$sec]" -v k="$k" -v v="$v" '{print} $0==s{print k"="v}' $INI > $INI.tmp && mv $INI.tmp $INI
-  fi; }
-# Ambiente se chama PRIMEERP (pedido do Kleber), não "environment".
-if grep -qi '^\[environment\]' $INI && ! grep -qi '^\[PRIMEERP\]' $INI; then
-  sed -i 's/^\[environment\]$/[PRIMEERP]/I' $INI
+# appserver.ini escrito inteiro, no modelo da PrimeERP (orientação TOTVS):
+# só o ambiente PRIMEERP, banco pelo DBAccess/PostgreSQL, sem CTREE
+# (o AppServer 26 não tem mais esse driver: arquivos locais em SQLITE).
+[ -f $INI.instalador ] || cp -f $INI $INI.instalador
+cat > $INI.novo <<'APPINI'
+[PRIMEERP]
+SourcePath=/opt/totvs/protheus12/protheus/apo/
+RPOCustom=/opt/totvs/protheus12/protheus/apo/custom.rpo
+RootPath=/opt/totvs/protheus12/protheus_data
+StartPath=/system/
+x2_path=
+RpoDb=top
+RpoLanguage=multi
+RpoVersion=120
+LocalFiles=SQLITE
+Trace=0
+localdbextension=.dtc
+StartSysInDB=1
+TopMemoMega=1
+TopDataBase=POSTGRES
+TopAlias=protheus
+TopServer=localhost
+TopPort=7890
+
+[DBAccess]
+PROTHEUSONLY=0
+
+[Drivers]
+Active=TCP
+MULTIPROTOCOLPORT=1
+MULTIPROTOCOLPORTSECURE=0
+
+[TCP]
+TYPE=TCPIP
+Port=1234
+
+[Service]
+Name=totvsappserver
+DisplayName=TOTVS | APPSERVER PRIMEERP
+
+[LICENSECLIENT]
+server=localhost
+port=5555
+
+[GENERAL]
+consolelog=1
+MaxStringSize=30
+MaxQuerySize=65536
+APP_ENVIRONMENT=PRIMEERP
+buildkillusers=1
+
+[WEBAPP]
+Port=8089
+
+[WebApp/webapp]
+MPP=
+APPINI
+cmp -s $INI.novo $INI || cp -f $INI.novo $INI
+rm -f $INI.novo
+# DBAccess com o mesmo MaxStringSize do AppServer.
+if grep -qi '^MAXSTRINGSIZE=' $DBA/dbaccess.ini && ! grep -qi '^MAXSTRINGSIZE=30$' $DBA/dbaccess.ini; then
+  sed -i 's/^MAXSTRINGSIZE=.*/MAXSTRINGSIZE=30/I' $DBA/dbaccess.ini && systemctl restart totvsdbaccess && echo "DBAccess: MaxStringSize=30"
 fi
-ini PRIMEERP DBDataBase POSTGRES
-ini PRIMEERP DBServer localhost
-ini PRIMEERP DBAlias protheus
-ini PRIMEERP DBPort 7890
-ini General MAXSTRINGSIZE 10
-ini General ConsoleLog 1
-ini DBAccess Database POSTGRES
-ini DBAccess Server localhost
-ini DBAccess Alias protheus
-ini DBAccess Port 7890
-# Um AppServer só (sem balanceamento): sem a seção LockServer (com ela, o build 26.3 recusa subir).
-awk 'BEGIN{d=0} /^\[/{d=(toupper($0)=="[LOCKSERVER]")} !d' $INI > $INI.tmp && mv $INI.tmp $INI
-echo "LockServer no ini: $(grep -ci '^\[lockserver\]' $INI) seção(ões)"
 grep -viE 'password|senha' $INI | grep -v '^\s*$' | head -60
 
 echo "== 3/4 serviço do AppServer (limite 2 GB)"
