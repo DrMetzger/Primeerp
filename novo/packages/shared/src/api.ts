@@ -294,3 +294,7 @@ export interface PainelVm {
   versoes: VersoesProtheus;
   agora: string;
 }
+
+/** Tarefa da VM (pipeline): cada ação do painel vira etapas acompanhadas ao vivo. */
+export interface EtapaVm { nome: string; estado: 'pendente' | 'rodando' | 'ok' | 'erro' | 'pulada'; duracao: number | null; detalhe: string }
+export interface TarefaVm { id: string; titulo: string; quem: string; estado: 'rodando' | 'ok' | 'erro'; inicio: number; fim: number | null; duracao: number; etapas: EtapaVm[] }

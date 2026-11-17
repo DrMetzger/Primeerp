@@ -28,8 +28,23 @@ systemctl restart totvsdbaccess; sleep 5
 echo "totvsdbaccess: $(systemctl is-active totvsdbaccess)"
 journalctl -u totvsdbaccess -n 12 --no-pager 2>/dev/null | grep -iE 'error|erro|fail|connect|postgres|license' | grep -viE 'senha|password' | tail -8 || true
 
-echo "== 2/4 AppServer 26.3.0.1 + ambiente no DBAccess"
-if [ ! -f $APP/.build-26.3.0.1 ]; then
+ALVO=$(grep -m1 '^APPSERVER_ALVO=' "$(dirname "$0")/versoes.conf" 2>/dev/null | cut -d= -f2)
+ALVO=${ALVO:-instalador}
+FORCAR=0
+echo "== 2/4 AppServer ($ALVO) + ambiente no DBAccess"
+ORIG=$(ls -d $APP.original-* 2>/dev/null | sort | head -1)
+if [ "$ALVO" = "instalador" ] && [ ! -f $APP/.build-instalador ] && [ -n "$ORIG" ]; then
+  # Volta o par AppServer+Webapp do instalador (mantém o appserver.ini atual).
+  cp -f $APP/appserver.ini /tmp/appserver.ini.manter
+  find $ORIG -mindepth 1 -maxdepth 1 ! -name 'appserver.ini' -exec cp -rf {} $APP/ \;
+  cp -f /tmp/appserver.ini.manter $APP/appserver.ini
+  rm -f $APP/.build-26.3.0.1 $APP/.webapp-*; touch $APP/.build-instalador
+  echo "AppServer e Webapp do instalador restaurados (combinam com o RPO de 06/10/2025)"
+  FORCAR=1
+fi
+if [ "$ALVO" = "26.3.0.1" ] && [ ! -f $APP/.build-26.3.0.1 ]; then
+  rm -f $APP/.build-instalador
+  FORCAR=1
   cp -a $APP $APP.original-$(date +%Y%m%d)
   TMPA=$(mktemp -d)
   tar -xzf "$(ls $BASE/instaladores/*APPSERVER*LINUX*.TAR.GZ | head -1)" -C $TMPA
@@ -43,7 +58,7 @@ INI=$APP/appserver.ini
 ANTES=$(md5sum $INI $APP/appsrvlinux $APP/webapp.so /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
 # Webapp (SmartClient HTML) do mesmo nível do AppServer 26.x, quando estiver nos instaladores.
 WTAR=$(ls $BASE/instaladores/*SMARTCLIENT_WEBAPP*LINUX*.TAR.GZ 2>/dev/null | sort | tail -1)
-if [ -n "$WTAR" ]; then
+if [ -n "$WTAR" ] && [ "$ALVO" = "26.3.0.1" ]; then
   WVER=$(basename "$WTAR" | grep -oE 'WEBAPP_[0-9.]+' | cut -d_ -f2 | sed 's/\.$//')
   if [ ! -f $APP/.webapp-$WVER ]; then
     echo "--- Webapp $WVER: conteúdo do pacote"; tar -tzf "$WTAR" | head -20
@@ -151,7 +166,7 @@ UNIT
 systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1
 DEPOIS=$(md5sum $INI $APP/appsrvlinux $APP/webapp.so /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
 # Só reinicia se algo mudou (ou se estiver parado): o log do AppServer fica guardado para diagnóstico.
-if [ "$ANTES" != "$DEPOIS" ] || ! systemctl is-active -q totvsappserver; then
+if [ "$FORCAR" = 1 ] || [ "$ANTES" != "$DEPOIS" ] || ! systemctl is-active -q totvsappserver; then
   echo "AppServer: configuração mudou, reiniciando"
   systemctl stop totvsappserver; sleep 3; pkill -f "$APP/appsrvlinux" || true; sleep 2
   cp -f $APP/console.log $APP/console.anterior.log 2>/dev/null || true

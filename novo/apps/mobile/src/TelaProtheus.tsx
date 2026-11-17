@@ -1,4 +1,4 @@
-import type { PainelVm, ServicoVm } from '@primehub/shared';
+import type { PainelVm, ServicoVm, TarefaVm } from '@primehub/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { api } from './api';
@@ -21,13 +21,23 @@ export function TelaProtheus() {
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
   const [log, setLog] = useState<{ nome: string; linhas: string[] | null } | null>(null);
   const [atualizando, setAtualizando] = useState(false);
+  const [tarefas, setTarefas] = useState<TarefaVm[]>([]);
+  const rodando = tarefas.some((t) => t.estado === 'rodando');
+  const carregarTarefas = useCallback(() => api<{ tarefas: TarefaVm[] }>('/api/vm/tarefas').then((r) => setTarefas(r.tarefas)).catch(() => undefined), []);
+  useEffect(() => { void carregarTarefas(); }, [carregarTarefas]);
   const carregar = useCallback(() => api<PainelVm>('/api/vm/servicos').then((x) => { setD(x); setErro(''); }).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Não consegui falar com a VM.')).finally(() => setAtualizando(false)), []);
   useEffect(() => { void carregar(); const t = setInterval(() => void carregar(), 15_000); return () => clearInterval(t); }, [carregar]);
+  useEffect(() => {
+    if (!rodando) return;
+    const t = setInterval(() => { void carregarTarefas(); void carregar(); }, 1500);
+    return () => clearInterval(t);
+  }, [rodando, carregarTarefas, carregar]);
 
-  async function agir(s: ServicoVm, acao: 'iniciar' | 'parar' | 'reiniciar') {
-    if (acao !== 'iniciar' && !(await confirmar(acao === 'parar' ? 'Parar' : 'Reiniciar', `${acao === 'parar' ? 'Parar' : 'Reiniciar'} o ${s.nome}?${s.critico ? ' O Protheus fica fora do ar enquanto isso.' : ''}`, acao === 'parar' ? 'Parar' : 'Reiniciar'))) return;
+  async function agir(s: { id: string; nome: string; critico: boolean }, acao: 'iniciar' | 'parar' | 'reiniciar') {
+    const todos = s.id === 'todos';
+    if (acao !== 'iniciar' && !(await confirmar(acao === 'parar' ? 'Parar' : 'Reiniciar', `${acao === 'parar' ? 'Parar' : 'Reiniciar'} ${todos ? 'TODOS os serviços do Protheus' : `o ${s.nome}`}?${s.critico ? ' O Protheus fica fora do ar enquanto isso.' : ''}`, acao === 'parar' ? 'Parar' : 'Reiniciar'))) return;
     setOcupado(`${s.id}:${acao}`); setAviso({ t: '', e: false });
-    try { const r = await api<{ mensagem: string }>(`/api/vm/servicos/${s.id}/${acao}`, { method: 'POST', body: '{}' }); setAviso({ t: r.mensagem, e: false }); await carregar(); }
+    try { const t = await api<TarefaVm>(`/api/vm/servicos/${s.id}/${acao}`, { method: 'POST', body: '{}' }); setTarefas((l) => [t, ...l.filter((x) => x.id !== t.id)]); }
     catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); }
     setOcupado('');
   }
@@ -59,6 +69,11 @@ export function TelaProtheus() {
               <View key={r} style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T style={{ color: tema.textoSuave, fontSize: 13 }}>{r}</T><T style={{ fontSize: 13, fontFamily: 'monospace' }}>{x}</T></View>
             ))}
             <BotaoGradiente titulo="↗ Abrir o Protheus" aoTocar={() => void Linking.openURL(v.webappUrl ?? 'https://protheus.primeerp.com.br')} />
+            <Acoes itens={[
+              ...(!noAr ? [{ rotulo: '⏻ Iniciar todos', aoTocar: () => { if (!rodando) void agir({ id: 'todos', nome: 'todos', critico: true }, 'iniciar'); } }] : []),
+              { rotulo: '↻ Reiniciar todos', aoTocar: () => { if (!rodando) void agir({ id: 'todos', nome: 'todos', critico: true }, 'reiniciar'); } },
+              { rotulo: '■ Parar todos', perigo: true, aoTocar: () => { if (!rodando) void agir({ id: 'todos', nome: 'todos', critico: true }, 'parar'); } },
+            ]} />
           </Cartao>
           <Cartao style={{ gap: 4 }}>
             <T style={{ fontSize: 13 }}>🧠 Memória: {(d.vm.memoriaUsadaMB / 1024).toFixed(1)} de {(d.vm.memoriaTotalMB / 1024).toFixed(1)} GB</T>
@@ -66,6 +81,21 @@ export function TelaProtheus() {
             <T style={{ fontSize: 13 }}>⚙️ Carga: {d.vm.carga[0]} ({d.vm.nucleos} núcleos)</T>
           </Cartao>
           <Aviso texto={aviso.t} erro={aviso.e} />
+          {tarefas.length > 0 && (
+            <Cartao style={{ gap: 8 }}>
+              <T style={{ fontWeight: '800' }}>🛠️ Pipeline da VM</T>
+              {tarefas.slice(0, 5).map((t, i) => (
+                <View key={t.id} style={{ gap: 4, paddingTop: i ? 8 : 0, borderTopWidth: i ? 1 : 0, borderTopColor: tema.borda }}>
+                  <T style={{ fontWeight: '700', fontSize: 14 }}>{t.estado === 'rodando' ? '⏳' : t.estado === 'ok' ? '✅' : '❌'} {t.titulo} <T style={{ fontSize: 12, color: tema.textoSuave }}>· {t.duracao.toFixed(0)} s · por {t.quem}</T></T>
+                  {(i === 0 || t.estado !== 'ok') && t.etapas.map((e, n) => (
+                    <T key={n} style={{ fontSize: 13, color: e.estado === 'erro' ? tema.perigo : e.estado === 'pendente' || e.estado === 'pulada' ? tema.textoSuave : tema.texto }}>
+                      {{ pendente: '○', rodando: '⟳', ok: '✓', erro: '✗', pulada: '–' }[e.estado]} {n + 1}. {e.nome}{e.duracao !== null ? ` · ${e.duracao.toFixed(1)} s` : ''}{e.detalhe ? `\n     ${e.detalhe}` : ''}
+                    </T>
+                  ))}
+                </View>
+              ))}
+            </Cartao>
+          )}
           {d.servicos.map((s) => {
             const ativo = s.estado === 'active';
             return (

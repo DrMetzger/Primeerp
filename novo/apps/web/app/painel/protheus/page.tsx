@@ -1,7 +1,7 @@
 'use client';
 
-import type { PainelVm, ServicoVm } from '@primehub/shared';
-import { Activity, Cpu, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync } from 'lucide-react';
+import type { PainelVm, ServicoVm, TarefaVm } from '@primehub/shared';
+import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { Esqueleto } from '@/components/esqueleto';
@@ -26,14 +26,26 @@ export default function PaginaProtheus() {
   const [ocupado, setOcupado] = useState('');
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
   const [log, setLog] = useState<{ nome: string; linhas: string[] | null } | null>(null);
+  const [tarefas, setTarefas] = useState<TarefaVm[]>([]);
+  const rodando = tarefas.some((t) => t.estado === 'rodando');
+
+  const carregarTarefas = useCallback(() => api<{ tarefas: TarefaVm[] }>('/api/vm/tarefas').then((r) => setTarefas(r.tarefas)).catch(() => undefined), []);
+  useEffect(() => { void carregarTarefas(); }, [carregarTarefas]);
+  // Enquanto tem tarefa rodando, acompanha de perto (pipeline ao vivo).
+  useEffect(() => {
+    if (!rodando) return;
+    const t = setInterval(() => { void carregarTarefas(); void carregar(); }, 1500);
+    return () => clearInterval(t);
+  }, [rodando, carregarTarefas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregar = useCallback(() => api<PainelVm>('/api/vm/servicos').then((x) => { setD(x); setErro(''); }).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Não consegui falar com a VM.')), []);
   useEffect(() => { void carregar(); const t = setInterval(() => void carregar(), 15_000); return () => clearInterval(t); }, [carregar]);
 
-  async function agir(s: ServicoVm, acao: 'iniciar' | 'parar' | 'reiniciar') {
-    if (acao !== 'iniciar' && !confirm(`${acao === 'parar' ? 'Parar' : 'Reiniciar'} o ${s.nome}?${s.critico ? ' O Protheus fica fora do ar enquanto isso.' : ''}`)) return;
+  async function agir(s: { id: string; nome: string; critico: boolean }, acao: 'iniciar' | 'parar' | 'reiniciar') {
+    const todos = s.id === 'todos';
+    if (acao !== 'iniciar' && !confirm(`${acao === 'parar' ? 'Parar' : 'Reiniciar'} ${todos ? 'TODOS os serviços do Protheus' : `o ${s.nome}`}?${s.critico ? ' O Protheus fica fora do ar enquanto isso.' : ''}`)) return;
     setOcupado(`${s.id}:${acao}`); setAviso({ t: '', e: false });
-    try { const r = await api<{ mensagem: string }>(`/api/vm/servicos/${s.id}/${acao}`, { method: 'POST', body: '{}' }); setAviso({ t: r.mensagem, e: false }); await carregar(); }
+    try { const t = await api<TarefaVm>(`/api/vm/servicos/${s.id}/${acao}`, { method: 'POST', body: '{}' }); setTarefas((l) => [t, ...l.filter((x) => x.id !== t.id)]); }
     catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); }
     setOcupado('');
   }
@@ -61,6 +73,11 @@ export default function PaginaProtheus() {
                 <span className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold ${todosNoAr ? 'bg-sucesso/15 text-sucesso' : 'bg-perigo/15 text-perigo'}`}>
                   <span className={`h-2.5 w-2.5 rounded-full ${todosNoAr ? 'bg-sucesso' : 'bg-perigo'} animate-pulse`} aria-hidden="true" />{todosNoAr ? 'Tudo no ar' : 'Atenção'}
                 </span>
+                <div className="flex flex-wrap gap-2">
+                  {!todosNoAr && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'iniciar')} className="text-sucesso"><Power size={16} aria-hidden="true" /> Iniciar todos</BotaoSecundario>}
+                  <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> Reiniciar todos</BotaoSecundario>
+                  <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'parar')} className="text-perigo"><PowerOff size={16} aria-hidden="true" /> Parar todos</BotaoSecundario>
+                </div>
                 <a href={v.webappUrl ?? 'https://protheus.primeerp.com.br'} target="_blank" rel="noopener noreferrer" className="gradiente-marca toque inline-flex items-center gap-2 rounded-xl px-4 font-semibold text-white shadow"><ExternalLink size={18} aria-hidden="true" /> Abrir o Protheus</a>
               </div>
               <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -81,6 +98,7 @@ export default function PaginaProtheus() {
             </section>
 
             <Aviso texto={aviso.t} erro={aviso.e} />
+            <Pipeline tarefas={tarefas} />
             <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {d.servicos.map((s) => {
                 const I = ICONE[s.id] ?? Activity;
@@ -100,9 +118,9 @@ export default function PaginaProtheus() {
                       <div><dt className="text-suave">Portas</dt><dd className="flex flex-wrap gap-1">{s.portas.map((p) => <span key={p.porta} className={`rounded px-1.5 font-mono font-semibold ${p.aberta ? 'bg-sucesso/15 text-sucesso' : 'bg-perigo/15 text-perigo'}`}>{p.porta}</span>)}</dd></div>
                     </dl>
                     <div className="mt-auto flex flex-wrap gap-2">
-                      {!ativo && <BotaoSecundario disabled={!!ocupado} onClick={() => void agir(s, 'iniciar')} className="text-sucesso"><Play size={16} aria-hidden="true" /> {ocupado === `${s.id}:iniciar` ? 'Iniciando…' : 'Iniciar'}</BotaoSecundario>}
-                      {ativo && <BotaoSecundario disabled={!!ocupado} onClick={() => void agir(s, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> {ocupado === `${s.id}:reiniciar` ? 'Reiniciando…' : 'Reiniciar'}</BotaoSecundario>}
-                      {ativo && <BotaoSecundario disabled={!!ocupado} onClick={() => void agir(s, 'parar')} className="text-perigo"><Square size={16} aria-hidden="true" /> {ocupado === `${s.id}:parar` ? 'Parando…' : 'Parar'}</BotaoSecundario>}
+                      {!ativo && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir(s, 'iniciar')} className="text-sucesso"><Play size={16} aria-hidden="true" /> {ocupado === `${s.id}:iniciar` ? 'Iniciando…' : 'Iniciar'}</BotaoSecundario>}
+                      {ativo && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir(s, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> {ocupado === `${s.id}:reiniciar` ? 'Reiniciando…' : 'Reiniciar'}</BotaoSecundario>}
+                      {ativo && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir(s, 'parar')} className="text-perigo"><Square size={16} aria-hidden="true" /> {ocupado === `${s.id}:parar` ? 'Parando…' : 'Parar'}</BotaoSecundario>}
                       <BotaoSecundario onClick={() => void verLog(s)} className="ml-auto"><ScrollText size={16} aria-hidden="true" /> Log</BotaoSecundario>
                     </div>
                   </article>
@@ -120,5 +138,52 @@ export default function PaginaProtheus() {
         </Modal>
       )}
     </Casca>
+  );
+}
+
+const ICONE_ETAPA = { pendente: CircleDashed, rodando: Loader2, ok: CheckCircle2, erro: XCircle, pulada: MinusCircle } as const;
+const COR_ETAPA = { pendente: 'text-suave', rodando: 'text-primaria', ok: 'text-sucesso', erro: 'text-perigo', pulada: 'text-suave' } as const;
+const seg = (n: number | null) => (n === null ? '' : n < 60 ? `${n.toFixed(1)} s` : `${Math.floor(n / 60)} min ${Math.round(n % 60)} s`);
+
+/** Pipeline da VM: cada ação vira etapas acompanhadas ao vivo (como uma esteira de CI). */
+function Pipeline({ tarefas }: { tarefas: TarefaVm[] }) {
+  const [abertas, setAbertas] = useState<Record<string, boolean>>({});
+  if (!tarefas.length) return null;
+  return (
+    <section className="space-y-2 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
+      <h2 className="flex items-center gap-2 font-bold text-texto"><Activity size={18} className="text-primaria" aria-hidden="true" /> Pipeline da VM</h2>
+      <ul className="space-y-2">
+        {tarefas.slice(0, 8).map((t, i) => {
+          const aberta = abertas[t.id] ?? (i === 0 || t.estado !== 'ok');
+          const feitas = t.etapas.filter((e) => e.estado === 'ok').length;
+          const I = t.estado === 'rodando' ? Loader2 : t.estado === 'ok' ? CheckCircle2 : XCircle;
+          return (
+            <li key={t.id} className="rounded-2xl border border-borda bg-superficie-alta/40">
+              <button type="button" onClick={() => setAbertas({ ...abertas, [t.id]: !aberta })} className="flex w-full items-center gap-3 px-3 py-2 text-left" aria-expanded={aberta}>
+                <I size={18} className={`${t.estado === 'rodando' ? 'animate-spin text-primaria' : t.estado === 'ok' ? 'text-sucesso' : 'text-perigo'}`} aria-hidden="true" />
+                <span className="min-w-0 flex-1"><span className="font-semibold text-texto">{t.titulo}</span><span className="ml-2 text-xs text-suave">por {t.quem} · {new Date(t.inicio * 1000).toLocaleTimeString('pt-BR')}</span></span>
+                <span className="text-xs font-semibold text-suave">{feitas}/{t.etapas.length} · {seg(t.duracao)}</span>
+              </button>
+              <div className="mx-3 h-1.5 overflow-hidden rounded-full bg-superficie-alta"><div className={`h-1.5 rounded-full transition-all ${t.estado === 'erro' ? 'bg-perigo' : 'bg-sucesso'}`} style={{ width: `${Math.round((feitas / Math.max(1, t.etapas.length)) * 100)}%` }} /></div>
+              {aberta && (
+                <ol className="space-y-1 px-3 py-2">
+                  {t.etapas.map((e, n) => {
+                    const IE = ICONE_ETAPA[e.estado];
+                    return (
+                      <li key={n} className="flex items-center gap-2 text-sm">
+                        <IE size={16} className={`${COR_ETAPA[e.estado]} ${e.estado === 'rodando' ? 'animate-spin' : ''}`} aria-hidden="true" />
+                        <span className={`flex-1 ${e.estado === 'pendente' || e.estado === 'pulada' ? 'text-suave' : 'text-texto'}`}>{n + 1}. {e.nome}</span>
+                        {e.detalhe && <span className={`truncate text-xs ${e.estado === 'erro' ? 'text-perigo' : 'text-suave'}`} title={e.detalhe}>{e.detalhe}</span>}
+                        <span className="w-16 text-right font-mono text-xs text-suave">{seg(e.duracao)}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

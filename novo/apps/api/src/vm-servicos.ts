@@ -11,7 +11,7 @@ const SOCKET = process.env.VM_AGENTE_SOCKET ?? '/run/primehub/servicos.sock';
 export const podePainelVm = (u: UsuarioLogado) => u.tipo === 'equipe' && ['admin', 'diretor', 'ceo'].includes(u.perfil ?? '');
 
 export class ErroVm extends Error {
-  constructor(message: string, readonly status: 400 | 403 | 404 | 500 | 503 = 500) { super(message); }
+  constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 500 | 503 = 500) { super(message); }
 }
 
 export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string): Promise<T> {
@@ -23,7 +23,7 @@ export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string
       res.on('end', () => {
         try {
           const j = JSON.parse(dados) as T & { erro?: string };
-          if ((res.statusCode ?? 500) >= 400) falha(new ErroVm(j.erro ?? 'O agente da VM recusou.', (res.statusCode === 404 ? 404 : res.statusCode === 400 ? 400 : 500)));
+          if ((res.statusCode ?? 500) >= 400) falha(new ErroVm(j.erro ?? 'O agente da VM recusou.', (res.statusCode === 404 ? 404 : res.statusCode === 400 ? 400 : res.statusCode === 409 ? 409 : 500)));
           else ok(j);
         } catch { falha(new ErroVm('Resposta inválida do agente da VM.')); }
       });

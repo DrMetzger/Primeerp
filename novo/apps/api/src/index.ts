@@ -221,6 +221,12 @@ app.post('/api/vm/servicos/:id/:acao', exigirLogin('equipe'), (c) => vmResp(c, (
   console.log(`painel VM: ${u.nome} (#${u.id}) -> ${acao} ${id}`);
   return agente('POST', `/servicos/${id}/${acao}`, `${u.nome} #${u.id}`);
 }));
+app.get('/api/vm/tarefas', exigirLogin('equipe'), (c) => vmResp(c, () => agente('GET', '/tarefas')));
+app.get('/api/vm/tarefas/:id', exigirLogin('equipe'), (c) => vmResp(c, () => {
+  const id = c.req.param('id');
+  if (!/^[a-f0-9]{12}$/.test(id)) throw new ErroVm('Tarefa inválida.', 400);
+  return agente('GET', `/tarefas/${id}`);
+}));
 /** Versão do Protheus para o menu (qualquer pessoa da equipe vê). */
 app.get('/api/vm/protheus/versao', exigirLogin('equipe'), async (c) => {
   try { return c.json(await agente('GET', '/versoes')); } catch { return c.json({}); }
