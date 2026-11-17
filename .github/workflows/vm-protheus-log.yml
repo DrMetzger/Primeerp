@@ -34,4 +34,16 @@ jobs:
           echo "== Caddy: erros para o protheus (últimos)"; docker logs --since 40m vanguard-web-1 2>&1 | grep -i protheus | grep -iE 'error|websocket|502|504|timeout|EOF' | cut -c1-300 | tail -15
           echo "== conexões abertas na 8089 e 1234"; ss -tnH state established '( sport = :8089 or sport = :1234 )' | wc -l
           echo "== License (últimas)"; journalctl -u licenseVirtual --since '-25 min' --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|fatal|denied|refus|slot|usu|user' | tail -15
+          echo "== threads SIGACFG presas: em que estão esperando (só leitura de /proc)"
+          PID=$(systemctl show totvsappserver -p MainPID --value)
+          for t in $(grep -E 'Starting Program' $APP/console.log | tail -6 | grep -oE 'Thread [0-9]+' | awk '{print $2}'); do
+            d=/proc/$PID/task/$t
+            if [ -d $d ]; then
+              sc=$(cat $d/syscall 2>/dev/null); fd=$(printf '%d' $(echo $sc | awk '{print $2}') 2>/dev/null)
+              alvo=$(readlink /proc/$PID/fd/$fd 2>/dev/null); ino=$(echo $alvo | grep -oE '[0-9]+')
+              peer=$( [ -n "$ino" ] && ss -tnpH 2>/dev/null | grep -F "ino:$ino" ; [ -n "$ino" ] && ss -tneH | grep -w "ino:$ino" | awk '{print $3" -> "$4}')
+              echo "thread $t VIVA: estado $(awk '/State/{print $2}' $d/status) wchan=$(cat $d/wchan) syscall=$(echo $sc | awk '{print $1}') fd=$fd ($alvo) conexão: $peer"
+            else echo "thread $t: já terminou"; fi
+          done
+          echo "== conexões do AppServer por porta de destino"; ss -tnpH state established 2>/dev/null | grep "pid=$PID," | awk '{print $4}' | sed 's/.*://' | sort | uniq -c
           REMOTO
