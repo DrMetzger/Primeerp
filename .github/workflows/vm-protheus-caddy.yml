@@ -1,0 +1,32 @@
+# Ajusta o Caddy do protheus.primeerp.com.br (tela branca no login 12.1.2510).
+# Não reinicia o AppServer; volta a configuração anterior se o Caddy recusar.
+name: VM - Caddy do Protheus
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/protheus/caddy-protheus.sh
+      - .github/workflows/vm-protheus-caddy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Caddy do Protheus
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/protheus/caddy-protheus.sh "$USER_VM@$VM_IP:/tmp/caddy-protheus.sh"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash /tmp/caddy-protheus.sh'
