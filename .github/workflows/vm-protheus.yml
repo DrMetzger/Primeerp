@@ -9,6 +9,7 @@ on:
       - deploy/protheus/**
       - '!deploy/protheus/trocar-appserver.sh'
       - '!deploy/protheus/versoes.conf'
+      - '!deploy/protheus/webapp-https.sh'
       - .github/workflows/vm-protheus.yml
 
 permissions:

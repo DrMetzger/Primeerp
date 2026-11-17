@@ -41,7 +41,7 @@ def portas_abertas():
 
 
 def status(s, abertas=None):
-    _, out, _ = sh("systemctl", "show", s["unidade"], "-p", "ActiveState,SubState,ActiveEnterTimestamp,MemoryCurrent,CPUUsageNSec,MainPID,NRestarts,UnitFileState")
+    _, out, _ = sh("systemctl", "show", s["unidade"], "-p", "ActiveState,SubState,ActiveEnterTimestamp,MemoryCurrent,MemoryMax,CPUUsageNSec,MainPID,NRestarts,UnitFileState")
     p = dict(l.split("=", 1) for l in out.strip().splitlines() if "=" in l)
     mem = p.get("MemoryCurrent", "")
     cpu = p.get("CPUUsageNSec", "")
@@ -51,6 +51,7 @@ def status(s, abertas=None):
         "estado": p.get("ActiveState", "unknown"), "subestado": p.get("SubState", ""),
         "desde": p.get("ActiveEnterTimestamp", "") or None,
         "memoriaMB": round(int(mem) / 1048576, 1) if mem.isdigit() else None,
+        "limiteMB": round(int(p["MemoryMax"]) / 1048576) if p.get("MemoryMax", "").isdigit() else None,
         "cpuSegundos": round(int(cpu) / 1e9, 1) if cpu.isdigit() else None,
         "pid": int(p["MainPID"]) if p.get("MainPID", "0").isdigit() and p.get("MainPID") != "0" else None,
         "reinicios": int(p["NRestarts"]) if p.get("NRestarts", "").isdigit() else 0,

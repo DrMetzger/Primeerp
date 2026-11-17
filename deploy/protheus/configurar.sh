@@ -20,11 +20,14 @@ if [ ! -f $DBA/.build-26.1.0.1 ]; then
   chmod +x $DBA/dbaccess64 $DBA/dbaccesscfg 2>/dev/null || true
   touch $DBA/.build-26.1.0.1
 fi
+DBAINI_ANTES=$(md5sum $DBA/dbaccess.ini 2>/dev/null)
 ODBCLIB=$(ls /usr/lib/x86_64-linux-gnu/libodbc.so* 2>/dev/null | sort | head -1)
 ( cd $DBA && ./dbaccesscfg -u protheus -p "$PG_SENHA" -d postgres -a protheus -c "$ODBCLIB" -g "LicenseServer=localhost;LicensePort=5555;ByYouProc=0" 2>&1 | grep -viE 'senha|password|-p ' | tail -5 ) || true
 grep -q '^\[POSTGRES\]' $DBA/dbaccess.ini && echo "dbaccess.ini: seção POSTGRES ok" || echo "AVISO: dbaccess.ini sem POSTGRES"
 grep -viE 'password|senha' $DBA/dbaccess.ini | grep -v '^\s*$'
-systemctl restart totvsdbaccess; sleep 5
+if [ "$DBAINI_ANTES" != "$(md5sum $DBA/dbaccess.ini 2>/dev/null)" ] || ! systemctl is-active -q totvsdbaccess; then
+  systemctl restart totvsdbaccess; sleep 5; echo "DBAccess reiniciado (configuração mudou)"
+else echo "DBAccess sem mudança: não reiniciado"; fi
 echo "totvsdbaccess: $(systemctl is-active totvsdbaccess)"
 journalctl -u totvsdbaccess -n 12 --no-pager 2>/dev/null | grep -iE 'error|erro|fail|connect|postgres|license' | grep -viE 'senha|password' | tail -8 || true
 
@@ -75,6 +78,11 @@ if [ -n "$WTAR" ] && [ "$ALVO" = "26.3.0.1" ]; then
     rm -rf $TMPW
   fi
 fi
+# Webapp em https (o Caddy repassa em https): sem isso o login do 2510 abre
+# um quadro em http dentro da página https e o navegador bloqueia (tela branca).
+mkdir -p $BASE/ssl
+[ -f $BASE/ssl/webapp.key ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=protheus.primeerp.com.br" -keyout $BASE/ssl/webapp.key -out $BASE/ssl/webapp.crt 2>/dev/null
+chmod 600 $BASE/ssl/webapp.key
 sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
 # appserver.ini escrito inteiro, no modelo da PrimeERP (orientação TOTVS):
@@ -133,6 +141,17 @@ Port=8089
 
 [WebApp/webapp]
 MPP=
+
+[SSLConfigure]
+CertificateServer=/opt/totvs/ssl/webapp.crt
+KeyServer=/opt/totvs/ssl/webapp.key
+PassPhrase=
+SSL2=0
+SSL3=0
+TLS1_0=0
+TLS1_1=0
+TLS1_2=1
+Verbose=0
 APPINI
 cmp -s $INI.novo $INI || cp -f $INI.novo $INI
 rm -f $INI.novo
@@ -142,7 +161,7 @@ if grep -qi '^MAXSTRINGSIZE=' $DBA/dbaccess.ini && ! grep -qi '^MAXSTRINGSIZE=30
 fi
 grep -viE 'password|senha' $INI | grep -v '^\s*$' | head -60
 
-echo "== 3/4 serviço do AppServer (limite 2 GB)"
+echo "== 3/4 serviço do AppServer (limite 3 GB)"
 cat > /etc/systemd/system/totvsappserver.service <<UNIT
 [Unit]
 Description=TOTVS AppServer Protheus 12.1.2510 (desenvolvimento)
@@ -157,7 +176,7 @@ Restart=on-failure
 RestartSec=15
 LimitNOFILE=65536
 LimitSTACK=1048576
-MemoryMax=2G
+MemoryMax=3G
 TasksMax=4096
 
 [Install]

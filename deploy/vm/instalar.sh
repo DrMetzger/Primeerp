@@ -98,7 +98,13 @@ GW=$(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Gatewa
 if [ -n "$GW" ] && [ -f /etc/systemd/system/totvsappserver.service ]; then
   BLOCO="${BLOCO%'# <<< Prime Hub'}protheus.primeerp.com.br {
 	encode gzip
-	reverse_proxy ${GW}:8089
+	# o Webapp responde em https (certificado próprio): assim o login do
+	# Protheus monta os endereços internos em https
+	reverse_proxy https://${GW}:8089 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
 }
 # <<< Prime Hub"
 fi
