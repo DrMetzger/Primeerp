@@ -26,6 +26,6 @@ jobs:
           F='senha|password|psw|passwd|secret|token'
           echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
           echo "== chaves de configuração no webapp.so"
-          strings -n 4 $APP/webapp.so | grep -iE 'ssl|cert|protect|secure|https|\.pem|\.crt|keyfile|passphrase|origin|proxy' | grep -viE 'openssl_|^_|libssl|libcrypto|BIO_|EVP_|SSL_[A-Z]|X509|PEM_' | sort -u | head -80
+          grep -aoE '[[:print:]]{4,}' $APP/webapp.so | grep -iE 'ssl|cert|protect|secure|https|\.pem|\.crt|keyfile|passphrase|origin|proxy' | grep -viE 'openssl_|^_|libssl|libcrypto|BIO_|EVP_|SSL_[A-Z]|X509|PEM_' | sort -u | head -80
           echo "== webapp.log"; tail -20 $APP/webapp.log 2>/dev/null
           REMOTO
