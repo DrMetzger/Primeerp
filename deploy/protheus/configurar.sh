@@ -59,9 +59,9 @@ ini DBAccess Database POSTGRES
 ini DBAccess Server localhost
 ini DBAccess Alias protheus
 ini DBAccess Port 7890
-# Um AppServer só (sem balanceamento): LockServer desligado; ligado com IP inválido derrubava o AppServer.
-ini LOCKSERVER Enable 0
-ini LOCKSERVER server 127.0.0.1
+# Um AppServer só (sem balanceamento): sem a seção LockServer (com ela, o build 26.3 recusa subir).
+awk 'BEGIN{d=0} /^\[/{d=(toupper($0)=="[LOCKSERVER]")} !d' $INI > $INI.tmp && mv $INI.tmp $INI
+echo "LockServer no ini: $(grep -ci '^\[lockserver\]' $INI) seção(ões)"
 grep -viE 'password|senha' $INI | grep -v '^\s*$' | head -60
 
 echo "== 3/4 serviço do AppServer (limite 2 GB)"
