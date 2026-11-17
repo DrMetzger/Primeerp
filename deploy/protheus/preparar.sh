@@ -106,4 +106,15 @@ echo "pastas: $(ST config folders list | tr '\n' ' ')"
 echo "pastas recebidas do PC:"; ls -1 $BASE/sync 2>/dev/null | sed 's/^/  - /'
 echo "arquivos recebidos: $(find $BASE/sync -type f 2>/dev/null | wc -l) ($(du -sh $BASE/sync 2>/dev/null | cut -f1))"
 echo "instaladores TOTVS encontrados:"; find $BASE/sync $BASE/instaladores -maxdepth 3 -type f \( -iname '*APPSERVER*LINUX*' -o -iname '*DBACCESS*LINUX*' -o -iname '*TOTVSLICENSE*LINUX*' -o -iname '*INSTALADOR_PROTHEUS_LINUX*' \) 2>/dev/null | sed 's|.*/|  - |' || true
+echo "fontes na VM: FONTES_PROTHEUS=$(find $BASE/fontes/FONTES_PROTHEUS -type f | wc -l) arquivos ($(du -sh $BASE/fontes/FONTES_PROTHEUS | cut -f1)) | Fontes_2510=$(find $BASE/fontes/Fontes_2510 -type f | wc -l) arquivos ($(du -sh $BASE/fontes/Fontes_2510 | cut -f1))"
+echo "== instaladores (tamanho e o que tem dentro)"
+for f in $BASE/instaladores/*; do
+  [ -f "$f" ] || continue
+  echo "--- $(basename "$f") ($(du -h "$f" | cut -f1))"
+  case "${f,,}" in
+    *.zip) unzip -l "$f" 2>/dev/null | awk 'NR>3 {print $4}' | grep -v '^$' | awk -F/ '{print $1"/"$2}' | sort -u | head -25 ;;
+    *.tar.gz|*.tgz) tar -tzf "$f" 2>/dev/null | awk -F/ '{print $1"/"$2}' | sort -u | head -25 ;;
+  esac
+done
+echo "== disco agora"; df -h / | tail -1
 echo "== memória agora"; free -h | head -2
