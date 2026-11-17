@@ -91,8 +91,19 @@ suporte.primeerp.com.br {
 	}
 }
 # <<< Prime Hub'
+# Protheus (base de desenvolvimento): Webapp do AppServer na própria VM, pela
+# rede do Caddy (o firewall só libera a 8089 para essa rede). Só entra se o
+# AppServer estiver instalado.
+GW=$(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
+if [ -n "$GW" ] && [ -f /etc/systemd/system/totvsappserver.service ]; then
+  BLOCO="${BLOCO%'# <<< Prime Hub'}protheus.primeerp.com.br {
+	encode gzip
+	reverse_proxy ${GW}:8089
+}
+# <<< Prime Hub"
+fi
 # Remove o bloco anterior (formato antigo ou novo) e põe o atual.
-tirar_bloco() { awk '/^# (>>> )?Prime Hub/{s=1;next} s==1{if(/^}/)s=2;next} s==2&&/^# <<< Prime Hub/{s=0;next} {s=0;print}' "$1"; }
+tirar_bloco() { awk '/^# (>>> )?Prime Hub/{s=1;next} s==1{if(/^# <<< Prime Hub/)s=0; else if(/^}/)s=2; next} s==2&&/^# <<< Prime Hub/{s=0;next} s==2&&/^protheus\.primeerp\.com\.br \{/{s=1;next} {s=0;print}' "$1"; }
 docker cp vanguard-web-1:/etc/caddy/Caddyfile migracao/Caddyfile.atual
 [ -f migracao/Caddyfile.original ] || tirar_bloco migracao/Caddyfile.atual > migracao/Caddyfile.original
 { tirar_bloco migracao/Caddyfile.atual; echo; echo "$BLOCO"; } > migracao/Caddyfile.novo
