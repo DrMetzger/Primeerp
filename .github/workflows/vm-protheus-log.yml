@@ -25,29 +25,7 @@ jobs:
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           F='senha|password|psw|passwd|secret|token'
           echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
-          echo "== AppServer: tudo dos últimos 25 min (sem ruído de memória)"
-          desde=$(date -d '-25 min' '+%Y-%m-%dT%H:%M')
-          awk -v d="$desde" 'substr($0,1,16)>=d{p=1} p' $APP/console.log 2>/dev/null | grep -vE 'Memory|memory|\[\.|\[=|PID +MEM|tot +lim|Percentages|Turn on|^\s*$|^ *[0-9]+\*? +[0-9]+ +[0-9]+d' | grep -viE "$F" | cut -c1-260 | tail -150
-          echo "== FWMenuToDB cru (linhas seguintes)"; n=$(grep -n 'FWMenuToDB Error' $APP/console.log | tail -1 | cut -d: -f1); [ -n "$n" ] && sed -n "$((n-3)),$((n+6))p" $APP/console.log | cut -c1-300 | cat -A | cut -c1-300
-          echo "== arquivos de log/erro recentes no protheus_data"; find /opt/totvs/protheus12/protheus_data -mmin -60 -type f \( -iname '*.log' -o -iname 'error*' \) 2>/dev/null | head; f=$(find /opt/totvs/protheus12/protheus_data/system -mmin -60 -iname 'error*.log' 2>/dev/null | head -1); [ -n "$f" ] && tail -60 "$f" | grep -viE "$F"
-          echo "== Webapp responde localmente?"; curl -s -o /dev/null -w 'http %{http_code} em %{time_total}s\n' http://127.0.0.1:8089/ ; curl -sk -o /dev/null -w 'externo http %{http_code}\n' https://protheus.primeerp.com.br/
-          echo "== Caddy: erros para o protheus (últimos)"; docker logs --since 40m vanguard-web-1 2>&1 | grep -i protheus | grep -iE 'error|websocket|502|504|timeout|EOF' | cut -c1-300 | tail -15
-          echo "== conexões abertas na 8089 e 1234"; ss -tnH state established '( sport = :8089 or sport = :1234 )' | wc -l
-          echo "== License (últimas)"; journalctl -u licenseVirtual --since '-25 min' --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|fatal|denied|refus|slot|usu|user' | tail -15
-          echo "== threads SIGACFG presas: em que estão esperando (só leitura de /proc)"
-          PID=$(systemctl show totvsappserver -p MainPID --value)
-          for t in $(grep -E 'Starting Program' $APP/console.log | tail -6 | grep -oE 'Thread [0-9]+' | awk '{print $2}'); do
-            d=/proc/$PID/task/$t
-            if [ -d $d ]; then
-              sc=$(cat $d/syscall 2>/dev/null); fd=$(printf '%d' $(echo $sc | awk '{print $2}') 2>/dev/null)
-              alvo=$(readlink /proc/$PID/fd/$fd 2>/dev/null); ino=$(echo $alvo | grep -oE '[0-9]+')
-              peer=$( [ -n "$ino" ] && ss -tnpH 2>/dev/null | grep -F "ino:$ino" ; [ -n "$ino" ] && ss -tneH | grep -w "ino:$ino" | awk '{print $3" -> "$4}')
-              echo "thread $t VIVA: estado $(awk '/State/{print $2}' $d/status) wchan=$(cat $d/wchan) syscall=$(echo $sc | awk '{print $1}') fd=$fd ($alvo) conexão: $peer"
-            else echo "thread $t: já terminou"; fi
-          done
-          echo "== conexões do AppServer por porta de destino"; ss -tnpH state established 2>/dev/null | grep "pid=$PID," | awk '{print $4}' | sed 's/.*://' | sort | uniq -c
-          echo "== instaladores"; ls -la /opt/totvs/instaladores/
-          for f in /opt/totvs/instaladores/*24.3.1.9*; do echo "--- $f"; tar -tzf "$f" 2>/dev/null | head -40; done
-          for f in /opt/totvs/instaladores/*REPOSITORIO*; do echo "--- $f"; file "$f"; [ -d "$f" ] && ls -laR "$f" | head; unzip -l "$f" 2>/dev/null | head; done
-          echo "== apo atual"; ls -la /opt/totvs/protheus12/protheus/apo/; ls /opt/totvs/protheus12/protheus/bin/appserver/ | head -60
+          echo "== chaves de configuração no webapp.so"
+          strings -n 4 $APP/webapp.so | grep -iE 'ssl|cert|protect|secure|https|\.pem|\.crt|keyfile|passphrase|origin|proxy' | grep -viE 'openssl_|^_|libssl|libcrypto|BIO_|EVP_|SSL_[A-Z]|X509|PEM_' | sort -u | head -80
+          echo "== webapp.log"; tail -20 $APP/webapp.log 2>/dev/null
           REMOTO
