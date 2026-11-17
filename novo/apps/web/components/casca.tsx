@@ -1,9 +1,10 @@
 'use client';
 
-import type { UsuarioLogado } from '@primehub/shared';
+import type { UsuarioLogado, VersoesProtheus } from '@primehub/shared';
+import { api } from '@/lib/api';
 import {
   BarChart3, BookOpen, Bot, CalendarDays, Code2, LayoutDashboard, LifeBuoy, LogOut, Menu,
-  Settings, UserCircle, Users, UsersRound, Video, X, Smartphone, type LucideIcon } from 'lucide-react';
+  Settings, UserCircle, Users, UsersRound, Video, X, Smartphone, type LucideIcon, Server } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { JanelaApk } from './cartao-apk';
 import { type ReactNode, useEffect, useState } from 'react';
@@ -12,7 +13,7 @@ import { sair, usuarioSalvo } from '@/lib/sessao';
 import { TemaBotao } from './tema-botao';
 
 /** Item do menu: tudo é tela do sistema novo. */
-interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; cor?: string; somenteAdmin?: boolean }
+interface ItemMenu { rotulo: string; icone: LucideIcon; href: string; cor?: string; somenteAdmin?: boolean; sub?: 'protheus' }
 
 const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Dashboard', icone: LayoutDashboard, cor: '#6366f1', href: '/painel' },
@@ -23,6 +24,7 @@ const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Relatórios', icone: BarChart3, cor: '#84cc16', href: '/painel/relatorios', somenteAdmin: true },
   { rotulo: 'Fontes ADVPL', icone: Code2, cor: '#06b6d4', href: '/painel/fontes', somenteAdmin: true },
   { rotulo: 'Usuários', icone: UsersRound, cor: '#8b5cf6', href: '/painel/usuarios', somenteAdmin: true },
+  { rotulo: 'Protheus', icone: Server, cor: '#0284c7', href: '/painel/protheus', somenteAdmin: true, sub: 'protheus' },
   { rotulo: 'Configurações', icone: Settings, cor: '#94a3b8', href: '/painel/configuracoes', somenteAdmin: true },
   { rotulo: 'Manual', icone: BookOpen, cor: '#f59e0b', href: '/painel/manual' },
 ];
@@ -49,6 +51,11 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
   const [usuario, setUsuario] = useState<UsuarioLogado | null>(null);
   const [aberto, setAberto] = useState(false);
   const [janelaApp, setJanelaApp] = useState(false);
+  const [versaoProtheus, setVersaoProtheus] = useState('');
+  useEffect(() => {
+    if (tipo !== 'equipe') return;
+    api<VersoesProtheus>('/api/vm/protheus/versao').then((v) => { if (v.protheus) setVersaoProtheus(`${v.protheus}${v.appserver ? ` · AppServer ${v.appserver}` : ''}`); }).catch(() => undefined);
+  }, [tipo]);
   const [abrindo, setAbrindo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -97,7 +104,10 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition" style={ativo ? { background: 'rgb(255 255 255 / .2)', color: '#fff' } : { background: `color-mix(in oklab, ${item.cor ?? '#0ea5e9'} 16%, transparent)`, color: item.cor ?? '#0ea5e9' }}>
                   <Icone size={18} aria-hidden="true" />
                 </span>
-                <span className="flex-1">{item.rotulo}</span>
+                <span className="min-w-0 flex-1 leading-tight">
+                  {item.rotulo}
+                  {item.sub === 'protheus' && versaoProtheus && <span className={`block truncate text-[11px] font-normal ${ativo ? 'text-white/75' : 'text-suave'}`}>{versaoProtheus}</span>}
+                </span>
                 {abrindo === item.rotulo && !ativo ? <span className="text-xs">abrindo…</span> : null}
               </button>
             </li>

@@ -12,7 +12,7 @@ echo "== 1/6 código"
 rm -rf app.novo && mkdir app.novo && tar -xzf /tmp/primehub-app.tar.gz -C app.novo && rm -f /tmp/primehub-app.tar.gz
 rm -rf app.anterior && { [ -d app ] && mv app app.anterior || true; } && mv app.novo app
 cp app/deploy/vm/docker-compose.yml docker-compose.yml
-mkdir -p dados/uploads dados/avatars dados/mysql migracao
+mkdir -p dados/uploads dados/avatars dados/mysql migracao /run/primehub
 
 if [ ! -f .env ]; then
   echo "== .env novo (senhas do banco geradas aqui, nunca saem da VM)"

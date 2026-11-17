@@ -1,4 +1,4 @@
-import { corStatus, rotuloStatus, type ChamadoResumo, type Dashboard, type ItemRanking, type Kpi, type ListaChamados, type StatusChamado, type UsuarioLogado } from '@primehub/shared';
+import { corStatus, rotuloStatus, type ChamadoResumo, type Dashboard, type ItemRanking, type Kpi, type ListaChamados, type StatusChamado, type UsuarioLogado, type VersoesProtheus } from '@primehub/shared';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useState } from 'react';
 import { BackHandler, FlatList, Image, Pressable, RefreshControl, ScrollView, TextInput, View } from 'react-native';
@@ -10,6 +10,7 @@ import { FundoCircuito } from './FundoCircuito';
 import { useTema } from './tema';
 import { TelaAgenda } from './TelaAgenda';
 import { TelaMesaAgente } from './MesaAgente';
+import { TelaProtheus } from './TelaProtheus';
 import { FotoPessoa, TelaCalendario, TelaConfiguracoes, TelaEquipeCliente, TelaFontes, TelaFontesCliente, TelaPerfil, TelaUsuarios, TelaVideoaulas } from './Telas2';
 import { TelaSetor } from './TelaSetor';
 import { LogoEmpresa, TelaChamado, TelaCliente, TelaClientes, TelaNovoChamado, TelaRelatorios } from './Telas';
@@ -17,9 +18,9 @@ import { Cartao, T } from './ui';
 
 type Aba = 'painel' | 'chamados' | 'assistente' | 'menu';
 type Tela = { tipo: 'chamado'; id: number } | { tipo: 'cliente'; id: number } | { tipo: 'setor'; clienteId: number; id: number } | { tipo: 'novoChamado'; clienteId?: number }
-  | { tipo: 'clientes' | 'agente' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
+  | { tipo: 'clientes' | 'agente' | 'protheus' | 'relatorios' | 'agenda' | 'fontes' | 'usuarios' | 'configuracoes' | 'perfil' | 'calendario' | 'videoaulas' | 'fontesCliente' | 'equipeCliente' };
 const TITULOS_TELA: Record<string, string> = {
-  clientes: 'Clientes', agente: 'Mesa do agente', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
+  clientes: 'Clientes', agente: 'Mesa do agente', protheus: 'Protheus 2510', relatorios: 'Relatórios', agenda: 'Agenda', fontes: 'Fontes ADVPL', usuarios: 'Usuários', configuracoes: 'Configurações',
   perfil: 'Meu perfil', calendario: 'Calendário', videoaulas: 'Videoaulas', fontesCliente: 'Fontes ADVPL', equipeCliente: 'Minha equipe',
 };
 const ADMIN = ['admin', 'diretor', 'ceo'];
@@ -250,7 +251,7 @@ function Chamados({ equipe, aoAbrirChamado, aoNovo }: { equipe: boolean; aoAbrir
 
 // ---------------------------------------------------------------- Menu
 
-interface ItemMenu { icone: string; rotulo: string; destino?: string; acao?: () => void; perigo?: boolean }
+interface ItemMenu { icone: string; rotulo: string; sub?: string; destino?: string; acao?: () => void; perigo?: boolean }
 
 function Menu({ itens }: { itens: ItemMenu[] }) {
   const { tema } = useTema();
@@ -264,6 +265,7 @@ function Menu({ itens }: { itens: ItemMenu[] }) {
             <T style={{ fontSize: 24 }}>{i.icone}</T>
           </View>
           <T style={{ fontWeight: '700', fontSize: 16, color: i.perigo ? tema.perigo : tema.texto }}>{i.rotulo}</T>
+          {!!i.sub && <T style={{ fontSize: 11, color: tema.textoSuave }} numberOfLines={1}>{i.sub}</T>}
         </Pressable>
       ))}
     </ScrollView>
@@ -299,10 +301,15 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
 
   const modulo = (icone: string, rotulo: string, tipo: Exclude<Tela, { id: number }>['tipo']): ItemMenu => ({ icone, rotulo, acao: () => ir({ tipo } as Tela) });
   const admin = ADMIN.includes(usuario.perfil ?? '');
+  const [versaoProtheus, setVersaoProtheus] = useState('');
+  useEffect(() => {
+    if (!admin) return;
+    api<VersoesProtheus>('/api/vm/protheus/versao').then((v) => { if (v.protheus) setVersaoProtheus(`${v.protheus}${v.appserver ? ` · AppServer ${v.appserver}` : ''}`); }).catch(() => undefined);
+  }, [admin]);
   const itensMenu: ItemMenu[] = equipe ? [
     modulo('👥', 'Clientes', 'clientes'),
     modulo('🤖', 'Mesa do agente', 'agente'),
-    ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), modulo('⚙️', 'Configurações', 'configuracoes')] : []),
+    ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), { ...modulo('🖥️', 'Protheus', 'protheus'), sub: versaoProtheus }, modulo('⚙️', 'Configurações', 'configuracoes')] : []),
     modulo('👤', 'Meu perfil', 'perfil'),
     { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
     { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
@@ -380,6 +387,7 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
           {atual.tipo === 'setor' && <TelaSetor key={atual.id} clienteId={atual.clienteId} setorId={atual.id} CartaoChamado={CartaoChamado} aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'clientes' && <TelaClientes aoAbrir={(id) => ir({ tipo: 'cliente', id })} />}
           {atual.tipo === 'relatorios' && <TelaRelatorios />}
+          {atual.tipo === 'protheus' && <TelaProtheus />}
           {atual.tipo === 'agente' && <TelaMesaAgente aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'agenda' && <TelaAgenda aoAbrirChamado={(id) => ir({ tipo: 'chamado', id })} />}
           {atual.tipo === 'fontes' && <TelaFontes />}

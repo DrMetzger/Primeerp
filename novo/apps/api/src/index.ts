@@ -15,6 +15,7 @@ import { config } from './config';
 import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
+import { agente, ErroVm, podePainelVm } from './vm-servicos';
 import { anexoAgente, aprovarExecucao, arquivoDaProposta, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
@@ -199,6 +200,31 @@ app.post('/api/agente/token', exigirLogin('equipe'), (c) => agenteResp(c, async 
   if (!['admin', 'diretor', 'ceo'].includes(c.get('usuario').perfil ?? '')) throw new ErroAgente('Só administrador gera o token do agente.', 403);
   return { token: await gerarTokenAgente() };
 }));
+
+// ---------------------------------------------------------------- Painel da VM (Protheus e serviços)
+const vmResp = async (c: Context, f: () => Promise<unknown>) => {
+  if (!podePainelVm(c.get('usuario'))) return c.json({ erro: 'Só administrador, diretor ou CEO.' }, 403);
+  try { return c.json((await f()) as object); }
+  catch (e) { return c.json({ erro: e instanceof Error ? e.message : 'Falhou.' }, e instanceof ErroVm ? e.status : 500); }
+};
+const SERVICO_VM = /^[a-z]{3,20}$/;
+app.get('/api/vm/servicos', exigirLogin('equipe'), (c) => vmResp(c, () => agente('GET', '/servicos')));
+app.get('/api/vm/servicos/:id/log', exigirLogin('equipe'), (c) => vmResp(c, () => {
+  const id = c.req.param('id');
+  if (!SERVICO_VM.test(id)) throw new ErroVm('Serviço inválido.', 400);
+  return agente('GET', `/servicos/${id}/log`);
+}));
+app.post('/api/vm/servicos/:id/:acao', exigirLogin('equipe'), (c) => vmResp(c, () => {
+  const { id, acao } = c.req.param();
+  if (!SERVICO_VM.test(id) || !['iniciar', 'parar', 'reiniciar'].includes(acao)) throw new ErroVm('Ação inválida.', 400);
+  const u = c.get('usuario');
+  console.log(`painel VM: ${u.nome} (#${u.id}) -> ${acao} ${id}`);
+  return agente('POST', `/servicos/${id}/${acao}`, `${u.nome} #${u.id}`);
+}));
+/** Versão do Protheus para o menu (qualquer pessoa da equipe vê). */
+app.get('/api/vm/protheus/versao', exigirLogin('equipe'), async (c) => {
+  try { return c.json(await agente('GET', '/versoes')); } catch { return c.json({}); }
+});
 
 app.get('/api/chamados/:id', exigirLogin(), async (c) => {
   const d = await detalharChamado(c.get('usuario'), Number(c.req.param('id')));

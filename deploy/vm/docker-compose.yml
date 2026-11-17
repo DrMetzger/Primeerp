@@ -61,6 +61,7 @@ services:
     volumes:
       - ./dados/downloads:/downloads:ro
       - ./dados/uploads:/uploads
+      - /run/primehub:/run/primehub
     depends_on:
       db:
         condition: service_healthy

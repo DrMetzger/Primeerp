@@ -277,3 +277,20 @@ export const TIPOS_CASO_AGENTE: Record<string, string> = {
   resposta: 'Resposta / orientação', duvida: 'Dúvida (falta informação)', correcao: 'Correção', melhoria: 'Melhoria',
   proposta: 'Proposta / orçamento', desenvolvimento: 'Desenvolvimento', outro: 'Outro',
 };
+
+/** Painel de serviços da VM (Protheus e companhia). */
+export interface ServicoVm {
+  id: string; nome: string; descricao: string; unidade: string; critico: boolean;
+  estado: string; subestado: string; desde: string | null; memoriaMB: number | null; cpuSegundos: number | null;
+  pid: number | null; reinicios: number; iniciaComVM: boolean; portas: { porta: number; aberta: boolean }[];
+}
+export interface VersoesProtheus {
+  protheus?: string; rpoData?: string; appserver?: string; appserverBuild?: string; webapp?: string; dbaccess?: string;
+  licenseServer?: string; postgresql?: string; ambiente?: string; webappUrl?: string;
+}
+export interface PainelVm {
+  servicos: ServicoVm[];
+  vm: { memoriaTotalMB: number; memoriaUsadaMB: number; memoriaDisponivelMB: number; discoTotalGB: number; discoUsadoGB: number; carga: number[]; nucleos: number };
+  versoes: VersoesProtheus;
+  agora: string;
+}
