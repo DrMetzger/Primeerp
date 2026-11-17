@@ -14,6 +14,7 @@ on:
       - .github/workflows/vm-protheus.yml
       - .github/workflows/vm-recursos.yml
       - .github/workflows/vm-memoria-appserver.yml
+      - .github/workflows/vm-protheus-log.yml
       - deploy/protheus/**
       - novo/apps/mobile/**
       - .github/workflows/android-apk.yml

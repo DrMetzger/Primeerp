@@ -1,0 +1,35 @@
+# SÓ LEITURA: fim do log do AppServer, DBAccess e License (não reinicia nada).
+name: VM - log do Protheus (só leitura)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-protheus-log.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ler logs
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          F='senha|password|psw|passwd|secret|token'
+          echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
+          echo "== AppServer: erros e avisos (últimas 2h)"
+          grep -nE 'ERROR|FATAL|THREAD ERROR|error|Erro|Invalid|not found|denied|refused|License|LICENSE|Licen' $APP/console.log 2>/dev/null | grep -viE "$F|Server not found, ID|Monitored Calls|Hub|SSL values" | tail -40
+          echo "== AppServer: últimas 60 linhas"
+          tail -400 $APP/console.log 2>/dev/null | grep -vE 'Memory|memory|\[\.|\[=|PID +MEM|tot +lim|Percentages|Turn on|^\s*$|^ *[0-9]+\*? +[0-9]+ +[0-9]+d' | grep -viE "$F" | tail -60
+          echo "== DBAccess (últimas)"; journalctl -u totvsdbaccess -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | tail -20
+          echo "== License (últimas)"; journalctl -u licenseVirtual -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|licen|slot|denied|refus|client' | tail -15
+          echo "== tabelas no banco protheus"; sudo -u postgres psql -d protheus -tAc "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null
+          REMOTO
