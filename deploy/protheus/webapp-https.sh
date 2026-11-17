@@ -27,6 +27,8 @@ TLS1_2=1
 Verbose=0
 INI
 fi
+# a porta multiprotocolo (1234) é a que aceita SSL e também serve o Webapp
+sed -i 's/^MULTIPROTOCOLPORTSECURE=.*/MULTIPROTOCOLPORTSECURE=1/I' $INI
 subir() {
   systemctl stop totvsappserver; sleep 3; pkill -f "$APP/appsrvlinux" || true; sleep 1
   cp -f $APP/console.log $APP/console.anterior.log 2>/dev/null || true; : > $APP/console.log
@@ -35,8 +37,14 @@ subir() {
 }
 echo "== reiniciando o AppServer com SSL"
 subir
-if curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8089/ | grep -q 200; then
-  echo "Webapp respondendo em https na 8089"
+PORTA=""
+for pt in 8089 1234; do
+  c=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:$pt/)
+  echo "https na $pt: $c"; [ -z "$PORTA" ] && [ "$c" = 200 ] && PORTA=$pt
+done
+if [ -n "$PORTA" ]; then
+  echo "Webapp respondendo em https na $PORTA"
+  ufw allow from 172.18.0.0/16 to any port $PORTA proto tcp >/dev/null 2>&1 || true
 else
   echo "ERRO: Webapp não respondeu em https; desfazendo"
   grep -aiE 'ssl|certif|error' $APP/console.log | head -10
@@ -47,12 +55,13 @@ fi
 echo "== Caddy repassando em https"
 GW=$(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Gateway}}')
 docker cp vanguard-web-1:/etc/caddy/Caddyfile /tmp/Caddyfile.atual
-python3 - "$GW" <<'PY'
+python3 - "$GW" "$PORTA" <<'PY'
 import sys, re
 gw = sys.argv[1]
 s = open('/tmp/Caddyfile.atual').read()
-novo = f"reverse_proxy https://{gw}:8089 {{\n\t\ttransport http {{\n\t\t\ttls_insecure_skip_verify\n\t\t}}\n\t}}"
-s2 = s.replace(f"reverse_proxy {gw}:8089", novo, 1)
+porta = sys.argv[2]
+novo = f"reverse_proxy https://{gw}:{porta} {{\n\t\ttransport http {{\n\t\t\ttls_insecure_skip_verify\n\t\t}}\n\t}}"
+s2 = re.sub(r"reverse_proxy (https://)?" + re.escape(gw) + r":\d+( \{\n\t\ttransport http \{\n\t\t\ttls_insecure_skip_verify\n\t\t\}\n\t\})?", lambda m: novo, s, count=1)
 open('/tmp/Caddyfile.novo', 'w').write(s2)
 print("bloco trocado" if s2 != s else "bloco já estava em https")
 PY
