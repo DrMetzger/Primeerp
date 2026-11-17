@@ -116,5 +116,22 @@ for f in $BASE/instaladores/*; do
     *.tar.gz|*.tgz) tar -tzf "$f" 2>/dev/null | awk -F/ '{print $1"/"$2}' | sort -u | head -25 ;;
   esac
 done
+echo "== por dentro dos instaladores Java"
+TMPI=$(mktemp -d)
+Z=$(ls $BASE/instaladores/*INSTALADOR_PROTHEUS_LINUX*.ZIP 2>/dev/null | head -1)
+if [ -n "$Z" ]; then
+  unzip -p "$Z" installer_lnx.jar > $TMPI/p.jar 2>/dev/null || true
+  unzip -p "$Z" TOTVS12.sh 2>/dev/null | grep -vE 'senha|password' | head -30
+  echo "--- installer_lnx.jar: arquivos grandes e pastas"
+  unzip -l $TMPI/p.jar 2>/dev/null | awk 'NR>3 && $1>5000000 {printf "%8d MB  %s\n", $1/1048576, $4}' | head -40
+  unzip -l $TMPI/p.jar 2>/dev/null | awk 'NR>3 {print $4}' | awk -F/ 'NF>1 {print $1"/"$2"/"$3}' | sort -u | head -60
+  unzip -l $TMPI/p.jar 2>/dev/null | grep -iE '\.rpo|systemload|sxsbra|menus|webapp|\.xnu|install.*properties|auto.*xml' | awk '{print $1, $4}' | head -30
+fi
+L=$(ls $BASE/instaladores/*TOTVSLICENSE*LINUX*.TAR.GZ 2>/dev/null | head -1)
+if [ -n "$L" ]; then
+  echo "--- License Server"; tar -tzf "$L" | head -40
+fi
+rm -rf $TMPI
+echo "Java: $(java -version 2>&1 | head -1 || echo 'não instalado')"
 echo "== disco agora"; df -h / | tail -1
 echo "== memória agora"; free -h | head -2
