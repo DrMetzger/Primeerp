@@ -16,7 +16,7 @@ echo "== 2/5 usuário e pastas"
 id totvs >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/totvs --shell /bin/bash totvs
 mkdir -p $BASE/fontes/FONTES_PROTHEUS $BASE/fontes/Fontes_2510 $BASE/instaladores $BASE/protheus
 chown -R totvs:totvs $BASE
-[ -f $BASE/.env ] || { umask 077; printf 'PG_SENHA=%s\n' "$(openssl rand -hex 24)" > $BASE/.env; }
+[ -f $BASE/.env ] || ( umask 077; printf 'PG_SENHA=%s\n' "$(openssl rand -hex 24)" > $BASE/.env )
 chmod 600 $BASE/.env; chown root:root $BASE/.env
 set -a; . $BASE/.env; set +a
 
@@ -34,6 +34,7 @@ work_mem = 8MB
 maintenance_work_mem = 128MB
 standard_conforming_strings = on
 CONFPG
+chmod 644 $CONF; chown postgres:postgres $CONF
 systemctl enable postgresql >/dev/null 2>&1
 pg_ctlcluster "$PGV" main restart 2>&1 || true
 for i in $(seq 1 30); do pg_isready -q && break; sleep 2; done
