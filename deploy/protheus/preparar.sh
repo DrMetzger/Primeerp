@@ -34,8 +34,15 @@ work_mem = 8MB
 maintenance_work_mem = 128MB
 standard_conforming_strings = on
 CONFPG
-systemctl enable --now postgresql >/dev/null 2>&1
-systemctl restart postgresql
+systemctl enable postgresql >/dev/null 2>&1
+pg_ctlcluster "$PGV" main restart 2>&1 || true
+for i in $(seq 1 30); do pg_isready -q && break; sleep 2; done
+if ! pg_isready -q; then
+  echo "ERRO: PostgreSQL não subiu"; pg_lsclusters
+  tail -20 "/var/log/postgresql/postgresql-$PGV-main.log" 2>/dev/null | grep -viE 'password|senha'
+  exit 1
+fi
+echo "PostgreSQL $PGV no ar"
 sudo -u postgres psql -qtAc "SELECT 1 FROM pg_roles WHERE rolname='protheus'" | grep -q 1 \
   || sudo -u postgres psql -qc "CREATE ROLE protheus LOGIN PASSWORD '${PG_SENHA}'"
 sudo -u postgres psql -qc "ALTER ROLE protheus PASSWORD '${PG_SENHA}'" >/dev/null
