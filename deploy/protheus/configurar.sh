@@ -40,7 +40,7 @@ if [ ! -f $APP/.build-26.3.0.1 ]; then
   touch $APP/.build-26.3.0.1
 fi
 INI=$APP/appserver.ini
-sed -i '1s/^\xEF\xBB\xBF//' $INI
+sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
 ini() { local sec=$1 k=$2 v=$3
   grep -q "^\[$sec\]" $INI || printf '\n[%s]\n' "$sec" >> $INI
@@ -86,7 +86,8 @@ UNIT
 systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1; systemctl restart totvsappserver
 sleep 20
 echo "totvsappserver: $(systemctl is-active totvsappserver)"
-journalctl -u totvsappserver -n 40 --no-pager 2>/dev/null | grep -viE 'senha|password' | grep -iE 'build|error|erro|fail|license|dbaccess|webapp|http|listen|port|ready|started|rpo' | tail -20 || true
+echo "--- log do serviço"; journalctl -u totvsappserver -n 40 --no-pager -o cat 2>/dev/null | grep -viE 'senha|password' | tail -30 || true
+echo "--- console.log"; ls -la $APP/*.log 2>/dev/null | head; tail -30 $APP/console.log 2>/dev/null | grep -viE 'senha|password' || true
 curl -s -o /dev/null -w "webapp local (8089): HTTP %{http_code}\n" --max-time 10 http://127.0.0.1:8089/ || echo "webapp local: sem resposta"
 
 echo "== 4/4 firewall: Webapp só para o Caddy local"
