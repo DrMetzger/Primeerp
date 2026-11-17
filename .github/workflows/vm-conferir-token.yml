@@ -22,12 +22,15 @@ jobs:
           SSHPASS: ${{ secrets.PSW_VM }}
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
-          echo "== containers"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub
-          echo "== hash do token no banco (só presença e tamanho)"
-          docker exec primehub-db sh -lc 'mariadb -uprimehub -p"$MARIADB_PASSWORD" primehub -N -e "SELECT chave, CHAR_LENGTH(valor) AS tam, DATE_FORMAT(COALESCE(atualizado_em, criado_em), \"%Y-%m-%d %H:%i\") FROM configuracoes WHERE chave IN (\"agente_token_hash\",\"ia_chamados_motor\",\"ia_chamados_usuario_id\")"' 2>&1 | grep -viE 'password|warning'
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO' || true
+          echo "INICIO"
+          echo "== containers"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub || echo "(sem primehub)"
+          echo "== token no banco (presenca e tamanho, sem o valor)"
+          docker exec primehub-db sh -lc 'mariadb -uprimehub -p"$MARIADB_PASSWORD" primehub -N -e "SELECT chave, CHAR_LENGTH(valor) FROM configuracoes WHERE chave IN (\"agente_token_hash\",\"ia_chamados_motor\")"' 2>&1 | grep -aviE 'password|insecure|warning' || echo "(query falhou)"
+          echo "== total de linhas na tabela configuracoes"
+          docker exec primehub-db sh -lc 'mariadb -uprimehub -p"$MARIADB_PASSWORD" primehub -N -e "SELECT COUNT(*) FROM configuracoes"' 2>&1 | grep -aviE 'password|insecure|warning' || echo "(query falhou)"
           echo "== a API publicada tem a rota do token?"
-          docker exec primehub-api sh -lc 'grep -c "agente_token_hash" /app/index.mjs; grep -c "/api/agente/token" /app/index.mjs' 2>&1
-          echo "== o proxy manda o cabeçalho? (o container vê o header que chega)"
-          docker exec primehub-api sh -lc 'wc -c < /app/index.mjs' 2>&1
+          docker exec primehub-api sh -lc 'grep -c "agente_token_hash" /app/index.mjs 2>/dev/null; grep -c "api/agente/token" /app/index.mjs 2>/dev/null' 2>&1 || echo "(grep falhou)"
+          echo "FIM"
           REMOTO
+          echo "passo concluido"
