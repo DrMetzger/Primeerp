@@ -25,7 +25,9 @@ jobs:
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           F='senha|password|psw|passwd|secret|token'
           echo "== serviços"; for u in totvsappserver totvsdbaccess licenseVirtual postgresql@16-main; do echo "$u: $(systemctl is-active $u) desde $(systemctl show $u -p ActiveEnterTimestamp --value) mem $(( $(systemctl show $u -p MemoryCurrent --value 2>/dev/null || echo 0) / 1048576 )) MB"; done
-          echo "== chaves de configuração no webapp.so"
-          grep -aoE '[[:print:]]{4,}' $APP/webapp.so | grep -iE 'ssl|cert|protect|secure|https|\.pem|\.crt|keyfile|passphrase|origin|proxy' | grep -viE 'openssl_|^_|libssl|libcrypto|BIO_|EVP_|SSL_[A-Z]|X509|PEM_' | sort -u | head -80
-          echo "== webapp.log"; tail -20 $APP/webapp.log 2>/dev/null
+          echo "== app-root no disco"; find / -xdev -type d \( -iname 'app-root' -o -iname 'preindex*' \) 2>/dev/null | head -20
+          for d in $(find / -xdev -type d -iname 'app-root' 2>/dev/null | head -3); do echo "--- $d"; ls -la $d | head -15; done
+          echo "== testes http locais"
+          for u in http://127.0.0.1:8089/app-root/ http://127.0.0.1:8089/app-root/preindex_env_primeerp/index.html http://127.0.0.1:1234/app-root/preindex_env_primeerp/index.html; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 $u || true)"; done
+          echo "== webapp.log"; tail -40 $APP/webapp.log 2>/dev/null
           REMOTO
