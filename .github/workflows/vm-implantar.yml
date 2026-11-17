@@ -11,6 +11,9 @@ on:
     paths-ignore:
       - docs/**
       - .github/workflows/vm-trocar-chave-cofre.yml
+      - .github/workflows/vm-protheus.yml
+      - .github/workflows/vm-recursos.yml
+      - deploy/protheus/**
       - novo/apps/mobile/**
       - .github/workflows/android-apk.yml
 

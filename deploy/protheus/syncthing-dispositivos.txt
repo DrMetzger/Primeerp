@@ -1,0 +1,2 @@
+# Dispositivos que podem sincronizar com a VM (ID do Syncthing + nome).
+# O ID não é segredo: sozinho ele não dá acesso a nada.

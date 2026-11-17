@@ -1,0 +1,34 @@
+# Protheus na VM (base de desenvolvimento): prepara/atualiza o ambiente.
+# O log é público: nunca imprime senha.
+name: VM - Protheus
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/protheus/**
+      - .github/workflows/vm-protheus.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar Protheus na VM
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/protheus.tgz -C deploy protheus
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/protheus.tgz "$USER_VM@$VM_IP:/tmp/protheus-deploy.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/protheus-deploy && mkdir -p /tmp/protheus-deploy && tar -xzf /tmp/protheus-deploy.tgz -C /tmp/protheus-deploy && bash /tmp/protheus-deploy/protheus/preparar.sh"'
