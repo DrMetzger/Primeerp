@@ -11,7 +11,7 @@ INI=$APP/appserver.ini
 mkdir -p $BASE/ssl
 [ -f $BASE/ssl/webapp.key ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=protheus.primeerp.com.br" -keyout $BASE/ssl/webapp.key -out $BASE/ssl/webapp.crt 2>/dev/null
 chmod 600 $BASE/ssl/webapp.key
-cp -f $INI $INI.antes-https
+grep -q '^\[SSLConfigure\]' $INI || cp -f $INI $INI.antes-https
 if ! grep -q '^\[SSLConfigure\]' $INI; then
   cat >> $INI <<INI
 
@@ -39,7 +39,7 @@ echo "== reiniciando o AppServer com SSL"
 subir
 PORTA=""
 for pt in 8089 1234; do
-  c=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:$pt/)
+  c=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:$pt/ || true)
   echo "https na $pt: $c"; [ -z "$PORTA" ] && [ "$c" = 200 ] && PORTA=$pt
 done
 if [ -n "$PORTA" ]; then
@@ -47,7 +47,7 @@ if [ -n "$PORTA" ]; then
   ufw allow from 172.18.0.0/16 to any port $PORTA proto tcp >/dev/null 2>&1 || true
 else
   echo "ERRO: Webapp não respondeu em https; desfazendo"
-  grep -aiE 'ssl|certif|error' $APP/console.log | head -10
+  grep -aiE 'ssl|certif|error|mpport|webapp' $APP/console.log | head -15
   cp -f $INI.antes-https $INI; subir
   echo "voltou ao http: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"; exit 1
 fi
