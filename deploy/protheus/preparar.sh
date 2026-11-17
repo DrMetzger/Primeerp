@@ -132,8 +132,9 @@ for par in "protheus:installer_lnx.jar" "license:installer.jar"; do
   if [ -s $TRAB/$nome-modelo.properties ]; then grep -viE 'senha|password' $TRAB/$nome-modelo.properties | head -60
   else echo "(sem modelo; saída do instalador:)"; grep -viE 'senha|password' $TRAB/$nome-saida.txt | head -25; fi
   echo "--- $nome: painéis do instalador"
-  unzip -l $TRAB/$nome/$jar 2>/dev/null | awk '{print $4}' | grep -E '^resources/|install\.xml|panelsOrder|userInputSpec' | head -20
-  unzip -p $TRAB/$nome/$jar resources/userInputSpec.xml 2>/dev/null | grep -oE '(variable|id)="[^"]+"' | sort -u | head -40
+  ( unzip -p $TRAB/$nome/$jar res/userInputSpec.xml 2>/dev/null | tr -s ' \t' ' ' | grep -E 'variable=|<choice|value=|set=|<spec|type=' | grep -viE 'senha|password' | head -80 ) || true
 done
+echo "--- License: script install (resumo)"
+( grep -vE '^\s*#|^\s*$' $TRAB/license/install | grep -viE 'senha|password' | head -60 ) || true
 echo "== disco agora"; df -h / | tail -1
 echo "== memória agora"; free -h | head -2
