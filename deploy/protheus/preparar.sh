@@ -79,6 +79,9 @@ if ! ST show system >/dev/null 2>&1; then
   echo "ERRO: Syncthing não respondeu"; systemctl --no-pager status syncthing@totvs | tail -15; ST show system 2>&1 | tail -3; exit 1
 fi
 ST config options relays-enabled set true 2>&1 | grep -v '^$' || true
+# Pastas que o PC autorizado compartilhar entram sozinhas aqui (com o nome que têm no PC).
+mkdir -p $BASE/sync && chown totvs:totvs $BASE/sync
+ST config defaults folder path set $BASE/sync 2>&1 | grep -v '^$' || true
 PASTAS=$(ST config folders list 2>&1 || true)
 for p in "fontes-proprios:FONTES_PROTHEUS:$BASE/fontes/FONTES_PROTHEUS" "fontes-2510:Fontes_2510:$BASE/fontes/Fontes_2510" "instaladores:instaladores:$BASE/instaladores"; do
   IFS=: read -r id rotulo caminho <<<"$p"
@@ -90,6 +93,7 @@ if [ -f "$LISTA" ]; then
   { grep -v '^#' "$LISTA" || true; } | while read -r dev nome; do
     [ -n "${dev:-}" ] || continue
     ST config devices list | grep -qx "$dev" || ST config devices add --device-id "$dev" --name "${nome:-PC}"
+    ST config devices "$dev" auto-accept-folders set true
     for id in fontes-proprios fontes-2510 instaladores; do
       ST config folders "$id" devices list | grep -qx "$dev" || ST config folders "$id" devices add --device-id "$dev"
     done
@@ -99,5 +103,7 @@ fi
 ufw allow 22000/tcp >/dev/null; ufw allow 22000/udp >/dev/null
 echo "ID da VM no Syncthing: $(ST show system | jq -r .myID)"
 echo "pastas: $(ST config folders list | tr '\n' ' ')"
-echo "arquivos já na VM: instaladores=$(find $BASE/instaladores -type f | wc -l) FONTES_PROTHEUS=$(find $BASE/fontes/FONTES_PROTHEUS -type f | wc -l) Fontes_2510=$(find $BASE/fontes/Fontes_2510 -type f | wc -l)"
+echo "pastas recebidas do PC:"; ls -1 $BASE/sync 2>/dev/null | sed 's/^/  - /'
+echo "arquivos recebidos: $(find $BASE/sync -type f 2>/dev/null | wc -l) ($(du -sh $BASE/sync 2>/dev/null | cut -f1))"
+echo "instaladores TOTVS encontrados:"; find $BASE/sync $BASE/instaladores -maxdepth 3 -type f \( -iname '*APPSERVER*LINUX*' -o -iname '*DBACCESS*LINUX*' -o -iname '*TOTVSLICENSE*LINUX*' -o -iname '*INSTALADOR_PROTHEUS_LINUX*' \) 2>/dev/null | sed 's|.*/|  - |' || true
 echo "== memória agora"; free -h | head -2

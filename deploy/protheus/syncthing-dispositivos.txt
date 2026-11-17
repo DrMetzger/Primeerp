@@ -1,2 +1,3 @@
 # Dispositivos que podem sincronizar com a VM (ID do Syncthing + nome).
 # O ID não é segredo: sozinho ele não dá acesso a nada.
+LKRNYYS-ZNIP6LU-SCKXMNZ-O2B367D-MVXWTBR-QGWC4ME-Y3MDHX6-NRKFPQZ DESKTOP-2IK32VA
