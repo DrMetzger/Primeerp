@@ -40,6 +40,7 @@ if [ ! -f $APP/.build-26.3.0.1 ]; then
   touch $APP/.build-26.3.0.1
 fi
 INI=$APP/appserver.ini
+ANTES=$(md5sum $INI $APP/appsrvlinux /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
 sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
 ini() { local sec=$1 k=$2 v=$3
@@ -90,10 +91,18 @@ TasksMax=4096
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1
-systemctl stop totvsappserver; sleep 3; pkill -f "$APP/appsrvlinux" || true; sleep 2
-: > $APP/console.log
-systemctl start totvsappserver
-sleep 30
+DEPOIS=$(md5sum $INI $APP/appsrvlinux /etc/systemd/system/totvsappserver.service 2>/dev/null | md5sum)
+# Só reinicia se algo mudou (ou se estiver parado): o log do AppServer fica guardado para diagnóstico.
+if [ "$ANTES" != "$DEPOIS" ] || ! systemctl is-active -q totvsappserver; then
+  echo "AppServer: configuração mudou, reiniciando"
+  systemctl stop totvsappserver; sleep 3; pkill -f "$APP/appsrvlinux" || true; sleep 2
+  cp -f $APP/console.log $APP/console.anterior.log 2>/dev/null || true
+  : > $APP/console.log
+  systemctl start totvsappserver
+  sleep 30
+else
+  echo "AppServer: nada mudou, segue rodando (sem reiniciar)"
+fi
 echo "totvsappserver: $(systemctl is-active totvsappserver)"
 echo "--- log do serviço"; journalctl -u totvsappserver -n 40 --no-pager -o cat 2>/dev/null | grep -viE 'senha|password' | tail -30 || true
 echo "--- console.log (início desta partida)"
