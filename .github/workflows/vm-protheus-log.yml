@@ -46,4 +46,8 @@ jobs:
             else echo "thread $t: já terminou"; fi
           done
           echo "== conexões do AppServer por porta de destino"; ss -tnpH state established 2>/dev/null | grep "pid=$PID," | awk '{print $4}' | sed 's/.*://' | sort | uniq -c
+          echo "== instaladores"; ls -la /opt/totvs/instaladores/
+          for f in /opt/totvs/instaladores/*24.3.1.9*; do echo "--- $f"; tar -tzf "$f" 2>/dev/null | head -40; done
+          for f in /opt/totvs/instaladores/*REPOSITORIO*; do echo "--- $f"; file "$f"; [ -d "$f" ] && ls -laR "$f" | head; unzip -l "$f" 2>/dev/null | head; done
+          echo "== apo atual"; ls -la /opt/totvs/protheus12/protheus/apo/; ls /opt/totvs/protheus12/protheus/bin/appserver/ | head -60
           REMOTO
