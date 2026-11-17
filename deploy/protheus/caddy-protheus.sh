@@ -17,7 +17,9 @@ bloco = f"""protheus.primeerp.com.br {{
 	encode gzip
 	header Content-Security-Policy "upgrade-insecure-requests"
 	handle /app-root/* {{
-		reverse_proxy {gw}:1234
+		reverse_proxy {gw}:1234 {{
+			header_up -Origin
+		}}
 	}}
 	handle {{
 		reverse_proxy {gw}:8089
