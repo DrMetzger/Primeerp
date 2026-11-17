@@ -7,6 +7,8 @@ on:
   push:
     paths:
       - deploy/protheus/**
+      - '!deploy/protheus/trocar-appserver.sh'
+      - '!deploy/protheus/versoes.conf'
       - .github/workflows/vm-protheus.yml
 
 permissions:

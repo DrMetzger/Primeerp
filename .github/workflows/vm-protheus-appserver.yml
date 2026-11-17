@@ -1,0 +1,34 @@
+# Troca o AppServer do Protheus (versoes.conf) e o RPO padrão, e sobe a pilha.
+# Só roda quando o script de troca ou a versão mudam. Não mexe no Prime Hub.
+name: VM - trocar AppServer do Protheus
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/protheus/trocar-appserver.sh
+      - deploy/protheus/versoes.conf
+      - .github/workflows/vm-protheus-appserver.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trocar AppServer e RPO
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/p.tgz -C deploy protheus/trocar-appserver.sh protheus/versoes.conf
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/p.tgz "$USER_VM@$VM_IP:/tmp/protheus-troca.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/protheus-troca && mkdir -p /tmp/protheus-troca && tar -xzf /tmp/protheus-troca.tgz -C /tmp/protheus-troca && bash /tmp/protheus-troca/protheus/trocar-appserver.sh"'
