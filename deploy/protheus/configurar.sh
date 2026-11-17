@@ -83,11 +83,16 @@ TasksMax=4096
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1; systemctl restart totvsappserver
-sleep 20
+systemctl daemon-reload; systemctl enable totvsappserver >/dev/null 2>&1
+systemctl stop totvsappserver; sleep 3; pkill -f "$APP/appsrvlinux" || true; sleep 2
+: > $APP/console.log
+systemctl start totvsappserver
+sleep 30
 echo "totvsappserver: $(systemctl is-active totvsappserver)"
 echo "--- log do serviço"; journalctl -u totvsappserver -n 40 --no-pager -o cat 2>/dev/null | grep -viE 'senha|password' | tail -30 || true
-echo "--- console.log"; ls -la $APP/*.log 2>/dev/null | head; tail -30 $APP/console.log 2>/dev/null | grep -viE 'senha|password' || true
+echo "--- console.log (início desta partida)"
+grep -vE 'Memory|memory|^\s*$|\[\.|\[=|PID +MEM|^ *[0-9]+\*? +[0-9]+ +[0-9]+d|tot +lim|Percentages|Turn on' $APP/console.log 2>/dev/null | grep -viE 'senha|password' | head -70 || true
+echo "--- erros"; grep -iE 'error|erro|fatal|invalid|cannot|unable|fail|abort|denied|not found|nao encontrad' $APP/console.log 2>/dev/null | grep -viE 'senha|password' | head -20 || true
 curl -s -o /dev/null -w "webapp local (8089): HTTP %{http_code}\n" --max-time 10 http://127.0.0.1:8089/ || echo "webapp local: sem resposta"
 
 echo "== 4/4 firewall: Webapp só para o Caddy local"
