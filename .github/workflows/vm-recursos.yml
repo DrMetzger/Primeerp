@@ -1,0 +1,37 @@
+# Conferência SÓ DE LEITURA dos recursos da VM (para decidir se cabe o
+# Protheus: AppServer + DBAccess + PostgreSQL). Não altera nada e não
+# imprime senha, chave nem conteúdo de arquivo (o log do Actions é público).
+name: VM - recursos
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/vm-recursos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir recursos
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$USER_VM@$VM_IP" 'sudo bash -s' <<'REMOTO'
+          echo "== sistema"; . /etc/os-release; echo "$PRETTY_NAME | kernel $(uname -r) | $(uname -m)"
+          echo "== CPU"; echo "núcleos: $(nproc) | $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)"; uptime
+          echo "== memória"; free -h
+          echo "== disco"; df -h -x tmpfs -x devtmpfs -x overlay | grep -v '^Filesystem' ; echo; du -sh /opt/* 2>/dev/null
+          echo "== containers (uso agora)"; docker stats --no-stream --format '{{.Name}}  CPU {{.CPUPerc}}  RAM {{.MemUsage}}'
+          echo "== portas abertas (só número e programa)"; ss -tlnH | awk '{print $4}' | sed 's/.*://' | sort -n | uniq | tr '\n' ' '; echo
+          echo "== firewall"; (ufw status 2>/dev/null | head -5) || echo "sem ufw"
+          echo "== docker"; docker version --format 'Docker {{.Server.Version}}' 2>/dev/null; docker compose version --short 2>/dev/null
+          echo "== PostgreSQL já instalado?"; (command -v psql && psql --version) || echo "não"
+          echo "== libs que o AppServer Linux costuma pedir"; for l in libssl.so.3 libcrypto.so.3 libodbc.so.2 libstdc++.so.6 libuuid.so.1; do printf '%s: ' "$l"; ldconfig -p | grep -q "$l" && echo sim || echo NÃO; done
+          REMOTO
