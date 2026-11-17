@@ -78,11 +78,6 @@ if [ -n "$WTAR" ] && [ "$ALVO" = "26.3.0.1" ]; then
     rm -rf $TMPW
   fi
 fi
-# Webapp em https (o Caddy repassa em https): sem isso o login do 2510 abre
-# um quadro em http dentro da página https e o navegador bloqueia (tela branca).
-mkdir -p $BASE/ssl
-[ -f $BASE/ssl/webapp.key ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=protheus.primeerp.com.br" -keyout $BASE/ssl/webapp.key -out $BASE/ssl/webapp.crt 2>/dev/null
-chmod 600 $BASE/ssl/webapp.key
 sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' $INI  # sem BOM e sem quebra de linha do Windows
 # chave=valor dentro de uma seção (cria a seção/chave se faltar)
 # appserver.ini escrito inteiro, no modelo da PrimeERP (orientação TOTVS):
@@ -142,16 +137,6 @@ Port=8089
 [WebApp/webapp]
 MPP=
 
-[SSLConfigure]
-CertificateServer=/opt/totvs/ssl/webapp.crt
-KeyServer=/opt/totvs/ssl/webapp.key
-PassPhrase=
-SSL2=0
-SSL3=0
-TLS1_0=0
-TLS1_1=0
-TLS1_2=1
-Verbose=0
 APPINI
 cmp -s $INI.novo $INI || cp -f $INI.novo $INI
 rm -f $INI.novo
@@ -205,6 +190,7 @@ curl -s -o /dev/null -w "webapp local (8089): HTTP %{http_code}\n" --max-time 10
 echo "== 4/4 firewall: Webapp só para o Caddy local"
 SUB=$(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null || true)
 [ -n "$SUB" ] && ufw allow from "$SUB" to any port 8089 proto tcp >/dev/null && echo "8089 liberada só para $SUB (rede do Caddy)"
+[ -n "$SUB" ] && ufw allow from "$SUB" to any port 1234 proto tcp >/dev/null && echo "1234 liberada só para $SUB (login do Webapp pelo Caddy)"
 echo "gateway para o Caddy: $(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null)"
 echo "== portas e memória"; ss -tlnH | awk '{print $4}' | sed 's/.*://' | sort -n | uniq | tr '\n' ' '; echo; free -h | head -2
 systemctl --no-pager --type=service --state=running | grep -iE 'totvs|license|postgres' | awk '{print $1, $4}'

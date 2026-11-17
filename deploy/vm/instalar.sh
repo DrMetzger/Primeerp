@@ -98,12 +98,15 @@ GW=$(docker network inspect vanguard_default -f '{{(index .IPAM.Config 0).Gatewa
 if [ -n "$GW" ] && [ -f /etc/systemd/system/totvsappserver.service ]; then
   BLOCO="${BLOCO%'# <<< Prime Hub'}protheus.primeerp.com.br {
 	encode gzip
-	# o Webapp responde em https (certificado próprio): assim o login do
-	# Protheus monta os endereços internos em https
-	reverse_proxy https://${GW}:8089 {
-		transport http {
-			tls_insecure_skip_verify
-		}
+	# O navegador troca http por https: atrás do Caddy o AppServer monta o
+	# endereço do login (PO UI) em http e a página https bloquearia.
+	header Content-Security-Policy "upgrade-insecure-requests"
+	# Os arquivos do login (app-root) saem da porta multiprotocolo (1234).
+	handle /app-root/* {
+		reverse_proxy ${GW}:1234
+	}
+	handle {
+		reverse_proxy ${GW}:8089
 	}
 }
 # <<< Prime Hub"

@@ -16,7 +16,7 @@ on:
       - .github/workflows/vm-memoria-appserver.yml
       - .github/workflows/vm-protheus-parar.yml
       - .github/workflows/vm-protheus-appserver.yml
-      - .github/workflows/vm-protheus-https.yml
+      - .github/workflows/vm-protheus-caddy.yml
       - .github/workflows/vm-protheus-log.yml
       - deploy/protheus/**
       - novo/apps/mobile/**
