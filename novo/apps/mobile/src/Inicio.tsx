@@ -309,8 +309,9 @@ export function Inicio({ usuario, aoSair }: { usuario: UsuarioLogado; aoSair: ()
   const itensMenu: ItemMenu[] = equipe ? [
     modulo('👥', 'Clientes', 'clientes'),
     modulo('🤖', 'Mesa do agente', 'agente'),
-    ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), { ...modulo('🖥️', 'Protheus', 'protheus'), sub: versaoProtheus }, modulo('⚙️', 'Configurações', 'configuracoes')] : []),
+    ...(admin ? [modulo('📅', 'Agenda', 'agenda'), modulo('📈', 'Relatórios', 'relatorios'), modulo('💻', 'Fontes ADVPL', 'fontes'), modulo('🧑‍💼', 'Usuários', 'usuarios'), modulo('⚙️', 'Configurações', 'configuracoes')] : []),
     modulo('👤', 'Meu perfil', 'perfil'),
+    ...(admin ? [{ ...modulo('🖥️', 'Protheus', 'protheus'), sub: versaoProtheus }] : []),
     { icone: nome === 'escuro' ? '☀️' : '🌙', rotulo: nome === 'escuro' ? 'Tema claro' : 'Tema escuro', acao: alternar },
     { icone: '⎋', rotulo: 'Sair', acao: aoSair, perigo: true },
   ] : [

@@ -24,9 +24,9 @@ const MENU_EQUIPE: ItemMenu[] = [
   { rotulo: 'Relatórios', icone: BarChart3, cor: '#84cc16', href: '/painel/relatorios', somenteAdmin: true },
   { rotulo: 'Fontes ADVPL', icone: Code2, cor: '#06b6d4', href: '/painel/fontes', somenteAdmin: true },
   { rotulo: 'Usuários', icone: UsersRound, cor: '#8b5cf6', href: '/painel/usuarios', somenteAdmin: true },
-  { rotulo: 'Protheus', icone: Server, cor: '#0284c7', href: '/painel/protheus', somenteAdmin: true, sub: 'protheus' },
   { rotulo: 'Configurações', icone: Settings, cor: '#94a3b8', href: '/painel/configuracoes', somenteAdmin: true },
   { rotulo: 'Manual', icone: BookOpen, cor: '#f59e0b', href: '/painel/manual' },
+  { rotulo: 'Protheus', icone: Server, cor: '#0284c7', href: '/painel/protheus', somenteAdmin: true, sub: 'protheus' },
 ];
 
 const MENU_CLIENTE: ItemMenu[] = [
@@ -53,9 +53,9 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
   const [janelaApp, setJanelaApp] = useState(false);
   const [versaoProtheus, setVersaoProtheus] = useState('');
   useEffect(() => {
-    if (tipo !== 'equipe') return;
+    if (tipo !== 'equipe' || !ADMIN.includes(usuario?.perfil ?? '')) return;
     api<VersoesProtheus>('/api/vm/protheus/versao').then((v) => { if (v.protheus) setVersaoProtheus(`${v.protheus}${v.appserver ? ` · AppServer ${v.appserver}` : ''}`); }).catch(() => undefined);
-  }, [tipo]);
+  }, [tipo, usuario?.perfil]);
   const [abrindo, setAbrindo] = useState<string | null>(null);
 
   useEffect(() => {
