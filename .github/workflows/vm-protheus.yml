@@ -31,4 +31,4 @@ jobs:
           sudo apt-get install -y -qq sshpass >/dev/null
           tar -czf /tmp/protheus.tgz -C deploy protheus
           sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/protheus.tgz "$USER_VM@$VM_IP:/tmp/protheus-deploy.tgz"
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/protheus-deploy && mkdir -p /tmp/protheus-deploy && tar -xzf /tmp/protheus-deploy.tgz -C /tmp/protheus-deploy && bash /tmp/protheus-deploy/protheus/preparar.sh && bash /tmp/protheus-deploy/protheus/instalar.sh"'
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/protheus-deploy && mkdir -p /tmp/protheus-deploy && tar -xzf /tmp/protheus-deploy.tgz -C /tmp/protheus-deploy && bash /tmp/protheus-deploy/protheus/preparar.sh && bash /tmp/protheus-deploy/protheus/instalar.sh && bash /tmp/protheus-deploy/protheus/configurar.sh"'
