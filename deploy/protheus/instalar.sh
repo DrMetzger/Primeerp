@@ -2,7 +2,8 @@
 # Protheus na VM, etapa 2: License Server Virtual, Protheus 12.1.2510
 # (instalador IzPack sem tela), DBAccess e AppServer no build baixado.
 # Idempotente. Não imprime senha.
-set -euo pipefail
+set -eu
+set +o pipefail  # os relatórios usam find|head (SIGPIPE não é erro aqui)
 BASE=/opt/totvs
 TRAB=$BASE/trabalho
 umask 022
@@ -80,7 +81,8 @@ P
   ( cd $TRAB/protheus && yes S | timeout 2400 java -Djava.awt.headless=true -Xmx768m -jar installer_lnx.jar -options opcoes.properties 2>&1 | grep -viE 'senha|password' | tail -20 ) || true
 fi
 echo "--- estrutura"; find $BASE/protheus12 -maxdepth 3 -type d 2>/dev/null | head -40
-echo "--- RPO e INIs"; find $BASE/protheus12 -maxdepth 5 \( -iname '*.rpo' -o -iname '*.ini' \) 2>/dev/null | head -20
+echo "--- RPOs"; find $BASE/protheus12 -iname '*.rpo' 2>/dev/null | head -10
+echo "--- INIs de servidor"; find $BASE/protheus12 \( -iname 'appserver.ini' -o -iname 'dbaccess.ini' -o -iname 'smartclient.ini' \) 2>/dev/null | head -10
 
 echo "== C/4 DBAccess 26.1.0.1"
 if [ ! -d $BASE/dbaccess ]; then
@@ -90,10 +92,16 @@ fi
 ls $BASE/dbaccess
 echo "--- dbaccesscfg (ajuda)"; ( cd $BASE/dbaccess/tools && timeout 20 ./dbaccesscfg -h 2>&1 | head -40 ) || true
 
-echo "== D/4 serviços criados e INIs (sem senhas)"
-systemctl list-unit-files 2>/dev/null | grep -iE 'totvs|license|appserver|dbaccess' || echo "nenhum serviço systemd TOTVS"
-ls /etc/init.d 2>/dev/null | grep -iE 'totvs|license|appserver|dbaccess' || true
-for ini in $(find $BASE/protheus12 $BASE/licenseserver -maxdepth 5 -iname 'appserver.ini' 2>/dev/null | head -3); do
-  echo "--- $ini"; grep -viE 'senha|password|pass=' "$ini" | head -60
+echo "== D/4 serviços e configurações geradas (sem senhas)"
+systemctl list-unit-files 2>/dev/null | grep -iE 'totvs|license|appserver|dbaccess' || true
+for u in $(systemctl list-unit-files 2>/dev/null | awk '{print $1}' | grep -iE 'appserver|dbaccess'); do
+  echo "--- $u ($(systemctl is-active $u))"; systemctl cat $u 2>/dev/null | grep -E 'ExecStart|WorkingDirectory|User=|Environment' 
 done
+echo "--- install_err.log"; tail -15 $BASE/protheus12/uninstaller/install_err.log 2>/dev/null || tail -15 $BASE/protheus12/.uninstaller/install_err.log 2>/dev/null || true
+for ini in $(find $BASE/protheus12 \( -iname 'appserver.ini' -o -iname 'dbaccess.ini' \) 2>/dev/null | head -4); do
+  echo "--- $ini"; grep -viE 'senha|password|pass ?=' "$ini" | grep -v '^\s*$' | head -70
+done
+echo "--- log do AppServer (systemd)"; journalctl -u appserver -n 25 --no-pager 2>/dev/null | grep -viE 'senha|password' | tail -25
+echo "== portas"; ss -tlnH | awk '{print $4}' | sed 's/.*://' | sort -n | uniq | tr '\n' ' '; echo
+echo "== memória"; free -h | head -2
 echo "== disco"; df -h / | tail -1; du -sh $BASE/protheus12 $BASE/licenseserver $BASE/dbaccess 2>/dev/null
