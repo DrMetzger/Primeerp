@@ -70,8 +70,6 @@ echo "SELECT 'conexao ODBC ok';" | isql -b protheus protheus "$PG_SENHA" 2>&1 | 
 
 echo "== 5/5 Syncthing (PC do Kleber <-> VM)"
 unset PG_SENHA
-exec 2>&1
-set -x
 ls /lib/systemd/system/ | grep -i syncthing || echo "sem unidade systemd do syncthing"
 systemctl enable syncthing@totvs 2>&1 || echo "aviso: enable falhou"
 systemctl restart syncthing@totvs 2>&1 || { echo "ERRO ao iniciar"; systemctl --no-pager status syncthing@totvs 2>&1 | tail -15; journalctl -u syncthing@totvs -n 20 --no-pager 2>&1 | tail -20; exit 1; }
@@ -89,7 +87,7 @@ done
 # Dispositivos autorizados (só os listados no repositório; ID do Syncthing não é segredo).
 LISTA="$(dirname "$0")/syncthing-dispositivos.txt"
 if [ -f "$LISTA" ]; then
-  grep -v '^#' "$LISTA" | while read -r dev nome; do
+  { grep -v '^#' "$LISTA" || true; } | while read -r dev nome; do
     [ -n "${dev:-}" ] || continue
     ST config devices list | grep -qx "$dev" || ST config devices add --device-id "$dev" --name "${nome:-PC}"
     for id in fontes-proprios fontes-2510 instaladores; do
