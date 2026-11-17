@@ -49,10 +49,14 @@ ini() { local sec=$1 k=$2 v=$3
   else
     awk -v s="[$sec]" -v k="$k" -v v="$v" '{print} $0==s{print k"="v}' $INI > $INI.tmp && mv $INI.tmp $INI
   fi; }
-ini environment DBDataBase POSTGRES
-ini environment DBServer localhost
-ini environment DBAlias protheus
-ini environment DBPort 7890
+# Ambiente se chama PRIMEERP (pedido do Kleber), não "environment".
+if grep -qi '^\[environment\]' $INI && ! grep -qi '^\[PRIMEERP\]' $INI; then
+  sed -i 's/^\[environment\]$/[PRIMEERP]/I' $INI
+fi
+ini PRIMEERP DBDataBase POSTGRES
+ini PRIMEERP DBServer localhost
+ini PRIMEERP DBAlias protheus
+ini PRIMEERP DBPort 7890
 ini General MAXSTRINGSIZE 10
 ini General ConsoleLog 1
 ini DBAccess Database POSTGRES
