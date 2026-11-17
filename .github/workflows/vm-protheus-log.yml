@@ -31,5 +31,9 @@ jobs:
           tail -400 $APP/console.log 2>/dev/null | grep -vE 'Memory|memory|\[\.|\[=|PID +MEM|tot +lim|Percentages|Turn on|^\s*$|^ *[0-9]+\*? +[0-9]+ +[0-9]+d' | grep -viE "$F" | tail -60
           echo "== DBAccess (últimas)"; journalctl -u totvsdbaccess -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | tail -20
           echo "== License (últimas)"; journalctl -u licenseVirtual -n 30 --no-pager -o cat 2>/dev/null | grep -viE "$F" | grep -iE 'error|warn|licen|slot|denied|refus|client' | tail -15
+          echo "== onde existe language.ini"; find /opt/totvs -iname 'language*.ini' 2>/dev/null | head
+          for f in /opt/totvs/instaladores/*APPSERVER*LINUX*.TAR.GZ /opt/totvs/instaladores/*SMARTCLIENT_WEBAPP*; do [ -f "$f" ] && tar -tzf "$f" 2>/dev/null | grep -i language | sed "s|^|  $(basename $f): |"; done
+          unzip -l /opt/totvs/trabalho/protheus/installer_lnx.jar 2>/dev/null | grep -i language | head -5
+          echo "== detalhe do FWMenuToDB"; grep -n -A4 'FWMenuToDB Error' $APP/console.log 2>/dev/null | grep -viE "$F" | head -24
           echo "== tabelas no banco protheus"; sudo -u postgres psql -d protheus -tAc "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null
           REMOTO
