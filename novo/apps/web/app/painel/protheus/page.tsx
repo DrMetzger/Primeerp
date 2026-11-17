@@ -1,6 +1,6 @@
 'use client';
 
-import type { PainelVm, ServicoVm, TarefaVm } from '@primehub/shared';
+import { alertasVm, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
 import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
@@ -57,6 +57,8 @@ export default function PaginaProtheus() {
 
   const v = d?.versoes ?? {};
   const todosNoAr = d?.servicos.filter((s) => s.critico).every((s) => s.estado === 'active');
+  const alertas = d ? alertasVm(d) : [];
+  const temErro = alertas.some((x) => x.nivel === 'erro');
   return (
     <Casca tipo="equipe" titulo="Protheus 2510" acoes={<BotaoSecundario onClick={() => void carregar()} aria-label="Atualizar"><RefreshCw size={18} aria-hidden="true" /></BotaoSecundario>}>
       <div className="mx-auto max-w-6xl space-y-6">
@@ -70,9 +72,10 @@ export default function PaginaProtheus() {
                   <h2 className="text-2xl font-bold text-texto">Protheus {v.protheus ?? '12.1.2510'}</h2>
                   <p className="text-sm text-suave">Ambiente <b className="text-texto">{v.ambiente ?? 'PRIMEERP'}</b> · base de desenvolvimento na VM</p>
                 </div>
-                <span className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold ${todosNoAr ? 'bg-sucesso/15 text-sucesso' : 'bg-perigo/15 text-perigo'}`}>
-                  <span className={`h-2.5 w-2.5 rounded-full ${todosNoAr ? 'bg-sucesso' : 'bg-perigo'} animate-pulse`} aria-hidden="true" />{todosNoAr ? 'Tudo no ar' : 'Atenção'}
-                </span>
+                <a href="#atencao" className={`inline-flex max-w-full items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold ${!alertas.length ? 'bg-sucesso/15 text-sucesso' : temErro ? 'bg-perigo/15 text-perigo' : 'bg-alerta/15 text-alerta'}`}>
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${!alertas.length ? 'bg-sucesso' : temErro ? 'bg-perigo' : 'bg-alerta'} animate-pulse`} aria-hidden="true" />
+                  <span className="truncate">{!alertas.length ? 'Tudo no ar' : `${alertas[0]?.titulo}${alertas.length > 1 ? ` (+${alertas.length - 1})` : ''}`}</span>
+                </a>
                 <div className="flex flex-wrap gap-2">
                   {!todosNoAr && <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'iniciar')} className="text-sucesso"><Power size={16} aria-hidden="true" /> Iniciar todos</BotaoSecundario>}
                   <BotaoSecundario disabled={!!ocupado || rodando} onClick={() => void agir({ id: 'todos', nome: 'todos', critico: true }, 'reiniciar')}><RotateCw size={16} aria-hidden="true" /> Reiniciar todos</BotaoSecundario>
@@ -97,6 +100,19 @@ export default function PaginaProtheus() {
               ))}
             </section>
 
+            {alertas.length > 0 && (
+              <section id="atencao" className="space-y-2 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
+                <h2 className="font-bold text-texto">O que precisa de atenção ({alertas.length})</h2>
+                <ul className="space-y-2">
+                  {alertas.map((x) => (
+                    <li key={x.titulo} className={`flex items-start gap-3 rounded-2xl border p-3 ${x.nivel === 'erro' ? 'border-perigo/40 bg-perigo/10' : 'border-alerta/40 bg-alerta/10'}`}>
+                      {x.nivel === 'erro' ? <XCircle size={20} className="mt-0.5 shrink-0 text-perigo" aria-hidden="true" /> : <Activity size={20} className="mt-0.5 shrink-0 text-alerta" aria-hidden="true" />}
+                      <div className="min-w-0 flex-1"><p className="font-semibold text-texto">{x.titulo}</p><p className="text-sm text-suave">{x.detalhe}</p></div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <Aviso texto={aviso.t} erro={aviso.e} />
             <Pipeline tarefas={tarefas} />
             <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

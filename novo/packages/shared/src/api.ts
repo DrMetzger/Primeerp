@@ -298,3 +298,28 @@ export interface PainelVm {
 /** Tarefa da VM (pipeline): cada ação do painel vira etapas acompanhadas ao vivo. */
 export interface EtapaVm { nome: string; estado: 'pendente' | 'rodando' | 'ok' | 'erro' | 'pulada'; duracao: number | null; detalhe: string }
 export interface TarefaVm { id: string; titulo: string; quem: string; estado: 'rodando' | 'ok' | 'erro'; inicio: number; fim: number | null; duracao: number; etapas: EtapaVm[] }
+
+/** O que precisa de atenção no painel da VM, em português claro (motivo + o que fazer). */
+export interface AlertaVm { nivel: 'erro' | 'aviso'; titulo: string; detalhe: string; servico?: string }
+const PORTA_USO: Record<number, string> = { 1234: 'o VS Code/TDS não conecta', 8089: 'o Webapp (navegador) não abre', 7890: 'o Protheus não chega ao banco', 5555: 'o Protheus não pega licença', 5432: 'o banco não aceita conexão', 22000: 'os fontes não sincronizam com o PC' };
+export function alertasVm(d: PainelVm): AlertaVm[] {
+  const a: AlertaVm[] = [];
+  const estado: Record<string, string> = { inactive: 'está parado', failed: 'caiu com erro', activating: 'está subindo', deactivating: 'está parando' };
+  for (const s of d.servicos) {
+    if (s.estado !== 'active') {
+      a.push({ nivel: s.critico && s.estado !== 'activating' ? 'erro' : 'aviso', servico: s.id, titulo: `${s.nome} ${estado[s.estado] ?? `está ${s.estado}`}`,
+        detalhe: s.estado === 'failed' ? 'Veja o Log do serviço e tente Iniciar de novo.' : s.estado === 'activating' || s.estado === 'deactivating' ? 'Aguarde alguns segundos: a tela atualiza sozinha.' : `${s.descricao}: use o botão Iniciar.` });
+      continue;
+    }
+    for (const p of s.portas.filter((x) => !x.aberta)) {
+      a.push({ nivel: 'aviso', servico: s.id, titulo: `${s.nome} no ar, mas a porta ${p.porta} está fechada`, detalhe: `${PORTA_USO[p.porta] ?? 'esse acesso não funciona'}. Se acabou de ligar, aguarde; senão, Reiniciar ${s.nome}.` });
+    }
+  }
+  const mem = d.vm.memoriaUsadaMB / d.vm.memoriaTotalMB;
+  if (mem > 0.85) a.push({ nivel: 'aviso', titulo: `Memória quase cheia (${Math.round(mem * 100)}%)`, detalhe: 'Pode deixar tudo lento. Reiniciar o AppServer costuma liberar.' });
+  const disco = d.vm.discoUsadoGB / d.vm.discoTotalGB;
+  if (disco > 0.85) a.push({ nivel: disco > 0.95 ? 'erro' : 'aviso', titulo: `Disco quase cheio (${d.vm.discoUsadoGB} de ${d.vm.discoTotalGB} GB)`, detalhe: 'Com o disco cheio o banco e os logs param de gravar.' });
+  const carga = d.vm.carga[0] ?? 0;
+  if (carga > d.vm.nucleos * 1.5) a.push({ nivel: 'aviso', titulo: `Processador sobrecarregado (carga ${carga.toFixed(2)} para ${d.vm.nucleos} núcleos)`, detalhe: 'Normal por alguns minutos depois de iniciar ou compilar; se continuar, veja qual serviço está pesado.' });
+  return a.sort((x, y) => (x.nivel === y.nivel ? 0 : x.nivel === 'erro' ? -1 : 1));
+}

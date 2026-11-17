@@ -1,4 +1,4 @@
-import type { PainelVm, ServicoVm, TarefaVm } from '@primehub/shared';
+import { alertasVm, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import { api } from './api';
@@ -49,6 +49,9 @@ export function TelaProtheus() {
 
   const v = d?.versoes ?? {};
   const noAr = d?.servicos.filter((s) => s.critico).every((s) => s.estado === 'active');
+  const alertas = d ? alertasVm(d) : [];
+  const temErro = alertas.some((x) => x.nivel === 'erro');
+  const corSelo = !alertas.length ? tema.sucesso : temErro ? tema.perigo : tema.alerta;
   return (
     <>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => { setAtualizando(true); void carregar(); }} colors={[tema.primaria]} />}>
@@ -61,9 +64,7 @@ export function TelaProtheus() {
                 <T style={{ fontSize: 20, fontWeight: '800' }}>Protheus {v.protheus ?? '12.1.2510'}</T>
                 <T style={{ fontSize: 13, color: tema.textoSuave }}>Ambiente {v.ambiente ?? 'PRIMEERP'}</T>
               </View>
-              <View style={{ borderRadius: 99, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: noAr ? `${tema.sucesso}26` : `${tema.perigo}26` }}>
-                <T style={{ fontSize: 12, fontWeight: '800', color: noAr ? tema.sucesso : tema.perigo }}>{noAr ? '● Tudo no ar' : '● Atenção'}</T>
-              </View>
+              {!alertas.length && <View style={{ borderRadius: 99, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: `${tema.sucesso}26` }}><T style={{ fontSize: 12, fontWeight: '800', color: tema.sucesso }}>● Tudo no ar</T></View>}
             </View>
             {([['RPO', `${v.protheus ?? '—'}${v.rpoData ? ` · ${v.rpoData}` : ''}`], ['AppServer', `${v.appserver ?? '—'}${v.appserverBuild ? ` (${v.appserverBuild})` : ''}`], ['Webapp', v.webapp || '—'], ['DBAccess', v.dbaccess || '—'], ['License', v.licenseServer || '—'], ['PostgreSQL', v.postgresql || '—']] as const).map(([r, x]) => (
               <View key={r} style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T style={{ color: tema.textoSuave, fontSize: 13 }}>{r}</T><T style={{ fontSize: 13, fontFamily: 'monospace' }}>{x}</T></View>
@@ -80,6 +81,17 @@ export function TelaProtheus() {
             <T style={{ fontSize: 13 }}>💽 Disco: {d.vm.discoUsadoGB} de {d.vm.discoTotalGB} GB</T>
             <T style={{ fontSize: 13 }}>⚙️ Carga: {d.vm.carga[0]} ({d.vm.nucleos} núcleos)</T>
           </Cartao>
+          {alertas.length > 0 && (
+            <Cartao style={{ gap: 8, borderColor: corSelo, borderWidth: 1 }}>
+              <T style={{ fontWeight: '800', color: corSelo }}>⚠️ O que precisa de atenção ({alertas.length})</T>
+              {alertas.map((x) => (
+                <View key={x.titulo} style={{ gap: 2 }}>
+                  <T style={{ fontWeight: '700', fontSize: 14, color: x.nivel === 'erro' ? tema.perigo : tema.texto }}>{x.nivel === 'erro' ? '✗' : '!'} {x.titulo}</T>
+                  <T style={{ fontSize: 13, color: tema.textoSuave }}>{x.detalhe}</T>
+                </View>
+              ))}
+            </Cartao>
+          )}
           <Aviso texto={aviso.t} erro={aviso.e} />
           {tarefas.length > 0 && (
             <Cartao style={{ gap: 8 }}>
