@@ -69,21 +69,27 @@ chmod 644 /etc/odbc.ini
 echo "SELECT 'conexao ODBC ok';" | isql -b protheus protheus "$PG_SENHA" 2>&1 | grep -q 'conexao ODBC ok' && echo "ODBC: conectou no banco protheus" || { echo "ERRO: ODBC não conectou"; exit 1; }
 
 echo "== 5/5 Syncthing (PC do Kleber <-> VM)"
-systemctl enable --now syncthing@totvs >/dev/null 2>&1
-for i in $(seq 1 30); do sudo -u totvs syncthing cli show system >/dev/null 2>&1 && break; sleep 2; done
-ST() { sudo -u totvs syncthing cli "$@"; }
-ST config options relays-enabled set true >/dev/null
+systemctl enable syncthing@totvs >/dev/null 2>&1
+systemctl restart syncthing@totvs
+ST() { sudo -u totvs -H syncthing cli "$@"; }
+for i in $(seq 1 45); do ST show system >/dev/null 2>&1 && break; sleep 2; done
+if ! ST show system >/dev/null 2>&1; then
+  echo "ERRO: Syncthing não respondeu"; systemctl --no-pager status syncthing@totvs | tail -15; ST show system 2>&1 | tail -3; exit 1
+fi
+ST config options relays-enabled set true 2>&1 | grep -v '^$' || true
+PASTAS=$(ST config folders list 2>&1 || true)
 for p in "fontes-proprios:FONTES_PROTHEUS:$BASE/fontes/FONTES_PROTHEUS" "fontes-2510:Fontes_2510:$BASE/fontes/Fontes_2510" "instaladores:instaladores:$BASE/instaladores"; do
   IFS=: read -r id rotulo caminho <<<"$p"
-  ST config folders list | grep -qx "$id" || ST config folders add --id "$id" --label "$rotulo" --path "$caminho" >/dev/null
+  echo "$PASTAS" | grep -qx "$id" || ST config folders add --id "$id" --label "$rotulo" --path "$caminho"
 done
 # Dispositivos autorizados (só os listados no repositório; ID do Syncthing não é segredo).
-if [ -f "$(dirname "$0")/syncthing-dispositivos.txt" ]; then
-  grep -v '^#' "$(dirname "$0")/syncthing-dispositivos.txt" | while read -r dev nome; do
+LISTA="$(dirname "$0")/syncthing-dispositivos.txt"
+if [ -f "$LISTA" ]; then
+  grep -v '^#' "$LISTA" | while read -r dev nome; do
     [ -n "${dev:-}" ] || continue
-    ST config devices list | grep -qx "$dev" || ST config devices add --device-id "$dev" --name "${nome:-PC}" >/dev/null
+    ST config devices list | grep -qx "$dev" || ST config devices add --device-id "$dev" --name "${nome:-PC}"
     for id in fontes-proprios fontes-2510 instaladores; do
-      ST config folders "$id" devices list | grep -qx "$dev" || ST config folders "$id" devices add --device-id "$dev" >/dev/null
+      ST config folders "$id" devices list | grep -qx "$dev" || ST config folders "$id" devices add --device-id "$dev"
     done
     echo "dispositivo autorizado: ${nome:-PC}"
   done
