@@ -331,6 +331,7 @@ export function alertasVm(d: PainelVm): AlertaVm[] {
 export interface AlvoCompilacao {
   id: number;
   slug: string;
+  grupo: string;
   nome: string;
   host: string;
   porta: number;
