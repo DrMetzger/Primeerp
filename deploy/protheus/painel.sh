@@ -2,6 +2,9 @@
 # Instala/atualiza o agente de serviços (painel do suporte). Idempotente.
 set -eu
 install -m 755 "$(dirname "$0")/servicos-agente.py" /usr/local/bin/primehub-servicos
+# Compilador (TDS-CLI/advpls) num caminho fixo, pro agente testar conexão e compilar.
+install -m 755 "$(dirname "$0")/tdscli.sh" /usr/local/bin/primehub-tdscli
+bash /usr/local/bin/primehub-tdscli instalar >/dev/null 2>&1 || true
 cat > /etc/systemd/system/primehub-servicos.service <<UNIT
 [Unit]
 Description=Prime Hub - agente de serviços da VM (painel do suporte)

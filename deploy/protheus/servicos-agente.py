@@ -198,6 +198,17 @@ class Agente(BaseHTTPRequestHandler):
                 _, out, _ = sh("journalctl", "-u", s["unidade"], "-n", "80", "--no-pager", "-o", "short-iso")
                 linhas = out.splitlines()
             return self.responder(200, {"linhas": [("[linha omitida: dado sensível]" if SENSIVEL.search(l) else l) for l in linhas]})
+        if len(partes) == 3 and partes[0] == "compilacao" and partes[1] == "testar":
+            slug = re.sub(r"[^a-z0-9_-]", "", partes[2].lower())[:60]
+            # roda o compilador num escopo próprio (fora do limite de memória do agente)
+            _, out, _ = sh("systemd-run", "--scope", "--quiet", "-p", "MemoryMax=2G",
+                           "/usr/local/bin/primehub-tdscli", "validar", slug, timeout=130)
+            linha = next((l for l in out.splitlines() if l.strip().startswith("{")), "")
+            try:
+                res = json.loads(linha) if linha else {"conectado": False, "detalhe": "sem resposta do compilador"}
+            except Exception:
+                res = {"conectado": False, "detalhe": "sem resposta do compilador"}
+            return self.responder(200, res)
         return self.responder(404, {"erro": "Caminho desconhecido."})
 
     def do_POST(self):

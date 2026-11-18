@@ -1,0 +1,36 @@
+# Atualiza só o agente de serviços da VM (painel) + o compilador num caminho
+# fixo. Roda painel.sh, que reinicia apenas o primehub-servicos. NÃO toca no
+# Protheus (não roda o reconfigure).
+name: VM - atualizar agente
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/protheus/servicos-agente.py
+      - deploy/protheus/painel.sh
+      - deploy/protheus/tdscli.sh
+      - .github/workflows/vm-agente.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atualizar agente
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/ag.tgz -C deploy protheus/servicos-agente.py protheus/painel.sh protheus/tdscli.sh
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/ag.tgz "$USER_VM@$VM_IP:/tmp/ag.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/ag && mkdir -p /tmp/ag && tar -xzf /tmp/ag.tgz -C /tmp/ag && bash /tmp/ag/protheus/painel.sh"'

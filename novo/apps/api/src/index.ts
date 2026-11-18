@@ -6,7 +6,7 @@ import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositiv
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
 import { converterRelatorio } from '@primehub/shared';
-import { alvoComSenha, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, listarAlvos, salvarAlvo } from './compilacao';
+import { alvoComSenha, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, listarAlvos, podeCompilacao, salvarAlvo } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -226,6 +226,12 @@ const compResp = async (c: Context, f: () => Promise<unknown>) => {
 app.get('/api/compilacao/alvos', exigirLogin('equipe'), (c) => compResp(c, () => listarAlvos(c.get('usuario'))));
 app.post('/api/compilacao/alvos/:slug', exigirLogin('equipe'), (c) => compResp(c, async () => salvarAlvo(c.get('usuario'), c.req.param('slug'), await corpoJson(c))));
 app.delete('/api/compilacao/alvos/:slug', exigirLogin('equipe'), (c) => compResp(c, async () => { await excluirAlvo(c.get('usuario'), c.req.param('slug')); return { mensagem: 'Alvo removido.' }; }));
+// Testa a conexão/login no AppServer do alvo (pelo agente da VM). Dá o "verde".
+app.post('/api/compilacao/alvos/:slug/testar', exigirLogin('equipe'), (c) => compResp(c, async () => {
+  if (!podeCompilacao(c.get('usuario'))) throw new ErroCompilacao('Sem permissão.', 403);
+  const slug = encodeURIComponent(c.req.param('slug').toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+  return agente('GET', `/compilacao/testar/${slug}`, c.get('usuario').nome);
+}));
 
 // ---------------------------------------------------------------- Painel da VM (Protheus e serviços)
 const vmResp = async (c: Context, f: () => Promise<unknown>) => {

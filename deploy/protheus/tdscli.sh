@@ -78,9 +78,60 @@ INI
   echo "FIM-TDSCLI $(date '+%H:%M:%S')"
 }
 
+# Teste rápido de conexão/autenticação de um alvo (pro "verde" do painel).
+# Só autentica, não compila. Imprime UMA linha JSON.
+validar() {
+  local SLUG=${1:-base} S=$CLI/val
+  rm -rf $S; mkdir -p $S
+  local ALVO; ALVO=$(docker exec primehub-api node /app/index.mjs --alvo-compilacao "$SLUG" 2>/dev/null)
+  [ -z "$ALVO" ] && { echo '{"conectado":false,"detalhe":"alvo não encontrado"}'; return 0; }
+  eval "$(printf '%s' "$ALVO" | python3 -c 'import sys,json;a=json.load(sys.stdin);print("AHOST=%r;APORT=%d;AENV=%r;AUSER=%r;ABUILD=%r;ASEC=%d;ATEM=%d"%(a["host"],a["porta"],a["ambiente"],a["usuario"],a.get("build") or "AUTO",1 if a.get("secure") else 0,1 if a.get("senha") else 0))')"
+  [ "$ATEM" != 1 ] && { echo '{"conectado":false,"detalhe":"sem senha cadastrada"}'; return 0; }
+  [ -z "$AENV" ] && { echo '{"conectado":false,"detalhe":"sem ambiente cadastrado"}'; return 0; }
+  local ASENHA; ASENHA=$(printf '%s' "$ALVO" | python3 -c 'import sys,json;sys.stdout.write(json.load(sys.stdin)["senha"])')
+  { cat > $S/val.ini <<INI
+logToFile=$S/val.log
+showConsoleOutput=True
+
+[auth]
+action=authentication
+server=$AHOST
+port=$APORT
+secure=$ASEC
+build=$ABUILD
+environment=$AENV
+user=$AUSER
+psw=$ASENHA
+INI
+  } 2>/dev/null
+  unset ASENHA
+  ( cd $S && timeout --kill-after=10 70 $BIN --verbose 1 --log-file $S/val.log cli $S/val.ini > $S/val.out 2>&1 < /dev/null )
+  pkill -9 -f advpls 2>/dev/null || true
+  shred -u $S/val.ini 2>/dev/null || rm -f $S/val.ini
+  python3 - "$S/val.log" <<'PY'
+import sys, re, json, os
+log = open(sys.argv[1], errors='ignore').read() if os.path.exists(sys.argv[1]) else ''
+m = re.search(r'build:\s*([0-9.A-Za-z]+)', log) or re.search(r'Build Version:\s*([0-9.A-Za-z]+)', log)
+build = m.group(1) if m else ''
+reached = ('Build Version' in log) or ('connected status: 0' in log)
+mu = re.search(r'userCode:\s*(\d+)', log)
+auth_ok = bool(re.search(r'(authenticated successfully|Authenticated\b|MS_DBGLOGIN OK|login OK)', log, re.I))
+if (mu and mu.group(1) == '0') or (auth_ok and not (mu and mu.group(1) != '0')):
+    r = {"conectado": True, "build": build, "detalhe": "autenticado"}
+elif mu:
+    r = {"conectado": False, "build": build, "detalhe": "usuário ou senha recusada"}
+elif reached:
+    r = {"conectado": False, "build": build, "detalhe": "conectou mas não autenticou"}
+else:
+    r = {"conectado": False, "build": build, "detalhe": "não conectou (porta/host/rede)"}
+print(json.dumps(r, ensure_ascii=False))
+PY
+}
+
 case "${1:-instalar}" in
   instalar) instalar ;;
   smoke)    instalar; executar "${2:-base}" ;;
+  validar)  validar "${2:-base}" ;;
   iniciar)  instalar; mkdir -p $CLI/smoke; : > $CLI/smoke/resultado.txt
             setsid bash -c "BASE=$BASE CLI=$CLI BIN=$BIN bash $0 _executar ${2:-base} > $CLI/smoke/resultado.txt 2>&1 < /dev/null" >/dev/null 2>&1 &
             echo "teste disparado (destacado)"; exit 0 ;;

@@ -212,6 +212,7 @@ function CofreCompilacao() {
   const [edit, setEdit] = useState<Record<string, Partial<AlvoCompilacao> & { senha?: string }>>({});
   const [aberto, setAberto] = useState<string>('');
   const [ocupado, setOcupado] = useState('');
+  const [teste, setTeste] = useState<Record<string, { testando?: boolean; conectado?: boolean; detalhe?: string; build?: string }>>({});
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
 
   const carregar = useCallback(() => { api<AlvoCompilacao[]>('/api/compilacao/alvos').then(setAlvos).catch(() => setAlvos([])); }, []);
@@ -226,6 +227,14 @@ function CofreCompilacao() {
       setEdit((e) => ({ ...e, [a.slug]: {} })); carregar();
     } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu.', e: true }); }
     setOcupado('');
+  }
+
+  async function testar(slug: string) {
+    setTeste((t) => ({ ...t, [slug]: { testando: true } }));
+    try {
+      const r = await api<{ conectado?: boolean; detalhe?: string; build?: string }>(`/api/compilacao/alvos/${slug}/testar`, { method: 'POST', body: '{}' });
+      setTeste((t) => ({ ...t, [slug]: { conectado: !!r.conectado, detalhe: r.detalhe ?? '', build: r.build ?? '' } }));
+    } catch (e) { setTeste((t) => ({ ...t, [slug]: { conectado: false, detalhe: e instanceof Error ? e.message : 'falhou' } })); }
   }
 
   if (!alvos) return <Esqueleto className="h-40" />;
@@ -245,11 +254,13 @@ function CofreCompilacao() {
           {alvos.filter((a) => (a.grupo || 'Outros') === g).map((a) => {
             const d = edit[a.slug] ?? {};
             const ok = pronto(a);
+            const tt = teste[a.slug];
+            const cor = tt?.testando ? 'bg-amber-400 animate-pulse' : tt?.conectado ? 'bg-sucesso shadow-[0_0_8px] shadow-sucesso' : tt && tt.conectado === false ? 'bg-perigo' : ok ? 'bg-sucesso/70' : a.temSenha ? 'bg-alerta' : 'bg-suave/40';
             const abertoAqui = aberto === a.slug;
             return (
               <div key={a.slug} className="rounded-2xl border border-borda bg-superficie-alta/40">
                 <button type="button" onClick={() => setAberto(abertoAqui ? '' : a.slug)} className="flex w-full items-center gap-3 p-3 text-left">
-                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${ok ? 'bg-sucesso shadow-[0_0_8px] shadow-sucesso' : a.temSenha ? 'bg-alerta' : 'bg-suave/40'}`} title={ok ? 'pronto' : a.temSenha ? 'falta ambiente ou liberar' : 'falta senha'} />
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cor}`} title={tt?.detalhe ?? (ok ? 'configurado' : a.temSenha ? 'falta ambiente ou liberar' : 'falta senha')} />
                   <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-texto">{a.nome}</span><span className="block truncate font-mono text-xs text-suave">{a.host}:{a.porta}</span></span>
                   {!a.liberado && <span className="rounded-full bg-superficie px-2 py-0.5 text-[11px] text-suave">pausado</span>}
                   <span className="text-suave">{abertoAqui ? '▴' : '▾'}</span>
@@ -265,9 +276,17 @@ function CofreCompilacao() {
                       <Campo rotulo="Porta"><input type="number" className={CLASSE_ENTRADA} value={d.porta ?? a.porta} onChange={(e) => set(a.slug, 'porta', Number(e.target.value))} /></Campo>
                     </div>
                     <Campo rotulo="Build (vazio = detectar)"><input className={CLASSE_ENTRADA} value={d.build ?? a.build} onChange={(e) => set(a.slug, 'build', e.target.value)} placeholder="AUTO" /></Campo>
-                    <div className="sm:col-span-2 flex items-center justify-between">
+                    {tt && !tt.testando && (
+                      <p className={`sm:col-span-2 text-sm font-semibold ${tt.conectado ? 'text-sucesso' : 'text-perigo'}`}>
+                        {tt.conectado ? `Conectado${tt.build ? ` · build ${tt.build}` : ''} ✓` : `Não conectou: ${tt.detalhe ?? 'erro'}`}
+                      </p>
+                    )}
+                    <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2">
                       <label className="flex items-center gap-2 text-sm text-texto"><input type="checkbox" checked={d.liberado ?? a.liberado} onChange={(e) => set(a.slug, 'liberado', e.target.checked)} /> Liberado para compilar</label>
-                      <BotaoPrimario disabled={ocupado === a.slug} onClick={() => void salvar(a)}>{ocupado === a.slug ? 'Salvando…' : 'Salvar'}</BotaoPrimario>
+                      <div className="ml-auto flex gap-2">
+                        <BotaoSecundario disabled={tt?.testando || !a.temSenha} onClick={() => void testar(a.slug)}>{tt?.testando ? 'Testando…' : 'Testar conexão'}</BotaoSecundario>
+                        <BotaoPrimario disabled={ocupado === a.slug} onClick={() => void salvar(a)}>{ocupado === a.slug ? 'Salvando…' : 'Salvar'}</BotaoPrimario>
+                      </div>
                     </div>
                   </div>
                 )}
