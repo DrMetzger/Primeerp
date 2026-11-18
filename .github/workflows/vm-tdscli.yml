@@ -29,7 +29,7 @@ jobs:
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/protheus/tdscli.sh "$USER_VM@$VM_IP:/tmp/tdscli.sh"
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke PRIMEERP' > resultado.txt 2>&1 || true
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke base' > resultado.txt 2>&1 || true
           echo "=== resumo ==="; tail -12 resultado.txt || true
       - uses: actions/upload-artifact@v4
         if: always()

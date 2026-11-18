@@ -25,25 +25,32 @@ instalar() {
 }
 
 executar() {
-  local AMB=${1:-PRIMEERP} S=$CLI/smoke
+  local SLUG=${1:-base} S=$CLI/smoke
   rm -rf $S; mkdir -p $S/fontes $S/patch $S/includes
   cat > $S/fontes/xsmoke01.prw <<'PRW'
 User Function XSMOKE01()
 Return .T.
 PRW
-  cat > $S/exec.ini <<INI
+  echo "== alvo '$SLUG' (do cofre do app)"
+  local ALVO; ALVO=$(docker exec primehub-api node /app/index.mjs --alvo-compilacao "$SLUG" 2>/dev/null)
+  if [ -z "$ALVO" ]; then echo "ERRO: alvo '$SLUG' não encontrado — cadastre no painel do Protheus → Compilação"; return 1; fi
+  eval "$(printf '%s' "$ALVO" | python3 -c 'import sys,json;a=json.load(sys.stdin);print("AHOST=%r;APORT=%d;AENV=%r;AUSER=%r;ABUILD=%r;ASEC=%d;ATEM=%d"%(a["host"],a["porta"],a["ambiente"],a["usuario"],a.get("build") or "AUTO",1 if a.get("secure") else 0,1 if a.get("senha") else 0))')"
+  echo "host=$AHOST porta=$APORT ambiente=$AENV usuario=$AUSER build=$ABUILD secure=$ASEC senha=$([ "$ATEM" = 1 ] && echo definida || echo VAZIA)"
+  if [ "$ATEM" != 1 ]; then echo "ERRO: alvo '$SLUG' está SEM SENHA — cadastre no painel do Protheus → Compilação"; return 1; fi
+  local ASENHA; ASENHA=$(printf '%s' "$ALVO" | python3 -c 'import sys,json;sys.stdout.write(json.load(sys.stdin)["senha"])')
+  { cat > $S/exec.ini <<INI
 logToFile=$S/exec.log
 showConsoleOutput=True
 
 [auth]
 action=authentication
-server=127.0.0.1
-port=1234
-secure=0
-build=7.00.240223P
-environment=$AMB
-user=admin
-psw=
+server=$AHOST
+port=$APORT
+secure=$ASEC
+build=$ABUILD
+environment=$AENV
+user=$AUSER
+psw=$ASENHA
 
 [compila]
 action=compile
@@ -57,9 +64,12 @@ fileResource=xsmoke01.prw
 patchType=PTM
 saveLocal=$S/patch/
 INI
-  echo "== teste compilar+patch na base $AMB (localhost:1234) — $(date '+%H:%M:%S')"
+  } 2>/dev/null
+  unset ASENHA
+  echo "== teste compilar+patch em $AENV ($AHOST:$APORT) — $(date '+%H:%M:%S')"
   ( cd $S && timeout --kill-after=20 160 $BIN --verbose 1 --log-file $S/cli.log cli $S/exec.ini > $S/saida.txt 2>&1 < /dev/null; echo "EXIT=$?" >> $S/saida.txt )
   pkill -9 -f advpls 2>/dev/null || true
+  shred -u $S/exec.ini 2>/dev/null || rm -f $S/exec.ini
   echo "--- EXIT ---"; grep -a '^EXIT=' $S/saida.txt
   echo "--- saida ---"; grep -aviE 'psw=|password|senha' $S/saida.txt | grep -av '^EXIT=' | tail -90
   echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $S/cli.log 2>/dev/null | tail -90
@@ -70,10 +80,10 @@ INI
 
 case "${1:-instalar}" in
   instalar) instalar ;;
-  smoke)    instalar; executar "${2:-PRIMEERP}" ;;
+  smoke)    instalar; executar "${2:-base}" ;;
   iniciar)  instalar; mkdir -p $CLI/smoke; : > $CLI/smoke/resultado.txt
-            setsid bash -c "BASE=$BASE CLI=$CLI BIN=$BIN bash $0 _executar ${2:-PRIMEERP} > $CLI/smoke/resultado.txt 2>&1 < /dev/null" >/dev/null 2>&1 &
+            setsid bash -c "BASE=$BASE CLI=$CLI BIN=$BIN bash $0 _executar ${2:-base} > $CLI/smoke/resultado.txt 2>&1 < /dev/null" >/dev/null 2>&1 &
             echo "teste disparado (destacado)"; exit 0 ;;
-  _executar) executar "${2:-PRIMEERP}" ;;
+  _executar) executar "${2:-base}" ;;
   *) echo "modo inválido"; exit 1 ;;
 esac
