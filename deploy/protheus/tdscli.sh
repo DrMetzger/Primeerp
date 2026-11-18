@@ -114,16 +114,17 @@ log = open(sys.argv[1], errors='ignore').read() if os.path.exists(sys.argv[1]) e
 m = re.search(r'build:\s*([0-9.A-Za-z]+)', log) or re.search(r'Build Version:\s*([0-9.A-Za-z]+)', log)
 build = m.group(1) if m else ''
 reached = ('Build Version' in log) or ('connected status: 0' in log)
+attempted = ('PSWADMIN' in log) or ('Authenticating' in log) or ('authentication' in log.lower())
 mu = re.search(r'userCode:\s*(\d+)', log)
-auth_ok = bool(re.search(r'(authenticated successfully|Authenticated\b|MS_DBGLOGIN OK|login OK)', log, re.I))
-if (mu and mu.group(1) == '0') or (auth_ok and not (mu and mu.group(1) != '0')):
-    r = {"conectado": True, "build": build, "detalhe": "autenticado"}
-elif mu:
-    r = {"conectado": False, "build": build, "detalhe": "usuário ou senha recusada"}
-elif reached:
-    r = {"conectado": False, "build": build, "detalhe": "conectou mas não autenticou"}
-else:
+auth_failed = bool(mu) and mu.group(1) != '0'
+if not reached:
     r = {"conectado": False, "build": build, "detalhe": "não conectou (porta/host/rede)"}
+elif auth_failed:
+    r = {"conectado": False, "build": build, "detalhe": "usuário ou senha recusada"}
+elif attempted:
+    r = {"conectado": True, "build": build, "detalhe": "conectado"}
+else:
+    r = {"conectado": False, "build": build, "detalhe": "conectou, mas a autenticação não respondeu"}
 print(json.dumps(r, ensure_ascii=False))
 PY
 }
