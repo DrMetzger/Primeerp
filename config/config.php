@@ -27,7 +27,7 @@ if ($isLocal) {
     define('DB_HOST', getenv('ADMINPRIME_DB_HOST') ?: 'localhost');
     define('DB_NAME', getenv('ADMINPRIME_DB_NAME') ?: 'adminprime_test');
     define('DB_USER', getenv('ADMINPRIME_DB_USER') ?: 'adminprime');
-    define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: 'testpass123');
+    define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: '');
 
     // Banco do HESK (helpdesk) — em branco por padrão localmente, mas pode
     // ser apontado para um banco de teste via variáveis de ambiente.
@@ -48,13 +48,13 @@ if ($isLocal) {
     define('DB_HOST', getenv('ADMINPRIME_DB_HOST') ?: 'localhost');
     define('DB_NAME', getenv('ADMINPRIME_DB_NAME') ?: 'u195563148_claude');
     define('DB_USER', getenv('ADMINPRIME_DB_USER') ?: 'u195563148_claude');
-    define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: '*@2^@cIdb4J?');
+    define('DB_PASS', getenv('ADMINPRIME_DB_PASS') ?: '');
 
     // Banco do HESK (sistema de chamados atual, primeerp.com.br/helpdesk/)
     define('HESK_DB_HOST', 'localhost');
     define('HESK_DB_NAME', 'u195563148_help');
     define('HESK_DB_USER', 'u195563148_help');
-    define('HESK_DB_PASS', 'I31&vq~=k5');
+    define('HESK_DB_PASS', getenv('ADMINPRIME_HESK_DB_PASS') ?: '');
 
     // SMTP autenticado (Hostinger) -- e-mails de notificação (novo chamado,
     // resposta da equipe, convite de acesso ao portal) passam a ser enviados
@@ -67,7 +67,7 @@ if ($isLocal) {
     define('SMTP_PORT', 465);
     define('SMTP_SECURE', 'ssl');
     define('SMTP_USER', 'kleber.farias@primeerp.com.br');
-    define('SMTP_PASS', 'Km@2024@#$');
+    define('SMTP_PASS', getenv('ADMINPRIME_SMTP_PASS') ?: '');
 }
 
 define('DB_CHARSET', 'utf8mb4');
@@ -92,9 +92,9 @@ define('NOTIFICACAO_EMAILS_EQUIPE', ['kleber.farias@primeerp.com.br', 'pcorreajr
 // 99205-5505) configurado em produção em 08/2026; em local fica em branco de
 // propósito (mesmo esquema do e-mail/SMTP), pra não mandar mensagem de
 // verdade só testando a tela -- WhatsAppApi só registra em log nesse caso.
-define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: ($isLocal ? '' : 'EAAOsbTpGbqABSEORJEYEaApYJCd3xwwU2HbF1GahdcjCj3ud6XRM2IcnsbYPlM0UULInZB0OPDm2MyMx1oO51jZCiWFQExiiJ2MnxnAWnhWDZA5rnIOb3V5MV0g6szAs7P5auxaQ5epbTuwqSv27WYey8VGXVQJa5usgzqiZAc1ArO6sZAUQuyJwbq9jjKgZDZD'));
+define('WHATSAPP_ACCESS_TOKEN', getenv('ADMINPRIME_WHATSAPP_ACCESS_TOKEN') ?: '');
 define('WHATSAPP_PHONE_NUMBER_ID', getenv('ADMINPRIME_WHATSAPP_PHONE_NUMBER_ID') ?: ($isLocal ? '' : '1251785564679814'));
-define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: ($isLocal ? '' : '1efbe8ba157800e0444bdeeae139d71a'));
+define('WHATSAPP_APP_SECRET', getenv('ADMINPRIME_WHATSAPP_APP_SECRET') ?: '');
 // Token que a própria Meta usa pra confirmar o webhook na primeira vez
 // (Configuração > Webhook, no painel do app) -- é a gente que inventa essa
 // senha, não vem da Meta.
@@ -115,7 +115,7 @@ define('WHATSAPP_HORARIO_COMERCIAL_FIM', 18);
 // gerando sugestão de verdade só testando a tela. Essa chave SÓ é usada pra
 // analisar dados JÁ CADASTRADOS (chamados/KPIs) -- nunca chama a ferramenta
 // de busca do Google, então continua 100% dentro do plano gratuito.
-define('GEMINI_API_KEY', getenv('ADMINPRIME_GEMINI_API_KEY') ?: ($isLocal ? '' : 'AQ.Ab8RN6LMT65gzPC8BDs0oFobulw8Gh0iKis5sVzHSwrozb8EeA'));
+define('GEMINI_API_KEY', getenv('ADMINPRIME_GEMINI_API_KEY') ?: '');
 
 // Chave SEPARADA (projeto Google Cloud diferente da de cima, de propósito)
 // só pra pesquisa de perfil público da empresa via busca do Google --
@@ -133,7 +133,7 @@ define('GEMINI_API_KEY_BUSCA', getenv('ADMINPRIME_GEMINI_API_KEY_BUSCA') ?: '');
 // descobrisse a URL poderia forçar o disparo dos lembretes. Não precisa
 // disso se o Cron Job do Hostinger rodar via CLI (php cron_lembretes_...php),
 // só quando for via URL/wget.
-define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: ($isLocal ? 'teste-local' : '9333d390beced8c03a2a8668c38ee1f9d7333def0501d182'));
+define('CRON_SECRET', getenv('ADMINPRIME_CRON_SECRET') ?: '');
 
 // Chave de cifra do cofre de acessos (senha de servidor/RDP/AnyDesk/VPN) --
 // ver src/Crypto.php. AES-256-GCM, chave de 32 bytes em base64. Em produção
