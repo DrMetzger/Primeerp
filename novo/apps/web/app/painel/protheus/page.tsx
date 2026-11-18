@@ -1,7 +1,7 @@
 'use client';
 
 import { alertasVm, type AlvoCompilacao, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
-import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync, Plus, Trash2 } from 'lucide-react';
+import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { Esqueleto } from '@/components/esqueleto';
@@ -214,6 +214,7 @@ function CofreCompilacao() {
   const [ocupado, setOcupado] = useState('');
   const [teste, setTeste] = useState<Record<string, { testando?: boolean; conectado?: boolean; detalhe?: string; build?: string }>>({});
   const [novo, setNovo] = useState<{ grupo: string; nome: string; host: string; porta: string; ambiente: string; usuario: string; senha: string } | null>(null);
+  const [verSenha, setVerSenha] = useState<Record<string, boolean>>({});
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
 
   const carregar = useCallback(() => { api<AlvoCompilacao[]>('/api/compilacao/alvos').then(setAlvos).catch(() => setAlvos([])); }, []);
@@ -280,7 +281,12 @@ function CofreCompilacao() {
             <Campo rotulo="Ambiente"><input className={CLASSE_ENTRADA} value={novo.ambiente} onChange={(e) => setNovo({ ...novo, ambiente: e.target.value })} /></Campo>
           </div>
           <Campo rotulo="Usuário"><input className={CLASSE_ENTRADA} value={novo.usuario} onChange={(e) => setNovo({ ...novo, usuario: e.target.value })} autoComplete="off" /></Campo>
-          <Campo rotulo="Senha"><input type="password" className={CLASSE_ENTRADA} value={novo.senha} onChange={(e) => setNovo({ ...novo, senha: e.target.value })} autoComplete="new-password" placeholder="••••••" /></Campo>
+          <Campo rotulo="Senha">
+            <div className="relative">
+              <input type={verSenha.novo ? 'text' : 'password'} className={`${CLASSE_ENTRADA} pr-10`} value={novo.senha} onChange={(e) => setNovo({ ...novo, senha: e.target.value })} autoComplete="new-password" placeholder="••••••" />
+              <button type="button" onClick={() => setVerSenha((v) => ({ ...v, novo: !v.novo }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-suave hover:text-texto" aria-label={verSenha.novo ? 'Ocultar senha' : 'Mostrar senha'} tabIndex={-1}>{verSenha.novo ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}</button>
+            </div>
+          </Campo>
           <div className="sm:col-span-2 flex justify-end gap-2">
             <BotaoSecundario onClick={() => setNovo(null)}>Cancelar</BotaoSecundario>
             <BotaoPrimario disabled={ocupado === 'novo'} onClick={() => void criar()}>{ocupado === 'novo' ? 'Adicionando…' : 'Adicionar servidor'}</BotaoPrimario>
@@ -308,7 +314,12 @@ function CofreCompilacao() {
                   <div className="grid gap-3 border-t border-borda p-4 sm:grid-cols-2">
                     <Campo rotulo="Ambiente (Environment)"><input className={CLASSE_ENTRADA} value={d.ambiente ?? a.ambiente} onChange={(e) => set(a.slug, 'ambiente', e.target.value)} placeholder="ex.: PRIMEERP" /></Campo>
                     <Campo rotulo="Usuário"><input className={CLASSE_ENTRADA} value={d.usuario ?? a.usuario} onChange={(e) => set(a.slug, 'usuario', e.target.value)} autoComplete="off" /></Campo>
-                    <Campo rotulo={a.temSenha ? 'Nova senha (vazio = manter)' : 'Senha'}><input type="password" className={CLASSE_ENTRADA} value={d.senha ?? ''} onChange={(e) => set(a.slug, 'senha', e.target.value)} autoComplete="new-password" placeholder="••••••" /></Campo>
+                    <Campo rotulo={a.temSenha ? 'Nova senha (vazio = manter)' : 'Senha'}>
+                      <div className="relative">
+                        <input type={verSenha[a.slug] ? 'text' : 'password'} className={`${CLASSE_ENTRADA} pr-10`} value={d.senha ?? ''} onChange={(e) => set(a.slug, 'senha', e.target.value)} autoComplete="new-password" placeholder={a.temSenha ? '•••••• (guardada)' : '••••••'} />
+                        <button type="button" onClick={() => setVerSenha((v) => ({ ...v, [a.slug]: !v[a.slug] }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-suave hover:text-texto" aria-label={verSenha[a.slug] ? 'Ocultar senha' : 'Mostrar senha'} tabIndex={-1}>{verSenha[a.slug] ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}</button>
+                      </div>
+                    </Campo>
                     <Campo rotulo="Includes (pasta na VM)"><input className={CLASSE_ENTRADA} value={d.includes ?? a.includes} onChange={(e) => set(a.slug, 'includes', e.target.value)} placeholder="/opt/totvs/fontes/includes" /></Campo>
                     <div className="grid grid-cols-2 gap-3">
                       <Campo rotulo="Host"><input className={CLASSE_ENTRADA} value={d.host ?? a.host} onChange={(e) => set(a.slug, 'host', e.target.value)} /></Campo>
