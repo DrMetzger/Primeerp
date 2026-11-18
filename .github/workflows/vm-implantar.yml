@@ -47,8 +47,8 @@ jobs:
 
       - name: Empacotar o código
         run: |
-          git archive --format=tar.gz -o /tmp/primehub-app.tar.gz HEAD
-          echo "pacote: $(du -h /tmp/primehub-app.tar.gz | cut -f1)"
+          git archive --format=tar.gz -o /tmp/primehub-src.tar.gz HEAD
+          echo "pacote: $(du -h /tmp/primehub-src.tar.gz | cut -f1)"
           [ -f deploy/vm/IMPORTAR_BANCO ] && echo "IMPORTAR_BANCO=1" >> "$GITHUB_ENV" || echo "IMPORTAR_BANCO=0" >> "$GITHUB_ENV"
 
       - name: Exportar o banco na Hostinger (em pedaços, sem depender do cron)
@@ -82,7 +82,9 @@ jobs:
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20"
-          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/primehub-app.tar.gz "$USER_VM@$VM_IP:/tmp/primehub-app.tar.gz"
+          # runner self-hosted roda na própria VM: remove o destino (pode ser de outro dono) antes de copiar
+          $SSH "$USER_VM@$VM_IP" 'sudo rm -f /tmp/primehub-app.tar.gz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/primehub-src.tar.gz "$USER_VM@$VM_IP:/tmp/primehub-app.tar.gz"
           $SSH "$USER_VM@$VM_IP" 'sudo mkdir -p /opt/primehub'
           {
             printf 'export FTP_HOST=%q FTP_USR=%q FTP_PSW=%q IMPORTAR_BANCO=%q DUMP_SHA256=%q\n' "$FTP_HOST" "$FTP_USR" "$FTP_PSW" "$IMPORTAR_BANCO" "${DUMP_SHA256:-}"
