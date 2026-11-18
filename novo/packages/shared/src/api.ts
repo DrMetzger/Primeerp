@@ -326,3 +326,21 @@ export function alertasVm(d: PainelVm): AlertaVm[] {
   if (carga > d.vm.nucleos * 1.5) a.push({ nivel: 'aviso', titulo: `Processador sobrecarregado (carga ${carga.toFixed(2)} para ${d.vm.nucleos} núcleos)`, detalhe: 'Normal por alguns minutos depois de iniciar ou compilar; se continuar, veja qual serviço está pesado.' });
   return a.sort((x, y) => (x.nivel === y.nivel ? 0 : x.nivel === 'erro' ? -1 : 1));
 }
+
+/** Alvo de compilação do Protheus (nossa base ou um cliente liberado). */
+export interface AlvoCompilacao {
+  id: number;
+  slug: string;
+  nome: string;
+  host: string;
+  porta: number;
+  ambiente: string;
+  usuario: string;
+  build: string;
+  secure: boolean;
+  liberado: boolean;
+  includes: string;
+  observacoes: string;
+  /** true quando já há senha guardada (o valor nunca é devolvido). */
+  temSenha: boolean;
+}

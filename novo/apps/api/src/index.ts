@@ -6,6 +6,7 @@ import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositiv
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
 import { converterRelatorio } from '@primehub/shared';
+import { alvoComSenha, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, listarAlvos, salvarAlvo } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -213,6 +214,19 @@ app.post('/api/compilacao/converter', exigirLogin('equipe'), async (c) => {
   return c.json(converterRelatorio(fonte, nome.replace(/\.(prw|tlpp|prx)$/i, '')));
 });
 
+// Alvos de compilação (base PrimeERP e clientes liberados). Só admin.
+const compResp = async (c: Context, f: () => Promise<unknown>) => {
+  try { return c.json((await f()) as object); }
+  catch (e) {
+    if (e instanceof ErroCompilacao) return c.json({ erro: e.message }, e.status);
+    console.error('compilacao:', e instanceof Error ? e.message : e);
+    return c.json({ erro: 'Não deu certo agora.' }, 500);
+  }
+};
+app.get('/api/compilacao/alvos', exigirLogin('equipe'), (c) => compResp(c, () => listarAlvos(c.get('usuario'))));
+app.post('/api/compilacao/alvos/:slug', exigirLogin('equipe'), (c) => compResp(c, async () => salvarAlvo(c.get('usuario'), c.req.param('slug'), await corpoJson(c))));
+app.delete('/api/compilacao/alvos/:slug', exigirLogin('equipe'), (c) => compResp(c, async () => { await excluirAlvo(c.get('usuario'), c.req.param('slug')); return { mensagem: 'Alvo removido.' }; }));
+
 // ---------------------------------------------------------------- Painel da VM (Protheus e serviços)
 const vmResp = async (c: Context, f: () => Promise<unknown>) => {
   if (!podePainelVm(c.get('usuario'))) return c.json({ erro: 'Só administrador, diretor ou CEO.' }, 403);
@@ -305,7 +319,17 @@ app.get('/downloads/primehub.apk', () => respostaApk());
 
 // Comandos de manutenção (rodados com `node index.mjs --...` dentro do contêiner):
 // não sobem o servidor, só fazem a tarefa e saem. Nunca imprimem senha nem chave.
-const comando = process.argv.find((a) => a.startsWith('--') && ['--recifrar-cofre', '--conferir-cofre'].includes(a));
+// Uso interno do compilador na VM: imprime os dados de conexão + a senha
+// decifrada de um alvo, em JSON, para montar o .ini. Nunca entra em log do
+// Actions (o script na VM captura em variável e não ecoa).
+const iAlvo = process.argv.indexOf('--alvo-compilacao');
+if (iAlvo >= 0) {
+  const slug = process.argv[iAlvo + 1] ?? 'base';
+  alvoComSenha(slug)
+    .then((a) => { if (!a) { console.error('alvo não encontrado'); process.exit(3); } process.stdout.write(JSON.stringify(a)); process.exit(0); })
+    .catch((e: unknown) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });
+}
+const comando = iAlvo >= 0 ? '--alvo-compilacao' : process.argv.find((a) => a.startsWith('--') && ['--recifrar-cofre', '--conferir-cofre'].includes(a));
 if (comando === '--recifrar-cofre') {
   recifrarCofre(process.env.CHAVE_ANTIGA ?? '', process.env.CHAVE_NOVA ?? '')
     .then((r) => { console.log(`cofre: ${r.total} senha(s); recifradas ${r.recifradas}; já na chave nova ${r.jaNaNova}; ilegíveis ${r.ilegiveis}`); process.exit(0); })
@@ -315,7 +339,7 @@ if (comando === '--recifrar-cofre') {
     .then((r) => { console.log(`cofre: ${r.abrem} de ${r.total} senha(s) abrem com a chave atual`); process.exit(r.abrem === r.total ? 0 : 2); })
     .catch((e: unknown) => { console.error('cofre: ERRO', e instanceof Error ? e.message : e); process.exit(1); });
 }
-if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); }
+if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); void garantirEstruturaCompilacao().catch((e: unknown) => console.error('compilacao: estrutura', e instanceof Error ? e.message : e)); }
 if (!comando) {
   serve({ fetch: app.fetch, port: config.porta }, (info) => {
     console.log(`API do Prime Hub ouvindo na porta ${info.port}`);
