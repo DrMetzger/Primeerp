@@ -4,16 +4,6 @@ name: VM - Protheus
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - deploy/protheus/**
-      - '!deploy/protheus/tdscli.sh'
-      - '!deploy/protheus/trocar-appserver.sh'
-      - '!deploy/protheus/versoes.conf'
-      - '!deploy/protheus/caddy-protheus.sh'
-      - '!deploy/protheus/servicos-agente.py'
-      - '!deploy/protheus/painel.sh'
-      - .github/workflows/vm-protheus.yml
 
 permissions:
   contents: read
