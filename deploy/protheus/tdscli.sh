@@ -65,7 +65,7 @@ INI
   echo "--- conectividade na 1234 ---"; (timeout 5 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/1234" && echo "porta 1234 aberta") || echo "porta 1234 NAO responde"
   echo "--- rodando advpls cli (verbose) ---"
   cd $CLI/smoke
-  timeout 150 $BIN --verbose 2 --log-file $CLI/smoke/cli.log --log-all-to-stderr cli $CLI/smoke/exec.ini > $CLI/smoke/saida.txt 2>&1
+  timeout --kill-after=15 90 $BIN --verbose 1 --log-file $CLI/smoke/cli.log cli $CLI/smoke/exec.ini > $CLI/smoke/saida.txt 2>&1 < /dev/null
   echo "EXIT=$?"
   echo "--- saida (stdout+stderr) ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/saida.txt | tail -40
   echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/cli.log 2>/dev/null | tail -40
