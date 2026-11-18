@@ -1,0 +1,32 @@
+# Instala o compilador TDS-CLI (advpls) na VM e faz um teste de compilar+patch
+# na base PRIMEERP. Não mexe em cliente. Dispare manualmente.
+name: VM - TDS-CLI (compilador)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/protheus/tdscli.sh
+      - .github/workflows/vm-tdscli.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar e testar o compilador
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/protheus/tdscli.sh "$USER_VM@$VM_IP:/tmp/tdscli.sh"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke PRIMEERP' || true

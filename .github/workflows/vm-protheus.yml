@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - deploy/protheus/**
+      - '!deploy/protheus/tdscli.sh'
       - '!deploy/protheus/trocar-appserver.sh'
       - '!deploy/protheus/versoes.conf'
       - '!deploy/protheus/caddy-protheus.sh'

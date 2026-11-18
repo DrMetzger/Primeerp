@@ -17,6 +17,8 @@ on:
       - .github/workflows/vm-protheus-parar.yml
       - .github/workflows/vm-protheus-appserver.yml
       - .github/workflows/vm-protheus-caddy.yml
+      - .github/workflows/vm-tdscli.yml
+      - .github/workflows/vm-conferir-token.yml
       - .github/workflows/vm-protheus-log.yml
       - deploy/protheus/**
       - novo/apps/mobile/**
