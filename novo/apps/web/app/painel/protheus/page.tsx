@@ -1,7 +1,7 @@
 'use client';
 
 import { alertasVm, type AlvoCompilacao, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
-import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync } from 'lucide-react';
+import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { Esqueleto } from '@/components/esqueleto';
@@ -114,7 +114,6 @@ export default function PaginaProtheus() {
               </section>
             )}
             <Aviso texto={aviso.t} erro={aviso.e} />
-            <CofreCompilacao />
             <Pipeline tarefas={tarefas} />
             <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {d.servicos.map((s) => {
@@ -144,6 +143,7 @@ export default function PaginaProtheus() {
                 );
               })}
             </section>
+            <CofreCompilacao />
             <p className="text-center text-xs text-suave">Atualiza sozinho a cada 15 segundos · ações ficam registradas na VM</p>
           </>
         )}
@@ -213,6 +213,7 @@ function CofreCompilacao() {
   const [aberto, setAberto] = useState<string>('');
   const [ocupado, setOcupado] = useState('');
   const [teste, setTeste] = useState<Record<string, { testando?: boolean; conectado?: boolean; detalhe?: string; build?: string }>>({});
+  const [novo, setNovo] = useState<{ grupo: string; nome: string; host: string; porta: string; ambiente: string; usuario: string; senha: string } | null>(null);
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
 
   const carregar = useCallback(() => { api<AlvoCompilacao[]>('/api/compilacao/alvos').then(setAlvos).catch(() => setAlvos([])); }, []);
@@ -229,6 +230,25 @@ function CofreCompilacao() {
     setOcupado('');
   }
 
+  async function criar() {
+    if (!novo) return;
+    const base = `${novo.grupo}-${novo.nome}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+    const slug = `${base || 'servidor'}-${Math.random().toString(36).slice(2, 6)}`;
+    if (!novo.nome.trim() || !novo.host.trim()) { setAviso({ t: 'Informe pelo menos o nome e o host.', e: true }); return; }
+    setOcupado('novo'); setAviso({ t: '', e: false });
+    try {
+      await api(`/api/compilacao/alvos/${slug}`, { method: 'POST', body: JSON.stringify({ grupo: novo.grupo, nome: novo.nome, host: novo.host, porta: Number(novo.porta) || 1234, ambiente: novo.ambiente, usuario: novo.usuario || 'admin', senha: novo.senha, liberado: true }) });
+      setNovo(null); setAviso({ t: 'Servidor adicionado.', e: false }); carregar();
+    } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu.', e: true }); }
+    setOcupado('');
+  }
+  async function remover(slug: string, nome: string) {
+    if (!confirm(`Remover o servidor "${nome}"? A senha guardada some junto.`)) return;
+    setOcupado(slug);
+    try { await api(`/api/compilacao/alvos/${slug}`, { method: 'DELETE' }); setAberto(''); carregar(); }
+    catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu.', e: true }); }
+    setOcupado('');
+  }
   async function testar(slug: string) {
     setTeste((t) => ({ ...t, [slug]: { testando: true } }));
     try {
@@ -246,8 +266,27 @@ function CofreCompilacao() {
     <section className="space-y-3 rounded-3xl border border-borda bg-superficie p-5 shadow-sm">
       <header className="flex items-center gap-2">
         <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-sky-500 text-white"><Server size={18} aria-hidden="true" /></span>
-        <div><h2 className="font-bold text-texto">Servidores de compilação</h2><p className="text-xs text-suave">Os mesmos servidores do VSCode, por empresa. Verde = pronto pra compilar (liberado, com ambiente e senha). A senha fica cifrada no cofre.</p></div>
+        <div className="flex-1"><h2 className="font-bold text-texto">VS Code — servidores</h2><p className="text-xs text-suave">Os mesmos servidores do VS Code, por empresa. Verde = conectado. A senha fica cifrada no cofre.</p></div>
+        <BotaoPrimario onClick={() => setNovo({ grupo: '', nome: '', host: '', porta: '1234', ambiente: '', usuario: 'admin', senha: '' })}><Plus size={16} aria-hidden="true" /> Adicionar</BotaoPrimario>
       </header>
+      {novo && (
+        <div className="grid gap-3 rounded-2xl border border-sky-500/40 bg-sky-500/5 p-4 sm:grid-cols-2">
+          <p className="sm:col-span-2 font-semibold text-texto">Novo servidor</p>
+          <Campo rotulo="Empresa"><input className={CLASSE_ENTRADA} value={novo.grupo} onChange={(e) => setNovo({ ...novo, grupo: e.target.value })} placeholder="ex.: DS TECNOLOGIA" /></Campo>
+          <Campo rotulo="Nome"><input className={CLASSE_ENTRADA} value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder="ex.: DS - TESTE - EXCLUSIVO" /></Campo>
+          <Campo rotulo="Host (endereço)"><input className={CLASSE_ENTRADA} value={novo.host} onChange={(e) => setNovo({ ...novo, host: e.target.value })} placeholder="ex.: ds122513.protheus.cloudtotvs.com.br" /></Campo>
+          <div className="grid grid-cols-2 gap-3">
+            <Campo rotulo="Porta"><input type="number" className={CLASSE_ENTRADA} value={novo.porta} onChange={(e) => setNovo({ ...novo, porta: e.target.value })} /></Campo>
+            <Campo rotulo="Ambiente"><input className={CLASSE_ENTRADA} value={novo.ambiente} onChange={(e) => setNovo({ ...novo, ambiente: e.target.value })} /></Campo>
+          </div>
+          <Campo rotulo="Usuário"><input className={CLASSE_ENTRADA} value={novo.usuario} onChange={(e) => setNovo({ ...novo, usuario: e.target.value })} autoComplete="off" /></Campo>
+          <Campo rotulo="Senha"><input type="password" className={CLASSE_ENTRADA} value={novo.senha} onChange={(e) => setNovo({ ...novo, senha: e.target.value })} autoComplete="new-password" placeholder="••••••" /></Campo>
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <BotaoSecundario onClick={() => setNovo(null)}>Cancelar</BotaoSecundario>
+            <BotaoPrimario disabled={ocupado === 'novo'} onClick={() => void criar()}>{ocupado === 'novo' ? 'Adicionando…' : 'Adicionar servidor'}</BotaoPrimario>
+          </div>
+        </div>
+      )}
       {grupos.map((g) => (
         <div key={g} className="space-y-2">
           <p className="text-xs font-bold uppercase tracking-wide text-suave">{g}</p>
@@ -283,7 +322,8 @@ function CofreCompilacao() {
                     )}
                     <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2">
                       <label className="flex items-center gap-2 text-sm text-texto"><input type="checkbox" checked={d.liberado ?? a.liberado} onChange={(e) => set(a.slug, 'liberado', e.target.checked)} /> Liberado para compilar</label>
-                      <div className="ml-auto flex gap-2">
+                      <div className="ml-auto flex flex-wrap gap-2">
+                        {a.slug !== 'base' && <BotaoSecundario disabled={ocupado === a.slug} className="text-perigo" onClick={() => void remover(a.slug, a.nome)}><Trash2 size={16} aria-hidden="true" /> Remover</BotaoSecundario>}
                         <BotaoSecundario disabled={tt?.testando || !a.temSenha} onClick={() => void testar(a.slug)}>{tt?.testando ? 'Testando…' : 'Testar conexão'}</BotaoSecundario>
                         <BotaoPrimario disabled={ocupado === a.slug} onClick={() => void salvar(a)}>{ocupado === a.slug ? 'Salvando…' : 'Salvar'}</BotaoPrimario>
                       </div>
