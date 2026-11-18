@@ -1,5 +1,5 @@
-# Instala o compilador TDS-CLI (advpls) na VM e faz um teste de compilar+patch
-# na base PRIMEERP. Não mexe em cliente. Dispare manualmente.
+# Instala o compilador TDS-CLI (advpls) na VM e testa compilar+patch na base
+# PRIMEERP. O resultado sai como ARTEFATO (o log do Actions está instável).
 name: VM - TDS-CLI (compilador)
 
 on:
@@ -29,4 +29,11 @@ jobs:
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/protheus/tdscli.sh "$USER_VM@$VM_IP:/tmp/tdscli.sh"
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke PRIMEERP' || true
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke PRIMEERP' > resultado.txt 2>&1 || true
+          echo "=== resumo ==="; tail -5 resultado.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tdscli-resultado
+          path: resultado.txt
+          retention-days: 3
