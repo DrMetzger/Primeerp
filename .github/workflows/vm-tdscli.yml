@@ -28,12 +28,9 @@ jobs:
           SSHPASS: ${{ secrets.PSW_VM }}
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
-          SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25"
           sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/protheus/tdscli.sh "$USER_VM@$VM_IP:/tmp/tdscli.sh"
-          echo "== dispara (volta na hora)"; $SSH "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh iniciar PRIMEERP' || true
-          echo "== espera o teste rodar"; sleep 60
-          echo "== lê o resultado"; $SSH "$USER_VM@$VM_IP" 'sudo cat /opt/totvs/tdscli/smoke/resultado.txt 2>/dev/null; echo; echo "===PATCH==="; sudo ls -la /opt/totvs/tdscli/smoke/patch/ 2>/dev/null' > resultado.txt 2>&1 || true
-          echo "=== resumo ==="; tail -8 resultado.txt || true
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 -o ServerAliveInterval=15 -o ServerAliveCountMax=20 "$USER_VM@$VM_IP" 'sudo bash /tmp/tdscli.sh smoke PRIMEERP' > resultado.txt 2>&1 || true
+          echo "=== resumo ==="; tail -12 resultado.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -76,6 +76,7 @@ INI
 
 case "${1:-instalar}" in
   instalar) instalar ;;
+  smoke)    instalar; executar "${2:-PRIMEERP}" ;;
   iniciar)  instalar; mkdir -p $CLI/smoke; : > $CLI/smoke/resultado.txt
             setsid bash -c "BASE=$BASE CLI=$CLI BIN=$BIN bash $0 _executar ${2:-PRIMEERP} > $CLI/smoke/resultado.txt 2>&1 < /dev/null" >/dev/null 2>&1 &
             echo "teste disparado (destacado)"; exit 0 ;;
