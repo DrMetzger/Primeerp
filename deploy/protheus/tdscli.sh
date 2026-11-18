@@ -35,18 +35,12 @@ PRW
 logToFile=$S/exec.log
 showConsoleOutput=True
 
-[valida]
-action=validate
-server=127.0.0.1
-port=1234
-secure=0
-
 [auth]
 action=authentication
 server=127.0.0.1
 port=1234
 secure=0
-build=AUTO
+build=7.00.240223P
 environment=$AMB
 user=admin
 psw=
