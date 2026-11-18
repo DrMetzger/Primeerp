@@ -1,11 +1,11 @@
 'use client';
 
-import { alertasVm, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
+import { alertasVm, type AlvoCompilacao, type PainelVm, type ServicoVm, type TarefaVm } from '@primehub/shared';
 import { Activity, CheckCircle2, CircleDashed, Cpu, Loader2, MinusCircle, Power, PowerOff, XCircle, Database, ExternalLink, HardDrive, KeyRound, MemoryStick, Play, RefreshCw, ScrollText, Server, Square, RotateCw, FolderSync } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { Esqueleto } from '@/components/esqueleto';
-import { Aviso, BotaoSecundario, Modal, Vazio } from '@/components/ui/basico';
+import { Aviso, BotaoPrimario, BotaoSecundario, Campo, CLASSE_ENTRADA, Modal, Vazio } from '@/components/ui/basico';
 import { api } from '@/lib/api';
 
 const ICONE: Record<string, typeof Server> = { appserver: Server, dbaccess: Database, license: KeyRound, postgresql: Database, syncthing: FolderSync };
@@ -114,6 +114,7 @@ export default function PaginaProtheus() {
               </section>
             )}
             <Aviso texto={aviso.t} erro={aviso.e} />
+            <CofreCompilacao />
             <Pipeline tarefas={tarefas} />
             <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {d.servicos.map((s) => {
@@ -200,6 +201,66 @@ function Pipeline({ tarefas }: { tarefas: TarefaVm[] }) {
           );
         })}
       </ul>
+    </section>
+  );
+}
+
+/** Cofre de compilação: guarda a senha (cifrada) que o compilador usa para
+ *  conectar no AppServer. A base PrimeERP vem pronta; a senha fica só aqui. */
+function CofreCompilacao() {
+  const [alvos, setAlvos] = useState<AlvoCompilacao[] | null>(null);
+  const [edit, setEdit] = useState<Record<string, Partial<AlvoCompilacao> & { senha?: string }>>({});
+  const [ocupado, setOcupado] = useState('');
+  const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
+
+  const carregar = useCallback(() => { api<AlvoCompilacao[]>('/api/compilacao/alvos').then(setAlvos).catch(() => setAlvos([])); }, []);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function salvar(a: AlvoCompilacao) {
+    const d = edit[a.slug] ?? {};
+    setOcupado(a.slug); setAviso({ t: '', e: false });
+    try {
+      await api(`/api/compilacao/alvos/${a.slug}`, { method: 'POST', body: JSON.stringify({ nome: d.nome ?? a.nome, host: d.host ?? a.host, porta: d.porta ?? a.porta, ambiente: d.ambiente ?? a.ambiente, usuario: d.usuario ?? a.usuario, build: d.build ?? a.build, senha: d.senha ?? '', liberado: d.liberado ?? a.liberado }) });
+      setAviso({ t: 'Salvo. A senha fica guardada cifrada.', e: false });
+      setEdit((e) => ({ ...e, [a.slug]: {} })); carregar();
+    } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu.', e: true }); }
+    setOcupado('');
+  }
+
+  if (!alvos) return <Esqueleto className="h-40" />;
+  const campo = (a: AlvoCompilacao, k: 'nome' | 'host' | 'ambiente' | 'usuario' | 'build', v: string) => setEdit((e) => ({ ...e, [a.slug]: { ...e[a.slug], [k]: v } }));
+
+  return (
+    <section className="space-y-3 rounded-3xl border border-borda bg-superficie p-5 shadow-sm">
+      <header className="flex items-center gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-sky-500 text-white"><KeyRound size={18} aria-hidden="true" /></span>
+        <div><h2 className="font-bold text-texto">Compilação (senhas do AppServer)</h2><p className="text-xs text-suave">A senha fica guardada cifrada, igual ao cofre de acessos. O compilador usa ela para conectar; ninguém vê o valor depois de salvar.</p></div>
+      </header>
+      {alvos.map((a) => {
+        const d = edit[a.slug] ?? {};
+        return (
+          <div key={a.slug} className="grid gap-3 rounded-2xl border border-borda bg-superficie-alta/40 p-4 sm:grid-cols-2">
+            <div className="sm:col-span-2 flex items-center gap-2">
+              <span className="font-semibold text-texto">{a.slug === 'base' ? 'Base PrimeERP (nossa VM)' : a.nome}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${a.temSenha ? 'bg-sucesso/15 text-sucesso' : 'bg-alerta/15 text-alerta'}`}>{a.temSenha ? 'senha guardada' : 'sem senha'}</span>
+            </div>
+            <Campo rotulo="Ambiente"><input className={CLASSE_ENTRADA} value={d.ambiente ?? a.ambiente} onChange={(e) => campo(a, 'ambiente', e.target.value)} /></Campo>
+            <Campo rotulo="Usuário"><input className={CLASSE_ENTRADA} value={d.usuario ?? a.usuario} onChange={(e) => campo(a, 'usuario', e.target.value)} autoComplete="off" /></Campo>
+            <Campo rotulo={a.temSenha ? 'Nova senha (deixe vazio para manter)' : 'Senha'}>
+              <input type="password" className={CLASSE_ENTRADA} value={d.senha ?? ''} onChange={(e) => setEdit((x) => ({ ...x, [a.slug]: { ...x[a.slug], senha: e.target.value } }))} autoComplete="new-password" placeholder="••••••" />
+            </Campo>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo rotulo="Host"><input className={CLASSE_ENTRADA} value={d.host ?? a.host} onChange={(e) => campo(a, 'host', e.target.value)} /></Campo>
+              <Campo rotulo="Porta"><input type="number" className={CLASSE_ENTRADA} value={d.porta ?? a.porta} onChange={(e) => setEdit((x) => ({ ...x, [a.slug]: { ...x[a.slug], porta: Number(e.target.value) } }))} /></Campo>
+            </div>
+            <div className="sm:col-span-2 flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-texto"><input type="checkbox" checked={d.liberado ?? a.liberado} onChange={(e) => setEdit((x) => ({ ...x, [a.slug]: { ...x[a.slug], liberado: e.target.checked } }))} /> Liberado para compilar</label>
+              <BotaoPrimario disabled={ocupado === a.slug} onClick={() => void salvar(a)}>{ocupado === a.slug ? 'Salvando…' : 'Salvar'}</BotaoPrimario>
+            </div>
+          </div>
+        );
+      })}
+      <Aviso texto={aviso.t} erro={aviso.e} />
     </section>
   );
 }
