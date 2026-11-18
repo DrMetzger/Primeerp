@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   trocar:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     timeout-minutes: 20
     steps:
       - name: Trocar a chave e recifrar as senhas

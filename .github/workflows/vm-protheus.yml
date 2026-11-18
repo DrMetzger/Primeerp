@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   preparar:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4

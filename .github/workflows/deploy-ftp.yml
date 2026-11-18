@@ -29,7 +29,7 @@ env:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
 

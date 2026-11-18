@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   implantar:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     timeout-minutes: 45
     env:
       FTP_HOST: ${{ secrets.FTP_HOST }}

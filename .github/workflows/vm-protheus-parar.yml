@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   vm:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - name: Parar serviços do Protheus
         env:
