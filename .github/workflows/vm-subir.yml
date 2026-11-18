@@ -1,0 +1,28 @@
+name: VM - subir Protheus
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vm-protheus
+  cancel-in-progress: false
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: Subir a pilha
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          for u in postgresql@16-main licenseVirtual totvsdbaccess totvsappserver; do
+            systemctl is-active -q $u || { echo "subindo $u"; systemctl start $u; sleep 4; }
+            echo "$u: $(systemctl is-active $u)"
+          done
+          for i in $(seq 1 30); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
+          echo "8089: $(ss -tlnH | grep -q ':8089 ' && echo aberta || echo FECHADA) | 1234: $(ss -tlnH | grep -q ':1234 ' && echo aberta || echo FECHADA)"
+          systemctl is-active totvsappserver | grep -q active && echo "APPSERVER OK" || { echo "--- erro no appserver ---"; journalctl -u totvsappserver -n 15 --no-pager | tail -15; }
+          R
