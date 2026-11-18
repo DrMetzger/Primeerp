@@ -5,6 +5,7 @@ import { emitirSessao, exigirLogin, verificarCredenciais, type Variaveis, client
 import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositivo } from './dois-fatores';
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
+import { converterRelatorio } from '@primehub/shared';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -200,6 +201,17 @@ app.post('/api/agente/token', exigirLogin('equipe'), (c) => agenteResp(c, async 
   if (!['admin', 'diretor', 'ceo'].includes(c.get('usuario').perfil ?? '')) throw new ErroAgente('Só administrador gera o token do agente.', 403);
   return { token: await gerarTokenAgente() };
 }));
+
+// Converte um fonte de relatório ADVPL para User Function (padrão PrimeERP).
+// Só prepara o texto; compilar/gerar patch é outro passo, revisado por pessoa.
+app.post('/api/compilacao/converter', exigirLogin('equipe'), async (c) => {
+  const b = await corpoJson(c);
+  const fonte = typeof b.fonte === 'string' ? b.fonte : '';
+  const nome = (typeof b.nome === 'string' ? b.nome : '').trim();
+  if (!fonte.trim() || !nome) return c.json({ erro: 'Informe o fonte e o nome do programa (ex.: MATR435).' }, 400);
+  if (!/^[A-Za-z_]\w{0,19}(\.(prw|tlpp|prx))?$/i.test(nome)) return c.json({ erro: 'Nome de programa inválido.' }, 400);
+  return c.json(converterRelatorio(fonte, nome.replace(/\.(prw|tlpp|prx)$/i, '')));
+});
 
 // ---------------------------------------------------------------- Painel da VM (Protheus e serviços)
 const vmResp = async (c: Context, f: () => Promise<unknown>) => {
