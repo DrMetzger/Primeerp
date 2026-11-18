@@ -63,10 +63,12 @@ patchType=PTM
 saveLocal=$CLI/smoke/patch/
 INI
   echo "--- conectividade na 1234 ---"; (timeout 5 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/1234" && echo "porta 1234 aberta") || echo "porta 1234 NAO responde"
-  echo "--- rodando advpls cli (verbose) ---"
+  echo "--- rodando advpls cli (destacado) ---"
   cd $CLI/smoke
-  timeout --kill-after=15 90 $BIN --verbose 1 --log-file $CLI/smoke/cli.log cli $CLI/smoke/exec.ini > $CLI/smoke/saida.txt 2>&1 < /dev/null
-  echo "EXIT=$?"
+  : > $CLI/smoke/saida.txt; : > $CLI/smoke/cli.log
+  setsid bash -c "$BIN --verbose 1 --log-file $CLI/smoke/cli.log cli $CLI/smoke/exec.ini > $CLI/smoke/saida.txt 2>&1 < /dev/null" &
+  for i in $(seq 1 24); do sleep 3; grep -qiE 'patch|error|erro|success|sucesso|fail|falha|exception|authenticat' $CLI/smoke/saida.txt $CLI/smoke/cli.log 2>/dev/null && break; done
+  pkill -9 -f advpls 2>/dev/null; sleep 1
   echo "--- saida (stdout+stderr) ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/saida.txt | tail -40
   echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/cli.log 2>/dev/null | tail -40
   echo "--- exec.log ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/exec.log 2>/dev/null | tail -20
