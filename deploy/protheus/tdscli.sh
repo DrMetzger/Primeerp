@@ -64,11 +64,11 @@ patchType=PTM
 saveLocal=$S/patch/
 INI
   echo "== teste compilar+patch na base $AMB (localhost:1234) — $(date '+%H:%M:%S')"
-  ( cd $S && timeout --kill-after=10 70 $BIN --verbose 1 --log-file $S/cli.log cli $S/exec.ini > $S/saida.txt 2>&1 < /dev/null; echo "EXIT=$?" >> $S/saida.txt )
+  ( cd $S && timeout --kill-after=20 160 $BIN --verbose 1 --log-file $S/cli.log cli $S/exec.ini > $S/saida.txt 2>&1 < /dev/null; echo "EXIT=$?" >> $S/saida.txt )
   pkill -9 -f advpls 2>/dev/null || true
   echo "--- EXIT ---"; grep -a '^EXIT=' $S/saida.txt
-  echo "--- saida ---"; grep -aviE 'psw=|password|senha' $S/saida.txt | grep -av '^EXIT=' | tail -40
-  echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $S/cli.log 2>/dev/null | tail -40
+  echo "--- saida ---"; grep -aviE 'psw=|password|senha' $S/saida.txt | grep -av '^EXIT=' | tail -90
+  echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $S/cli.log 2>/dev/null | tail -90
   echo "--- exec.log ---"; grep -aviE 'psw=|password|senha' $S/exec.log 2>/dev/null | tail -20
   echo "--- patch gerado? ---"; ls -la $S/patch/ 2>/dev/null
   echo "FIM-TDSCLI $(date '+%H:%M:%S')"
