@@ -34,6 +34,12 @@ PRW
 logToFile=$CLI/smoke/exec.log
 showConsoleOutput=True
 
+[valida]
+action=validate
+server=127.0.0.1
+port=1234
+secure=0
+
 [auth]
 action=authentication
 server=127.0.0.1
@@ -56,13 +62,14 @@ fileResource=xsmoke01.prw
 patchType=PTM
 saveLocal=$CLI/smoke/patch/
 INI
-  echo "--- ajuda do advpls (v2) ---"
-  $BIN --help 2>&1 | head -25 | grep -aviE 'psw|password|senha'
-  echo "--- ajuda do modo cli ---"
-  $BIN cli --help 2>&1 | head -30 | grep -aviE 'psw|password|senha'
-  echo "--- rodando advpls cli ---"
-  ( cd $CLI/smoke && timeout 120 $BIN cli $CLI/smoke/exec.ini; echo "EXIT=$?" ) 2>&1 | grep -aviE 'psw=|password|senha' | tail -50
-  echo "--- exec.log ---"; cat $CLI/smoke/exec.log 2>/dev/null | grep -aviE 'psw=|password|senha' | tail -40
+  echo "--- conectividade na 1234 ---"; (timeout 5 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/1234" && echo "porta 1234 aberta") || echo "porta 1234 NAO responde"
+  echo "--- rodando advpls cli (verbose) ---"
+  cd $CLI/smoke
+  timeout 150 $BIN --verbose 2 --log-file $CLI/smoke/cli.log --log-all-to-stderr cli $CLI/smoke/exec.ini > $CLI/smoke/saida.txt 2>&1
+  echo "EXIT=$?"
+  echo "--- saida (stdout+stderr) ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/saida.txt | tail -40
+  echo "--- cli.log ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/cli.log 2>/dev/null | tail -40
+  echo "--- exec.log ---"; grep -aviE 'psw=|password|senha' $CLI/smoke/exec.log 2>/dev/null | tail -20
   echo "--- patch gerado? ---"; ls -la $CLI/smoke/patch/ 2>/dev/null
 }
 
