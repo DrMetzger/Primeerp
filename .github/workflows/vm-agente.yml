@@ -31,6 +31,7 @@ jobs:
           SSHPASS: ${{ secrets.PSW_VM }}
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
-          tar -czf /tmp/ag.tgz -C deploy protheus/servicos-agente.py protheus/painel.sh protheus/tdscli.sh
-          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/ag.tgz "$USER_VM@$VM_IP:/tmp/ag.tgz"
+          tar -czf /tmp/ag-src.tgz -C deploy protheus/servicos-agente.py protheus/painel.sh protheus/tdscli.sh
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/ag.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/ag-src.tgz "$USER_VM@$VM_IP:/tmp/ag.tgz"
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/ag && mkdir -p /tmp/ag && tar -xzf /tmp/ag.tgz -C /tmp/ag && bash /tmp/ag/protheus/painel.sh"'
