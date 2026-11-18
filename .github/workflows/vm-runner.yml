@@ -1,0 +1,30 @@
+# Instala o runner self-hosted na VM. Dispare passando o token de registro
+# (Settings -> Actions -> Runners -> New self-hosted runner). Token dura ~1h.
+name: VM - instalar runner self-hosted
+
+on:
+  workflow_dispatch:
+    inputs:
+      token:
+        description: 'Token de registro do runner (do GitHub)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar runner na VM
+        env:
+          VM_IP: ${{ secrets.VM_IP }}
+          USER_VM: ${{ secrets.USER_VM }}
+          SSHPASS: ${{ secrets.PSW_VM }}
+          RTOKEN: ${{ github.event.inputs.token }}
+        run: |
+          echo "::add-mask::$RTOKEN"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/vm/runner-instalar.sh "$USER_VM@$VM_IP:/tmp/runner-instalar.sh"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" "sudo bash /tmp/runner-instalar.sh '$RTOKEN' && sudo shred -u /tmp/runner-instalar.sh 2>/dev/null || true"
