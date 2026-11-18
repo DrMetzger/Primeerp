@@ -56,8 +56,13 @@ fileResource=xsmoke01.prw
 patchType=PTM
 saveLocal=$CLI/smoke/patch/
 INI
+  echo "--- ajuda do advpls (v2) ---"
+  $BIN --help 2>&1 | head -25 | grep -aviE 'psw|password|senha'
+  echo "--- ajuda do modo cli ---"
+  $BIN cli --help 2>&1 | head -30 | grep -aviE 'psw|password|senha'
   echo "--- rodando advpls cli ---"
-  ( cd $CLI/smoke && timeout 120 $BIN cli $CLI/smoke/exec.ini 2>&1 ) | grep -aviE 'psw=|password|senha' | tail -40
+  ( cd $CLI/smoke && timeout 120 $BIN cli $CLI/smoke/exec.ini; echo "EXIT=$?" ) 2>&1 | grep -aviE 'psw=|password|senha' | tail -50
+  echo "--- exec.log ---"; cat $CLI/smoke/exec.log 2>/dev/null | grep -aviE 'psw=|password|senha' | tail -40
   echo "--- patch gerado? ---"; ls -la $CLI/smoke/patch/ 2>/dev/null
 }
 
