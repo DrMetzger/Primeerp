@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   teste:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     services:
       mysql:
         image: mariadb:11

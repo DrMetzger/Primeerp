@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   gemini-ai-studio:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - name: Chamar Gemini (generativelanguage.googleapis.com)
         env:
@@ -35,7 +35,7 @@ jobs:
           exit 1
 
   gemini-vertex:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - name: Chamar Gemini (aiplatform.googleapis.com)
         env:
@@ -50,7 +50,7 @@ jobs:
           [ "$CODE" = 200 ]
 
   banco:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - name: Conectar no MySQL
         env:
@@ -63,7 +63,7 @@ jobs:
           mysql --connect-timeout=20 -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) AS tabelas FROM information_schema.tables WHERE table_schema = DATABASE();"
 
   ftp:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vm]
     steps:
       - name: Conectar no FTP
         env:
