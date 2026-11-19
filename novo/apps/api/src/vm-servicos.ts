@@ -14,9 +14,13 @@ export class ErroVm extends Error {
   constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 500 | 503 = 500) { super(message); }
 }
 
-export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string): Promise<T> {
+export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string, corpo?: unknown, timeoutMs = 150_000): Promise<T> {
   return new Promise((ok, falha) => {
-    const req = request({ socketPath: SOCKET, path: caminho, method: metodo, headers: quem ? { 'x-quem': quem.replace(/[^\p{L}\p{N} @._-]/gu, '').slice(0, 120) } : {}, timeout: 150_000 }, (res) => {
+    const cabecalhos: Record<string, string> = {};
+    if (quem) cabecalhos['x-quem'] = quem.replace(/[^\p{L}\p{N} @._-]/gu, '').slice(0, 120);
+    const dadosEnvio = corpo !== undefined ? JSON.stringify(corpo) : undefined;
+    if (dadosEnvio !== undefined) { cabecalhos['content-type'] = 'application/json'; cabecalhos['content-length'] = String(Buffer.byteLength(dadosEnvio)); }
+    const req = request({ socketPath: SOCKET, path: caminho, method: metodo, headers: cabecalhos, timeout: timeoutMs }, (res) => {
       let dados = '';
       res.setEncoding('utf8');
       res.on('data', (c: string) => { dados += c; });
@@ -30,6 +34,7 @@ export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string
     });
     req.on('timeout', () => { req.destroy(); falha(new ErroVm('O agente da VM demorou para responder.', 503)); });
     req.on('error', () => falha(new ErroVm('O painel da VM está fora do ar (agente de serviços parado).', 503)));
+    if (dadosEnvio !== undefined) req.write(dadosEnvio);
     req.end();
   });
 }

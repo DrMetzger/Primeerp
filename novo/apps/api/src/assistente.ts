@@ -1,6 +1,7 @@
-import { manualEmTexto, type UsuarioLogado } from '@primehub/shared';
+import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub/shared';
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
+import { compilarFonte, listarAlvos, podeCompilacao } from './compilacao';
 
 /**
  * DOIS assistentes separados, ambos no Gemini pago da Prime:
@@ -177,6 +178,34 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       return { ok: 'Cartão de confirmação mostrado à pessoa.' };
     },
   },
+  {
+    declaracao: {
+      name: 'gerar_patch',
+      description: 'SÓ PARA ADMINISTRADORES. Compila um fonte ADVPL/TLPP em um servidor cadastrado (os mesmos do VS Code, no painel Protheus) e gera um patch .ptm pronto para aplicar. Pode antes converter um relatório padrão em User Function no padrão PrimeERP. Devolve um link para baixar o .ptm. Use quando pedirem para compilar, gerar patch, ou converter um relatório em user function.',
+      parameters: { type: 'OBJECT', properties: {
+        servidor: { type: 'STRING', description: 'nome ou identificador do servidor cadastrado (ex.: "base", "DS - TESTE - EXCLUSIVO", "Werk Schott")' },
+        nome_programa: { type: 'STRING', description: 'nome do programa/fonte, ex.: MATR435' },
+        fonte: { type: 'STRING', description: 'conteúdo completo do fonte ADVPL/TLPP a compilar' },
+        converter_relatorio: { type: 'BOOLEAN', description: 'true para converter o relatório em User Function (1ª letra vira X, chamada U_) antes de compilar' },
+      }, required: ['servidor', 'fonte'] },
+    },
+    executar: async (u, a) => {
+      if (!podeCompilacao(u)) return { erro: 'Gerar patch é só para administradores (admin/diretor/CEO).' };
+      const alvos = await listarAlvos(u);
+      const termo = txt(a, 'servidor').toLowerCase();
+      const alvo = alvos.find((x) => x.slug === termo || x.nome.toLowerCase().includes(termo) || `${x.grupo} ${x.nome}`.toLowerCase().includes(termo));
+      if (!alvo) return { erro: `Servidor "${txt(a, 'servidor')}" não encontrado. Disponíveis: ${alvos.map((x) => x.nome).join(', ')}` };
+      let fonte = typeof a.fonte === 'string' ? a.fonte : '';
+      if (!fonte.trim()) return { erro: 'Preciso do conteúdo do fonte para compilar.' };
+      const base = (txt(a, 'nome_programa') || 'FONTE').replace(/\.(prw|tlpp|prx)$/i, '');
+      let nomeArquivo = `${base || 'FONTE'}.prw`;
+      let resumoConversao = '';
+      if (a.converter_relatorio) { const c = converterRelatorio(fonte, base || 'FONTE'); fonte = c.fonte; nomeArquivo = c.nomeArquivo; resumoConversao = `Convertido para ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).`; }
+      const r = await compilarFonte(u, alvo.slug, [{ nome: nomeArquivo, conteudo_base64: Buffer.from(fonte, 'utf8').toString('base64') }]);
+      if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.erro, dica: 'confira ambiente/senha do servidor e se o fonte compila' };
+      return { ok: true, servidor: alvo.nome, conversao: resumoConversao || undefined, nome_patch: r.nome, baixar: `/api/compilacao/patch/${r.token}`, instrucao_resposta: 'Dê o link de download do .ptm para a pessoa e diga em qual servidor compilou.' };
+    },
+  },
 ];
 
 const FERRAMENTAS_CLIENTE: Ferramenta[] = [
@@ -222,6 +251,8 @@ JEITO: colega de trabalho gente boa, educado e descolado na medida, objetivo. Nu
 CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos exatamente como estão nele: os módulos ficam no MENU LATERAL ESQUERDO (no app, barra de baixo e Menu); NUNCA chame módulo de "aba". Nunca invente tela, botão ou rotina. Também domina TOTVS Protheus e ADVPL e pode orientar a equipe tecnicamente.
 
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
+
+COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Peça o fonte e o servidor se faltar, chame gerar_patch e devolva o link do .ptm. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
 

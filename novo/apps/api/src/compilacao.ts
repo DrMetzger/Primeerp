@@ -131,3 +131,41 @@ export async function alvoComSenha(slug: string): Promise<(AlvoCompilacao & { se
   if (!l) return null;
   return { ...paraAlvo(l), senha: decifrar(l.senha_cifrada as string | null) ?? '' };
 }
+
+// ---- Compilar um fonte e gerar o patch (.ptm) -----------------------------
+import { agente } from './vm-servicos';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+
+const PATCHES = join(process.env.UPLOADS_DIR ?? '/uploads', 'patches');
+
+export interface ArquivoFonte { nome: string; conteudo_base64: string }
+export interface ResultadoCompilacao { ok: boolean; nome?: string; erro?: string; token?: string }
+
+/** Compila os fontes no servidor do alvo e guarda o .ptm para download. Só admin. */
+export async function compilarFonte(u: UsuarioLogado, slug: string, arquivos: ArquivoFonte[]): Promise<ResultadoCompilacao> {
+  if (!podeCompilacao(u)) throw new ErroCompilacao('Sem permissão.', 403);
+  slug = String(slug || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const alvo = await primeira<RowDataPacket>('SELECT liberado FROM compilacao_alvos WHERE slug = ?', [slug]);
+  if (!alvo) throw new ErroCompilacao('Servidor não encontrado.', 404);
+  if (!alvo.liberado) throw new ErroCompilacao('Servidor não está liberado para compilar.');
+  if (!arquivos?.length) throw new ErroCompilacao('Envie ao menos um fonte (.prw/.tlpp).');
+  const r = await agente<{ ok: boolean; nome?: string; patch_base64?: string; erro?: string }>('POST', '/compilacao/compilar', u.nome, { slug, arquivos }, 280_000);
+  if (!r.ok || !r.patch_base64) return { ok: false, erro: r.erro || 'não gerou o patch (ver log)' };
+  await mkdir(PATCHES, { recursive: true });
+  const token = randomBytes(16).toString('hex');
+  await writeFile(join(PATCHES, `${token}.ptm`), Buffer.from(r.patch_base64, 'base64'));
+  await writeFile(join(PATCHES, `${token}.nome`), r.nome ?? 'patch.ptm');
+  return { ok: true, nome: r.nome ?? '', token };
+}
+
+export async function lerPatch(token: string): Promise<{ nome: string; bytes: Buffer } | null> {
+  const t = String(token || '').replace(/[^a-f0-9]/g, '');
+  if (t.length !== 32) return null;
+  try {
+    const bytes = await readFile(join(PATCHES, `${t}.ptm`));
+    const nome = (await readFile(join(PATCHES, `${t}.nome`), 'utf8').catch(() => 'patch.ptm')).trim() || 'patch.ptm';
+    return { nome, bytes };
+  } catch { return null; }
+}

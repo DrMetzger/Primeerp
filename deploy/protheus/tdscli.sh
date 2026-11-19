@@ -131,10 +131,72 @@ print(json.dumps(r, ensure_ascii=False))
 PY
 }
 
+# Compila os fontes de um diretório em um alvo e gera um .ptm.
+# Uso: compilar <slug> <dir_com_fontes>. Imprime UMA linha JSON.
+compilar() {
+  local SLUG=${1:?} SRC=${2:?} S=$CLI/compilar
+  rm -rf $S; mkdir -p $S/patch
+  local ALVO; ALVO=$(docker exec primehub-api node /app/index.mjs --alvo-compilacao "$SLUG" 2>/dev/null)
+  [ -z "$ALVO" ] && { echo '{"ok":false,"erro":"alvo não encontrado"}'; return 0; }
+  eval "$(printf '%s' "$ALVO" | python3 -c 'import sys,json;a=json.load(sys.stdin);print("AHOST=%r;APORT=%d;AENV=%r;AUSER=%r;ABUILD=%r;ASEC=%d;ATEM=%d;AINC=%r"%(a["host"],a["porta"],a["ambiente"],a["usuario"],a.get("build") or "AUTO",1 if a.get("secure") else 0,1 if a.get("senha") else 0,a.get("includes") or ""))')"
+  [ -n "$AINC" ] || AINC=/opt/totvs/protheus12/protheus/include
+  [ "$ATEM" != 1 ] && { echo '{"ok":false,"erro":"alvo sem senha cadastrada"}'; return 0; }
+  [ -z "$AENV" ] && { echo '{"ok":false,"erro":"alvo sem ambiente cadastrado"}'; return 0; }
+  find "$SRC" -type f \( -iname '*.prw' -o -iname '*.tlpp' -o -iname '*.prx' \) > $S/progs.txt
+  [ -s $S/progs.txt ] || { echo '{"ok":false,"erro":"nenhum fonte .prw/.tlpp enviado"}'; return 0; }
+  awk -F/ '{print $NF}' $S/progs.txt > $S/recursos.txt
+  local ASENHA; ASENHA=$(printf '%s' "$ALVO" | python3 -c 'import sys,json;sys.stdout.write(json.load(sys.stdin)["senha"])')
+  { cat > $S/exec.ini <<INI
+logToFile=$S/exec.log
+showConsoleOutput=True
+
+[auth]
+action=authentication
+server=$AHOST
+port=$APORT
+secure=$ASEC
+build=$ABUILD
+environment=$AENV
+user=$AUSER
+psw=$ASENHA
+
+[compila]
+action=compile
+includes=$AINC
+programList=$S/progs.txt
+recompile=T
+
+[patch]
+action=patchGen
+fileResourceList=$S/recursos.txt
+patchType=PTM
+saveLocal=$S/patch/
+INI
+  } 2>/dev/null
+  unset ASENHA
+  ( cd $S && timeout --kill-after=20 200 $BIN --verbose 1 --log-file $S/cli.log cli $S/exec.ini > $S/saida.txt 2>&1 < /dev/null )
+  pkill -9 -f advpls 2>/dev/null || true
+  shred -u $S/exec.ini 2>/dev/null || rm -f $S/exec.ini
+  local PTM; PTM=$(ls -t $S/patch/*.ptm $S/patch/*.PTM 2>/dev/null | head -1)
+  python3 - "$S/cli.log" "$S/saida.txt" "${PTM:-}" <<'PY'
+import sys, re, os, json
+log = ''
+for f in sys.argv[1:3]:
+    if os.path.exists(f): log += open(f, errors='ignore').read()
+ptm = sys.argv[3]
+ok = bool(ptm) and os.path.exists(ptm)
+errs = re.findall(r'(Error C\d+[^\n]*|has no valid content[^\n]*|Authentication error[^\n]*|non numeric value[^\n]*|userCode:\s*[1-9]\d*)', log)
+cod = ' | '.join(dict.fromkeys(e.strip() for e in errs))[:400]
+print(json.dumps({"ok": ok, "patch": ptm if ok else "", "nome": os.path.basename(ptm) if ok else "",
+                  "erro": "" if ok else (cod or "não gerou patch (ver log do AppServer)")}, ensure_ascii=False))
+PY
+}
+
 case "${1:-instalar}" in
   instalar) instalar ;;
   smoke)    instalar; executar "${2:-base}" ;;
   validar)  validar "${2:-base}" ;;
+  compilar) compilar "${2}" "${3}" ;;
   iniciar)  instalar; mkdir -p $CLI/smoke; : > $CLI/smoke/resultado.txt
             setsid bash -c "BASE=$BASE CLI=$CLI BIN=$BIN bash $0 _executar ${2:-base} > $CLI/smoke/resultado.txt 2>&1 < /dev/null" >/dev/null 2>&1 &
             echo "teste disparado (destacado)"; exit 0 ;;

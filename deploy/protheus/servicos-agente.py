@@ -211,8 +211,43 @@ class Agente(BaseHTTPRequestHandler):
             return self.responder(200, res)
         return self.responder(404, {"erro": "Caminho desconhecido."})
 
+    def _corpo(self):
+        n = int(self.headers.get("content-length") or 0)
+        return json.loads(self.rfile.read(n) or b"{}") if n else {}
+
     def do_POST(self):
         partes = [p for p in self.path.split("?")[0].split("/") if p]
+        if partes == ["compilacao", "compilar"]:
+            try:
+                corpo = self._corpo()
+            except Exception:
+                return self.responder(400, {"ok": False, "erro": "corpo inválido"})
+            slug = re.sub(r"[^a-z0-9_-]", "", str(corpo.get("slug", "")).lower())[:60]
+            arquivos = corpo.get("arquivos") or []
+            if not slug or not arquivos:
+                return self.responder(400, {"ok": False, "erro": "informe slug e arquivos"})
+            import base64, tempfile, shutil
+            d = tempfile.mkdtemp(prefix="compilar-")
+            try:
+                for a in arquivos[:50]:
+                    nome = os.path.basename(str(a.get("nome", "")))[:80]
+                    if not re.search(r"\.(prw|tlpp|prx)$", nome, re.I):
+                        continue
+                    with open(os.path.join(d, nome), "wb") as fp:
+                        fp.write(base64.b64decode(str(a.get("conteudo_base64", ""))))
+                _, out, _ = sh("systemd-run", "--scope", "--quiet", "-p", "MemoryMax=2G",
+                               "/usr/local/bin/primehub-tdscli", "compilar", slug, d, timeout=260)
+                linha = next((l for l in out.splitlines() if l.strip().startswith("{")), "")
+                res = json.loads(linha) if linha else {"ok": False, "erro": "sem resposta do compilador"}
+                if res.get("ok") and res.get("patch") and os.path.exists(res["patch"]):
+                    with open(res["patch"], "rb") as fp:
+                        res["patch_base64"] = base64.b64encode(fp.read()).decode()
+                res.pop("patch", None)
+                return self.responder(200, res)
+            except Exception as e:
+                return self.responder(200, {"ok": False, "erro": str(e)[:200]})
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
         if len(partes) != 3 or partes[0] != "servicos":
             return self.responder(404, {"erro": "Caminho desconhecido."})
         alvo, acao = partes[1], partes[2]
