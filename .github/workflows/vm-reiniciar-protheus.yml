@@ -1,0 +1,18 @@
+name: VM - reiniciar Protheus
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: reiniciar license + appserver
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "reiniciando licenseVirtual"; systemctl restart licenseVirtual; sleep 5; echo "license: $(systemctl is-active licenseVirtual)"
+          echo "reiniciando totvsappserver"; systemctl restart totvsappserver
+          for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
+          echo "appserver: $(systemctl is-active totvsappserver) | 8089 $(ss -tlnH|grep -q ':8089 '&&echo ok||echo NAO) | 1234 $(ss -tlnH|grep -q ':1234 '&&echo ok||echo NAO)"
+          R
