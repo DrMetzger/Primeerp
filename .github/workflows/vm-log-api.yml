@@ -1,0 +1,17 @@
+name: VM - log api
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: log do primehub-api
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== primehub-api (últimas 60, filtrando ruído)"
+          docker logs --tail 120 primehub-api 2>&1 | grep -aiE 'agente|chamado|proposta|erro|error|rascunh|ouvindo|porta|gemini|detalhe|undefined|TypeError|Cannot' | grep -aviE 'password|senha' | tail -40
+          echo "== uptime do container"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub-api
+          R
