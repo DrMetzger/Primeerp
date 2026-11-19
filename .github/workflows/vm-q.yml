@@ -1,0 +1,18 @@
+name: VM - testar query
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: query
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'insecure'; }
+          echo "== status distintos de clientes"; D "SELECT status, COUNT(*) FROM clientes GROUP BY status"
+          echo "== a query do processador retorna:"; D "SELECT ch.id FROM chamados ch JOIN clientes c ON c.id = ch.cliente_id  WHERE ch.status IN ('aberto','aguardando_equipe') AND c.status = 'ativo'    AND COALESCE((SELECT r.autor_tipo FROM chamado_respostas r WHERE r.chamado_id = ch.id ORDER BY r.criado_em DESC, r.id DESC LIMIT 1), 'cliente') <> 'equipe'    AND NOT EXISTS (SELECT 1 FROM chamado_agente a WHERE a.chamado_id = ch.id AND a.status IN ('rascunho','aprovado_execucao','enviada','descartada') AND a.ate_resposta_id = COALESCE((SELECT r.id FROM chamado_respostas r WHERE r.chamado_id = ch.id ORDER BY r.criado_em DESC, r.id DESC LIMIT 1), 0))  ORDER BY FIELD(ch.prioridade,'urgente','alta','media','baixa'), ch.criado_em ASC LIMIT 3; "
+          echo "== cliente do chamado 293 e status"; D "SELECT ch.id, ch.status, c.nome, c.status FROM chamados ch JOIN clientes c ON c.id=ch.cliente_id WHERE ch.id=293"
+          R
