@@ -34,8 +34,10 @@ PRW
   echo "== alvo '$SLUG' (do cofre do app)"
   local ALVO; ALVO=$(docker exec primehub-api node /app/index.mjs --alvo-compilacao "$SLUG" 2>/dev/null)
   if [ -z "$ALVO" ]; then echo "ERRO: alvo '$SLUG' não encontrado — cadastre no painel do Protheus → Compilação"; return 1; fi
-  eval "$(printf '%s' "$ALVO" | python3 -c 'import sys,json;a=json.load(sys.stdin);print("AHOST=%r;APORT=%d;AENV=%r;AUSER=%r;ABUILD=%r;ASEC=%d;ATEM=%d"%(a["host"],a["porta"],a["ambiente"],a["usuario"],a.get("build") or "AUTO",1 if a.get("secure") else 0,1 if a.get("senha") else 0))')"
-  echo "host=$AHOST porta=$APORT ambiente=$AENV usuario=$AUSER build=$ABUILD secure=$ASEC senha=$([ "$ATEM" = 1 ] && echo definida || echo VAZIA)"
+  eval "$(printf '%s' "$ALVO" | python3 -c 'import sys,json;a=json.load(sys.stdin);print("AHOST=%r;APORT=%d;AENV=%r;AUSER=%r;ABUILD=%r;ASEC=%d;ATEM=%d;AINC=%r"%(a["host"],a["porta"],a["ambiente"],a["usuario"],a.get("build") or "AUTO",1 if a.get("secure") else 0,1 if a.get("senha") else 0,a.get("includes") or ""))')"
+  # includes: usa a pasta cadastrada; senão a da própria instalação do Protheus na VM
+  [ -n "$AINC" ] || AINC=/opt/totvs/protheus12/protheus/include
+  echo "host=$AHOST porta=$APORT ambiente=$AENV usuario=$AUSER build=$ABUILD secure=$ASEC includes=$AINC senha=$([ "$ATEM" = 1 ] && echo definida || echo VAZIA)"
   if [ "$ATEM" != 1 ]; then echo "ERRO: alvo '$SLUG' está SEM SENHA — cadastre no painel do Protheus → Compilação"; return 1; fi
   local ASENHA; ASENHA=$(printf '%s' "$ALVO" | python3 -c 'import sys,json;sys.stdout.write(json.load(sys.stdin)["senha"])')
   { cat > $S/exec.ini <<INI
@@ -54,7 +56,7 @@ psw=$ASENHA
 
 [compila]
 action=compile
-includes=$S/includes
+includes=$AINC
 program=$S/fontes/xsmoke01.prw
 recompile=T
 
