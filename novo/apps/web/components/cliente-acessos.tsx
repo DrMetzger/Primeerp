@@ -20,6 +20,9 @@ type Vpn = CofreCliente['vpn'][number];
 
 const COR_TIPO: Record<string, string> = { servidor: '#0ea5e9', rdp: '#6366f1', anydesk: '#ef4444', vpn: '#10b981', protheus: '#f59e0b', sql_server: '#8b5cf6', t_cloud: '#06b6d4', outro: '#64748b' };
 const COR_AMBIENTE: Record<string, string> = { dev: '#8b5cf6', teste: '#f59e0b', homologacao: '#0ea5e9', producao: '#10b981' };
+/** Garante http:// quando o link foi salvo sem esquema (ex.: 192.168.1.4:8000),
+ *  senão o navegador trata como caminho do próprio site. */
+const comEsquema = (u: string) => { const v = (u ?? '').trim(); return !v || /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `http://${v}`; };
 const LINKS: [keyof CofreCliente['tcloud'][number], string, string][] = [
   ['linkProtheus', 'link_protheus', 'Protheus'], ['linkRest', 'link_rest', 'REST'], ['linkSchedule', 'link_schedule', 'Schedule'], ['linkExclusivo', 'link_exclusivo', 'Modo exclusivo'],
 ];
@@ -154,7 +157,7 @@ export function SecaoAcessos({ clienteId }: { clienteId: number }) {
                   <div className="space-y-1.5">
                     {LINKS.filter(([k]) => a[k]).map(([k, , r]) => (
                       <div key={k} className="flex items-center gap-1">
-                        <a href={String(a[k])} target="_blank" rel="noopener noreferrer" className="toque inline-flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-white" style={{ background: cor }}>
+                        <a href={comEsquema(String(a[k]))} target="_blank" rel="noopener noreferrer" className="toque inline-flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-white" style={{ background: cor }}>
                           <ExternalLink size={15} aria-hidden="true" /><span className="truncate">{r}</span>
                         </a>
                         <Copiar texto={String(a[k])} rotulo={`link ${r}`} />
@@ -333,7 +336,7 @@ export function AtalhosProtheus({ clienteId, aoVerTudo }: { clienteId: number; a
     <div className="flex flex-wrap items-center gap-2 rounded-3xl border border-borda bg-superficie p-3 shadow-sm">
       <span className="px-2 text-sm font-semibold text-suave">Protheus:</span>
       {links.length ? links.map((l) => (
-        <a key={l.tipo} href={l.url} target="_blank" rel="noopener noreferrer" className="toque inline-flex items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow" style={{ background: COR_AMBIENTE[l.tipo] ?? '#0ea5e9' }}>
+        <a key={l.tipo} href={comEsquema(l.url)} target="_blank" rel="noopener noreferrer" className="toque inline-flex items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow" style={{ background: COR_AMBIENTE[l.tipo] ?? '#0ea5e9' }}>
           <ExternalLink size={15} aria-hidden="true" /> {d.ambientesTcloud[l.tipo]}
         </a>
       )) : <span className="text-sm text-suave">nenhum link cadastrado</span>}

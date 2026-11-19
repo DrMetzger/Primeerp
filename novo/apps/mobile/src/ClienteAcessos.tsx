@@ -21,6 +21,7 @@ type Cred = CofreCliente['credenciais'][number];
 const COR_TIPO: Record<string, string> = { servidor: '#0ea5e9', rdp: '#6366f1', anydesk: '#ef4444', vpn: '#10b981', protheus: '#f59e0b', sql_server: '#8b5cf6', t_cloud: '#06b6d4', outro: '#64748b' };
 const COR_AMB: Record<string, string> = { dev: '#8b5cf6', teste: '#f59e0b', homologacao: '#0ea5e9', producao: '#10b981' };
 const LINKS: [keyof CofreCliente['tcloud'][number], string, string][] = [['linkProtheus', 'link_protheus', 'Protheus'], ['linkRest', 'link_rest', 'REST'], ['linkSchedule', 'link_schedule', 'Schedule'], ['linkExclusivo', 'link_exclusivo', 'Modo exclusivo']];
+const comEsquema = (u: string) => { const v = (u ?? '').trim(); return !v || /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `http://${v}`; };
 
 function Linha({ rotulo, valor, children }: { rotulo: string; valor?: string | null; children?: React.ReactNode }) {
   const { tema } = useTema();
@@ -124,7 +125,7 @@ export function SecaoAcessosApp({ clienteId }: { clienteId: number }) {
             {lista.length ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {lista.map(([k, , r]) => (
-                  <Pressable key={k} onPress={() => void Linking.openURL(String(a[k]))} onLongPress={() => void Clipboard.setStringAsync(String(a[k]))} accessibilityRole="link" accessibilityHint="Segure para copiar o link"
+                  <Pressable key={k} onPress={() => void Linking.openURL(comEsquema(String(a[k])))} onLongPress={() => void Clipboard.setStringAsync(String(a[k]))} accessibilityRole="link" accessibilityHint="Segure para copiar o link"
                     style={{ minHeight: 42, paddingHorizontal: 14, borderRadius: 12, backgroundColor: cor, justifyContent: 'center' }}>
                     <T style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>↗ {r}</T>
                   </Pressable>
