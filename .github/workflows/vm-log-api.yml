@@ -12,6 +12,6 @@ jobs:
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           echo "== primehub-api (últimas 60, filtrando ruído)"
-          docker logs --tail 120 primehub-api 2>&1 | grep -aiE 'agente|chamado|proposta|erro|error|rascunh|ouvindo|porta|gemini|detalhe|undefined|TypeError|Cannot' | grep -aviE 'password|senha' | tail -40
+          docker logs --tail 80 primehub-api 2>&1 | grep -av "password" | tail -60
           echo "== uptime do container"; docker ps --format '{{.Names}} {{.Status}}' | grep primehub-api
           R
