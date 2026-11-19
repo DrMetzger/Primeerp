@@ -1,0 +1,17 @@
+name: VM - achar includes
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: procurar headers .ch
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== PRTOPDEF.CH na VM?"; find /opt/totvs -iname 'prtopdef.ch' 2>/dev/null | head
+          echo "== pastas com muitos .ch (top 8)"; find /opt/totvs -iname '*.ch' 2>/dev/null | sed 's|/[^/]*$||' | sort | uniq -c | sort -rn | head -8
+          echo "== fontes sincronizados (Syncthing)"; ls /opt/totvs/fontes/ 2>/dev/null; echo "--- include dentro de FONTES_PROTHEUS?"; find /opt/totvs/fontes -maxdepth 2 -iname 'include*' -type d 2>/dev/null | head
+          R
