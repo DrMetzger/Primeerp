@@ -1,7 +1,7 @@
 import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub/shared';
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
-import { compilarFonte, listarAlvos, podeCompilacao } from './compilacao';
+import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
 
 /**
  * DOIS assistentes separados, ambos no Gemini pago da Prime:
@@ -200,10 +200,11 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       const base = (txt(a, 'nome_programa') || 'FONTE').replace(/\.(prw|tlpp|prx)$/i, '');
       let nomeArquivo = `${base || 'FONTE'}.prw`;
       let resumoConversao = '';
-      if (a.converter_relatorio) { const c = converterRelatorio(fonte, base || 'FONTE'); fonte = c.fonte; nomeArquivo = c.nomeArquivo; resumoConversao = `Convertido para ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).`; }
+      if (a.converter_relatorio) { const c = converterRelatorio(fonte, base || 'FONTE', u.nome); fonte = c.fonte; nomeArquivo = c.nomeArquivo; resumoConversao = `Convertido para ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).`; }
       const r = await compilarFonte(u, alvo.slug, [{ nome: nomeArquivo, conteudo_base64: Buffer.from(fonte, 'utf8').toString('base64') }]);
       if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.erro, dica: 'confira ambiente/senha do servidor e se o fonte compila' };
-      return { ok: true, servidor: alvo.nome, conversao: resumoConversao || undefined, nome_patch: r.nome, baixar: `/api/compilacao/patch/${r.token}`, instrucao_resposta: 'Dê o link de download do .ptm para a pessoa e diga em qual servidor compilou.' };
+      const tokenFonte = await guardarArtefato(nomeArquivo, Buffer.from(fonte, 'utf8'));
+      return { ok: true, servidor: alvo.nome, conversao: resumoConversao || undefined, nome_patch: r.nome, nome_fonte: nomeArquivo, baixar_patch: `/api/compilacao/arquivo/${r.token}`, baixar_fonte: `/api/compilacao/arquivo/${tokenFonte}`, instrucao_resposta: 'Diga o que mudou e entregue OS DOIS links: o do fonte (.prw) e o do patch (.ptm), dizendo em qual servidor compilou.' };
     },
   },
 ];
@@ -253,7 +254,8 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
 COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Peça o fonte e o servidor se faltar, chame gerar_patch e devolva o link do .ptm. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
-ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Compile na "base" para a pessoa testar; só gere para o servidor do cliente quando ela confirmar que funcionou. Ao responder, diga em poucas linhas o que você mudou no fonte antes de dar o link do patch.
+ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Compile na "base" para a pessoa testar; só gere para o servidor do cliente quando ela confirmar que funcionou. A ferramenta devolve DOIS links (o fonte .prw e o patch .ptm): entregue os dois e diga em poucas linhas o que mudou.
+CABEÇALHO E COMENTÁRIOS (padrão PrimeERP): todo ponto de entrada / user function que você criar ou alterar começa com o cabeçalho Protheus.doc no modelo: "@author  ${u.nome}", "@since   <data de hoje dd/mm/aaaa>", "@version P12", "@obs     PrimeERP - Solucoes em Tecnologia". Cada alteração que você fizer no código leva um comentário na linha no formato "// [${u.nome} - <data de hoje> - PrimeERP] o que mudou". Nunca use outro nome de autor.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
 

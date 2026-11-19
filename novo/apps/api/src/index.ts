@@ -6,7 +6,7 @@ import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositiv
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
 import { converterRelatorio } from '@primehub/shared';
-import { alvoComSenha, compilarFonte, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerPatch, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
+import { alvoComSenha, compilarFonte, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -239,10 +239,10 @@ app.post('/api/compilacao/alvos/:slug/compilar', exigirLogin('equipe'), (c) => c
   return compilarFonte(c.get('usuario'), c.req.param('slug'), arquivos);
 }));
 // Baixa o patch gerado (token de uso interno). Só admin.
-app.get('/api/compilacao/patch/:token', exigirLogin('equipe'), async (c) => {
+app.get('/api/compilacao/arquivo/:token', exigirLogin('equipe'), async (c) => {
   if (!podeCompilacao(c.get('usuario'))) return c.json({ erro: 'Sem permissão.' }, 403);
-  const p = await lerPatch(c.req.param('token'));
-  if (!p) return c.json({ erro: 'Patch não encontrado ou expirado.' }, 404);
+  const p = await lerArtefato(c.req.param('token'));
+  if (!p) return c.json({ erro: 'Arquivo não encontrado ou expirado.' }, 404);
   return new Response(new Uint8Array(p.bytes), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${p.nome.replace(/["\r\n]/g, '')}"`, 'cache-control': 'private, no-store' } });
 });
 

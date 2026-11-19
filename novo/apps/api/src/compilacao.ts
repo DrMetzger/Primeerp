@@ -153,19 +153,25 @@ export async function compilarFonte(u: UsuarioLogado, slug: string, arquivos: Ar
   if (!arquivos?.length) throw new ErroCompilacao('Envie ao menos um fonte (.prw/.tlpp).');
   const r = await agente<{ ok: boolean; nome?: string; patch_base64?: string; erro?: string }>('POST', '/compilacao/compilar', u.nome, { slug, arquivos }, 280_000);
   if (!r.ok || !r.patch_base64) return { ok: false, erro: r.erro || 'não gerou o patch (ver log)' };
-  await mkdir(PATCHES, { recursive: true });
-  const token = randomBytes(16).toString('hex');
-  await writeFile(join(PATCHES, `${token}.ptm`), Buffer.from(r.patch_base64, 'base64'));
-  await writeFile(join(PATCHES, `${token}.nome`), r.nome ?? 'patch.ptm');
+  const token = await guardarArtefato(r.nome ?? 'patch.ptm', Buffer.from(r.patch_base64, 'base64'));
   return { ok: true, nome: r.nome ?? '', token };
 }
 
-export async function lerPatch(token: string): Promise<{ nome: string; bytes: Buffer } | null> {
+/** Guarda um arquivo (patch ou fonte) para download por token. Devolve o token. */
+export async function guardarArtefato(nomeArquivo: string, bytes: Buffer): Promise<string> {
+  await mkdir(PATCHES, { recursive: true });
+  const token = randomBytes(16).toString('hex');
+  await writeFile(join(PATCHES, `${token}.bin`), bytes);
+  await writeFile(join(PATCHES, `${token}.nome`), (nomeArquivo || 'arquivo.txt').replace(/[\r\n]/g, ' ').slice(0, 160));
+  return token;
+}
+
+export async function lerArtefato(token: string): Promise<{ nome: string; bytes: Buffer } | null> {
   const t = String(token || '').replace(/[^a-f0-9]/g, '');
   if (t.length !== 32) return null;
   try {
-    const bytes = await readFile(join(PATCHES, `${t}.ptm`));
-    const nome = (await readFile(join(PATCHES, `${t}.nome`), 'utf8').catch(() => 'patch.ptm')).trim() || 'patch.ptm';
+    const bytes = await readFile(join(PATCHES, `${t}.bin`));
+    const nome = (await readFile(join(PATCHES, `${t}.nome`), 'utf8').catch(() => 'arquivo.txt')).trim() || 'arquivo.txt';
     return { nome, bytes };
   } catch { return null; }
 }

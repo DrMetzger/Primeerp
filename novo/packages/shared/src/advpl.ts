@@ -39,7 +39,7 @@ const ALTERNATIVAS = '23456789BCDEFGHJKLMNPQRSTUVWXYZ';
  * Converte o fonte de um relatório para User Function. `nomeBase` é o nome do
  * programa (ex.: "MATR435"); se vier vazio, usa a 1ª Function não estática.
  */
-export function converterRelatorio(fonteEntrada: string, nomeBase: string): ConversaoRelatorio {
+export function converterRelatorio(fonteEntrada: string, nomeBase: string, autor = 'Kleber Metzger'): ConversaoRelatorio {
   const avisos: string[] = [];
   const fonte = fonteEntrada.replace(/\r\n/g, '\n');
 
@@ -88,7 +88,15 @@ export function converterRelatorio(fonteEntrada: string, nomeBase: string): Conv
   // 5) Cabeçalho Protheus.doc na função principal.
   const principal = mapa.get(nomeBase.toUpperCase()) ?? [...mapa.values()][0] ?? nomeCustomizado(nomeBase);
   const hoje = new Date().toISOString().slice(0, 10).split('-').reverse().join('/');
-  const doc = `/*/{Protheus.doc} ${principal}\nCustomizacao do relatorio ${nomeBase} convertido para User Function.\n@author PrimeERP\n@since ${hoje}\n/*/`;
+  const doc = [
+    `/*/{Protheus.doc} ${principal}`,
+    `Customizacao do relatorio ${nomeBase} convertido para User Function.`,
+    `@author  ${autor}`,
+    `@since   ${hoje}`,
+    `@version P12`,
+    `@obs     PrimeERP - Solucoes em Tecnologia`,
+    `/*/`,
+  ].join('\n');
   if (/#INCLUDE[ \t]+"PROTHEUS/i.test(saida)) {
     saida = saida.replace(/(#INCLUDE[ \t]+"PROTHEUS[^\n]*\n)/i, `$1${doc}\n`);
   } else {
