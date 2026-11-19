@@ -1,0 +1,23 @@
+name: VM - procurar reset de senha
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: grep fontes
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          F=/opt/totvs/fontes
+          echo "== funções PSW* de senha (definições)"
+          grep -rIhoE '(User |Static )?Function +(PSW|Psw|Pwd|FwPwd|FWPwd)[A-Za-z]*' $F 2>/dev/null | sort -u | head -40
+          echo "== APIs de troca/reset de senha (chamadas)"
+          grep -rIhoE '(PSWCHGPSW|PswChangePassword|PswChgPsw|PswSetPsw|PswResetPsw|ResetPassword|SetPassword|FwPwdReset|changepassworduserservice|ExpiraSenha|ForcaTrocaSenha)[A-Za-z0-9_]*' $F 2>/dev/null | sort | uniq -c | sort -rn | head -30
+          echo "== fontes cujo nome fala de senha"
+          find $F -type f \( -iname '*senha*' -o -iname '*passw*' -o -iname '*pswd*' -o -iname '*reset*' \) 2>/dev/null | head -20
+          echo "== onde mexe na tabela de usuários (SYS_USR)"
+          grep -rIloE 'SYS_USR|USR_SENHA|USR_PSWDAT|USR_ID|PswOrder|PswSeek' $F 2>/dev/null | head -15
+          R
