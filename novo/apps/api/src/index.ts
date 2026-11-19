@@ -363,8 +363,9 @@ if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((
 // Processa chamados pendentes de tempos em tempos: todo chamado do cliente sem
 // resposta da equipe vira um rascunho na Mesa do agente (nada vai ao cliente sozinho).
 if (!comando) {
-  setTimeout(() => { void processarChamadosPendentes().catch(() => undefined); }, 30_000);
-  setInterval(() => { void processarChamadosPendentes().catch(() => undefined); }, 4 * 60_000);
+  const rodarAgente = () => { void processarChamadosPendentes().catch((e: unknown) => console.error('agente processar:', e instanceof Error ? e.stack ?? e.message : e)); };
+  setTimeout(rodarAgente, 30_000);
+  setInterval(rodarAgente, 4 * 60_000);
 }
 if (!comando) {
   serve({ fetch: app.fetch, port: config.porta }, (info) => {

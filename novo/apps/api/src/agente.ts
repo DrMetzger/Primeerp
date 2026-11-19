@@ -340,9 +340,10 @@ export async function processarChamadosPendentes(): Promise<void> {
           AND COALESCE(${ULTIMO_AUTOR}, 'cliente') <> 'equipe'
           AND NOT EXISTS (SELECT 1 FROM chamado_agente a WHERE a.chamado_id = ch.id AND a.status IN ('rascunho','aprovado_execucao','enviada','descartada') AND a.ate_resposta_id = COALESCE(${ULTIMA}, 0))
         ORDER BY FIELD(ch.prioridade,'urgente','alta','media','baixa'), ch.criado_em ASC LIMIT 3`);
+    console.log(`agente: ${pend.length} chamado(s) pendente(s) para rascunhar:`, pend.map((t) => t.id).join(', '));
     for (const t of pend) {
-      try { await rascunharChamado(t.id); }
-      catch (e) { console.error('agente auto chamado', t.id, e instanceof Error ? e.message : e); }
+      try { await rascunharChamado(t.id); console.log(`agente: rascunho criado para o chamado ${t.id}`); }
+      catch (e) { console.error('agente auto chamado', t.id, e instanceof Error ? e.stack ?? e.message : e); }
     }
   } finally { processandoAgente = false; }
 }
