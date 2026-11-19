@@ -1,0 +1,19 @@
+name: VM - testar compilar
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: compilar UF de teste na base
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D=$(mktemp -d); printf 'User Function XPRIME99()\nReturn .T.\n' > $D/xprime99.prw
+          echo "== rodando primehub-tdscli compilar base"
+          systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base "$D" 2>/dev/null | tail -1
+          rm -rf $D
+          echo "== base no ar?"; curl -s -o /dev/null -w 'local 8089: %{http_code}\n' http://127.0.0.1:8089/ || true
+          R
