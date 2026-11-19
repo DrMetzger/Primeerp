@@ -18,7 +18,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { agente, ErroVm, podePainelVm } from './vm-servicos';
-import { anexoAgente, aprovarExecucao, arquivoDaProposta, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, registrarProposta, type Proposta } from './agente';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, processarChamadosPendentes, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -360,6 +360,12 @@ if (comando === '--recifrar-cofre') {
     .catch((e: unknown) => { console.error('cofre: ERRO', e instanceof Error ? e.message : e); process.exit(1); });
 }
 if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); void garantirEstruturaCompilacao().catch((e: unknown) => console.error('compilacao: estrutura', e instanceof Error ? e.message : e)); }
+// Processa chamados pendentes de tempos em tempos: todo chamado do cliente sem
+// resposta da equipe vira um rascunho na Mesa do agente (nada vai ao cliente sozinho).
+if (!comando) {
+  setTimeout(() => { void processarChamadosPendentes().catch(() => undefined); }, 30_000);
+  setInterval(() => { void processarChamadosPendentes().catch(() => undefined); }, 4 * 60_000);
+}
 if (!comando) {
   serve({ fetch: app.fetch, port: config.porta }, (info) => {
     console.log(`API do Prime Hub ouvindo na porta ${info.port}`);

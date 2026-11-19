@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SignJWT } from 'jose';
-import type { PropostaAgente, UsuarioLogado } from '@primehub/shared';
+import { converterRelatorio, type PropostaAgente, type UsuarioLogado } from '@primehub/shared';
 export type { PropostaAgente };
 import { config } from './config';
 import { consulta, primeira } from './db';
@@ -320,4 +320,81 @@ export async function arquivoDaProposta(arquivoId: number): Promise<{ nome: stri
   const a = await primeira<{ nome: string; dados: Buffer }>('SELECT nome, dados FROM chamado_agente_arquivos WHERE id = ?', [arquivoId]);
   if (!a) throw new ErroAgente('Arquivo não encontrado.', 404);
   return { nome: a.nome, bytes: Buffer.from(a.dados) };
+}
+
+// ---- Processador automático: nenhum chamado fica sem cair na Mesa ----------
+// Roda no próprio servidor (sem rotina externa, sem token): pega chamados do
+// cliente sem resposta da equipe e cria um RASCUNHO na Mesa do agente. Se o
+// chamado pede conversão de fonte e tem anexo .prw, já converte (determinístico)
+// e anexa o fonte convertido. O texto é um rascunho (revisado antes de enviar).
+let processandoAgente = false;
+
+export async function processarChamadosPendentes(): Promise<void> {
+  if (processandoAgente) return;
+  if ((await configuracao('ia_chamados_motor', 'claude')) === 'desligado') return;
+  processandoAgente = true;
+  try {
+    const pend = await consulta<{ id: number }>(
+      `SELECT ch.id FROM chamados ch JOIN clientes c ON c.id = ch.cliente_id
+        WHERE ch.status IN ('aberto','aguardando_equipe') AND c.status = 'ativo'
+          AND COALESCE(${ULTIMO_AUTOR}, 'cliente') <> 'equipe'
+          AND NOT EXISTS (SELECT 1 FROM chamado_agente a WHERE a.chamado_id = ch.id AND a.status IN ('rascunho','aprovado_execucao','enviada','descartada') AND a.ate_resposta_id = COALESCE(${ULTIMA}, 0))
+        ORDER BY FIELD(ch.prioridade,'urgente','alta','media','baixa'), ch.criado_em ASC LIMIT 3`);
+    for (const t of pend) {
+      try { await rascunharChamado(t.id); }
+      catch (e) { console.error('agente auto chamado', t.id, e instanceof Error ? e.message : e); }
+    }
+  } finally { processandoAgente = false; }
+}
+
+async function rascunharChamado(id: number): Promise<void> {
+  const det = (await detalheAgente(id)) as Record<string, any>;
+  const conversa: any[] = det.conversa ?? [];
+  const anexos: any[] = det.anexos ?? [];
+  const texto = `${det.chamado?.titulo ?? ''} ${det.chamado?.descricao ?? ''} ${conversa.map((m) => m.mensagem).join(' ')}`.toLowerCase();
+  const pedeConversao = /user ?function|converter|convers[aã]o|ponto de entrada|\bpe\b|relat[oó]rio/.test(texto);
+  const anexoFonte = anexos.find((a) => /\.(prw|tlpp|prx)$/i.test(String(a.nome)));
+  const arquivos: { nome: string; conteudo_base64: string }[] = [];
+  let planoConv = '';
+  if (pedeConversao && anexoFonte) {
+    try {
+      const f = await anexoAgente(Number(anexoFonte.id));
+      const base = String(anexoFonte.nome).replace(/\.(prw|tlpp|prx)$/i, '');
+      const conv = converterRelatorio(f.bytes.toString('utf8'), base, String(det.atendente ?? 'Kleber Metzger'));
+      arquivos.push({ nome: conv.nomeArquivo, conteudo_base64: Buffer.from(conv.fonte, 'utf8').toString('base64') });
+      planoConv = `Converti ${base} para User Function ${conv.principal} (chamada ${conv.funcoes[0]?.chamada ?? ''}). Segue o fonte convertido em anexo. Para gerar o patch, use o assistente da equipe (gerar_patch) depois de revisar.`;
+    } catch { planoConv = 'Pediram conversão com anexo, mas não consegui ler/converter o fonte — confira o anexo manualmente.'; }
+  }
+  const resposta = await rascunhoIA(det, Boolean(arquivos.length));
+  await registrarProposta(id, {
+    resposta,
+    tipo: arquivos.length ? 'desenvolvimento' : 'resposta',
+    plano: (planoConv ? planoConv + '\n\n' : '') + 'Rascunho automático do servidor — a equipe revisa e aprova antes de enviar.',
+    confianca: 'media',
+    status_sugerido: 'aguardando_cliente',
+    resumo_interno: 'Gerado automaticamente pelo servidor (motor=claude). Revise o texto; se for desenvolvimento, compile/gere o patch pelo assistente.',
+    arquivos,
+    sessao: 'auto-servidor',
+  });
+}
+
+async function rascunhoIA(det: Record<string, any>, temFonte: boolean): Promise<string> {
+  const nome = String(det.contatoPrimeiroNome ?? '').trim();
+  const padrao = `Oi, ${nome || 'tudo bem'}! Recebemos seu chamado e já estamos verificando. Em breve retornamos com a solução.`;
+  const chave = await configuracao('gemini_api_key', '');
+  if (!chave) return padrao;
+  const conversa: any[] = det.conversa ?? [];
+  const parecidos: any[] = det.chamadosParecidosResolvidos ?? [];
+  const sistema = `Você escreve a resposta de um chamado em nome da equipe da PrimeERP (consultoria TOTVS Protheus). Portugues do Brasil, cordial e direto, TEXTO PURO sem markdown. Comece cumprimentando "${nome || 'Olá'}". Fale em primeira pessoa do plural (verificamos, preparamos). NUNCA mencione IA, robô, assistente, modelo ou Gemini; nunca afirme ser humano. Não invente rotina, parâmetro (MV_), tabela ou prazo. ${temFonte ? 'Já convertemos o fonte para User Function (segue em anexo): diga que enviamos o fonte convertido, que podemos gerar a atualização (patch) para aplicar, e peça para testar em ambiente de teste primeiro.' : 'Dê a melhor orientação técnica possível, ou peça com objetividade as informações que faltam.'} No máximo ~150 palavras. Não assine.`;
+  const contexto = `Chamado: ${det.chamado?.titulo}\nDescrição: ${String(det.chamado?.descricao ?? '').slice(0, 1500)}\n\nÚltimas mensagens:\n${conversa.slice(-5).map((m) => `${m.de}: ${m.mensagem}`).join('\n').slice(0, 2000)}\n\nCasos parecidos já resolvidos pela equipe:\n${parecidos.map((s) => `- ${s.titulo}: ${(s.respostasEquipe ?? []).join(' ').slice(0, 300)}`).join('\n').slice(0, 1500)}`;
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': chave },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: contexto }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 600 } }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const j = (await r.json()) as any;
+    const t = String((j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join('')).replace(/\*\*/g, '').trim();
+    return t.length >= 20 ? t : padrao;
+  } catch { return padrao; }
 }
