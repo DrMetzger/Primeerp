@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Send, Sparkles, X, Zap } from 'lucide-react';
+import { Check, Paperclip, Send, Sparkles, X, Zap } from 'lucide-react';
 import { acaoPhp } from '@/lib/api';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { usuarioSalvo } from '@/lib/sessao';
@@ -50,6 +50,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [acoes, setAcoes] = useState<Acao[]>([]);
   const [texto, setTexto] = useState('');
+  const [anexos, setAnexos] = useState<{ nome: string; conteudo: string }[]>([]);
   const [pensando, setPensando] = useState(false);
   const [digitando, setDigitando] = useState('');
   const fim = useRef<HTMLDivElement>(null);
@@ -140,10 +141,13 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
 
   async function enviar(pergunta: string) {
     const p = pergunta.trim();
-    if (!p || pensando || digitando) return;
+    if ((!p && !anexos.length) || pensando || digitando) return;
     setTexto('');
     const historico = mensagens;
-    setMensagens((m) => [...m, { autor: 'pessoa', texto: p }]);
+    const enviados = anexos;
+    setAnexos([]);
+    const rotulo = enviados.length ? `${p}${p ? '\n' : ''}📎 ${enviados.map((a) => a.nome).join(', ')}` : p;
+    setMensagens((m) => [...m, { autor: 'pessoa', texto: rotulo }]);
 
     if (modo === 'login') {
       robo.current?.agir('pensar', 900);
@@ -156,7 +160,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     try {
       const r = await fetch('/api/assistente', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mensagem: p, historico, tela: contextoDaTela() }),
+        body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, tela: contextoDaTela(), ...(enviados.length ? { anexos: enviados } : {}) }),
       });
       const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[] };
       setPensando(false);
@@ -261,13 +265,38 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
             )}
             <div ref={fim} />
           </div>
-          <form onSubmit={(e: FormEvent) => { e.preventDefault(); void enviar(texto); }} className="flex gap-2 border-t border-borda p-3">
-            <label className="sr-only" htmlFor="pergunta-assistente">Sua pergunta</label>
-            <input id="pergunta-assistente" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Pergunte ao assistente…" maxLength={1000}
-              onFocus={() => robo.current?.agir('sorrir', 1200)}
-              className="toque min-w-0 flex-1 rounded-xl border border-borda bg-fundo px-3 text-base text-texto outline-none focus:border-primaria" />
-            <button type="submit" disabled={!texto.trim() || pensando || !!digitando} aria-label="Enviar"
-              className="gradiente-marca toque flex items-center justify-center rounded-xl px-3 text-white disabled:opacity-50"><Send size={20} /></button>
+          <form onSubmit={(e: FormEvent) => { e.preventDefault(); void enviar(texto); }} className="flex flex-col gap-2 border-t border-borda p-3">
+            {anexos.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {anexos.map((a, i) => (
+                  <span key={`${a.nome}-${i}`} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-superficie-alta px-2 py-1 text-xs text-texto">
+                    <Paperclip size={12} aria-hidden="true" /><span className="truncate">{a.nome}</span>
+                    <button type="button" aria-label={`Remover ${a.nome}`} onClick={() => setAnexos((l) => l.filter((_, j) => j !== i))} className="text-suave hover:text-perigo"><X size={12} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <label className="sr-only" htmlFor="pergunta-assistente">Sua pergunta</label>
+              <label className="toque flex cursor-pointer items-center justify-center rounded-xl border border-borda px-2 text-suave hover:text-texto" title="Anexar fonte (.prw, .tlpp, .ch)">
+                <Paperclip size={18} aria-hidden="true" />
+                <input type="file" accept=".prw,.tlpp,.prx,.ch,.txt,.tlp,text/plain" multiple className="hidden"
+                  onChange={async (e) => {
+                    const fs = Array.from(e.target.files ?? []);
+                    e.target.value = '';
+                    for (const f of fs) {
+                      if (anexos.length >= 5) break;
+                      if (f.size > 200_000) { setMensagens((m) => [...m, { autor: 'assistente', texto: `O arquivo ${f.name} é grande demais (máx. 200 KB).` }]); continue; }
+                      try { const t = await f.text(); setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: f.name.slice(0, 120), conteudo: t }])); } catch { /* ignore */ }
+                    }
+                  }} />
+              </label>
+              <input id="pergunta-assistente" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={anexos.length ? 'O que mudar no fonte?' : 'Pergunte ao assistente…'} maxLength={1000}
+                onFocus={() => robo.current?.agir('sorrir', 1200)}
+                className="toque min-w-0 flex-1 rounded-xl border border-borda bg-fundo px-3 text-base text-texto outline-none focus:border-primaria" />
+              <button type="submit" disabled={(!texto.trim() && !anexos.length) || pensando || !!digitando} aria-label="Enviar"
+                className="gradiente-marca toque flex items-center justify-center rounded-xl px-3 text-white disabled:opacity-50"><Send size={20} /></button>
+            </div>
           </form>
         </section>
       )}

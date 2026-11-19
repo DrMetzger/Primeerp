@@ -305,12 +305,13 @@ const esquemaAssistente = z.object({
   mensagem: z.string().trim().min(1).max(1000),
   historico: z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string().max(4000) })).max(20).default([]),
   tela: z.object({ rota: z.string().max(300), titulo: z.string().max(200), texto: z.string().max(8000) }).optional(),
+  anexos: z.array(z.object({ nome: z.string().max(160), conteudo: z.string().max(200000) })).max(5).optional(),
 });
 
 app.post('/api/assistente', exigirLogin(), async (c) => {
   const dados = esquemaAssistente.safeParse(await c.req.json().catch(() => null));
   if (!dados.success) return c.json({ erro: 'Escreva sua pergunta.' }, 400);
-  const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem, dados.data.tela);
+  const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem, dados.data.tela, dados.data.anexos);
   return 'erro' in r ? c.json(r, 200) : c.json(r);
 });
 

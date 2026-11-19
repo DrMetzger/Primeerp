@@ -253,6 +253,7 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
 COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Peça o fonte e o servidor se faltar, chame gerar_patch e devolva o link do .ptm. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
+ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Compile na "base" para a pessoa testar; só gere para o servidor do cliente quando ela confirmar que funcionou. Ao responder, diga em poucas linhas o que você mudou no fonte antes de dar o link do patch.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
 
@@ -314,7 +315,8 @@ Conteúdo visível:
 ${tela.texto.slice(0, 6000)}`;
 }
 
-export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string, tela?: TelaAtual): Promise<RespostaAssistente | { erro: string }> {
+export interface AnexoChat { nome: string; conteudo: string }
+export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[], mensagem: string, tela?: TelaAtual, anexos?: AnexoChat[]): Promise<RespostaAssistente | { erro: string }> {
   const dia = new Date().toISOString().slice(0, 10);
   const chaveUso = `${usuario.tipo}:${usuario.id}`;
   const uso = usoHoje.get(chaveUso);
@@ -333,8 +335,9 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
   for (const [tentativa, modelo] of MODELOS.entries()) {
     if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));
     const acoes: AcaoProposta[] = [];
-    const contents: Conteudo[] = [...historico.slice(-10), { autor: 'pessoa' as const, texto: mensagem }]
-      .map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
+    const contents: Conteudo[] = historico.slice(-10).map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
+    const anexosTexto = (anexos ?? []).map((a) => `\n\n--- Arquivo anexado: ${a.nome} ---\n${a.conteudo.slice(0, 80000)}\n--- fim do arquivo ---`).join('');
+    contents.push({ role: 'user' as const, parts: [{ text: (mensagem.slice(0, 3000) + anexosTexto).slice(0, 170000) }] });
     try {
       // Até 5 rodadas de ferramenta (consultar, conferir, propor) antes de responder.
       for (let rodada = 0; rodada < 6; rodada++) {
