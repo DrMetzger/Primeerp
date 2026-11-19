@@ -1,0 +1,19 @@
+name: VM - diag 293
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: diag
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'insecure'; }
+          echo "== propostas na Mesa agora"; D "SELECT COUNT(*) FROM chamado_agente"
+          echo "== 293: ultimo autor, qtd respostas, tem proposta?"; D "SELECT (SELECT r.autor_tipo FROM chamado_respostas r WHERE r.chamado_id=293 ORDER BY r.criado_em DESC,r.id DESC LIMIT 1) ultimo_autor, (SELECT COUNT(*) FROM chamado_respostas r WHERE r.chamado_id=293) qtd_resp, (SELECT COUNT(*) FROM chamado_agente a WHERE a.chamado_id=293) qtd_prop"
+          echo "== quantos batem o criterio completo (sem limit)"; D "SELECT COUNT(*) FROM chamados ch JOIN clientes c ON c.id=ch.cliente_id WHERE ch.status IN ('aberto','aguardando_equipe') AND c.status='ativo' AND COALESCE((SELECT r.autor_tipo FROM chamado_respostas r WHERE r.chamado_id=ch.id ORDER BY r.criado_em DESC,r.id DESC LIMIT 1),'cliente')<>'equipe' AND NOT EXISTS (SELECT 1 FROM chamado_agente a WHERE a.chamado_id=ch.id AND a.ate_resposta_id=COALESCE((SELECT r.id FROM chamado_respostas r WHERE r.chamado_id=ch.id ORDER BY r.criado_em DESC,r.id DESC LIMIT 1),0))"
+          echo "== abertos/aguardando com ultimo autor"; D "SELECT ch.id, ch.status, (SELECT r.autor_tipo FROM chamado_respostas r WHERE r.chamado_id=ch.id ORDER BY r.criado_em DESC,r.id DESC LIMIT 1) ult FROM chamados ch WHERE ch.status IN ('aberto','aguardando_equipe') ORDER BY ch.id DESC LIMIT 12"
+          R
