@@ -1,0 +1,21 @@
+name: VM - ver API de senha
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: contexto das APIs
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          F=/opt/totvs/fontes/Fontes_2510
+          echo "== funções da engine p/ senha chamadas nos fontes (Psw*/FwPwd*/ChgPsw)"
+          grep -rIhoE '\b(PswChaPsw|PswChgPsw|PSWCHGPSW|PswRet|PswRetId|PswOrder|PswSeek|PswAdmIsUser|FWSaveUserDef|FwPwdExpire|FwSetPassword|SetUserPassword|GravaSenha|AlteraSenhaUsuario)\b' $F 2>/dev/null | sort | uniq -c | sort -rn | head -25
+          echo "== RmiSenhas.prw (como grava/reseta senha de usuário)"
+          f=$(find $F -iname 'RmiSenhas.prw' | head -1); grep -inE 'function|senha|password|psw|U_USR|SYS_USR|encrypt|hash|grava' "$f" 2>/dev/null | head -30
+          echo "== PLS password recovery (mecanismo)"
+          f=$(find $F -ipath '*beneficiary-password-recovery*Service.tlpp' | head -1); grep -inE 'function|method|senha|password|token|email|reset|new|set' "$f" 2>/dev/null | head -25
+          R
