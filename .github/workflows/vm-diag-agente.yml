@@ -1,0 +1,20 @@
+name: VM - diagnostico agente
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: estado do agente/IA
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          Q(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'password|insecure|warning'; }
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'password|insecure|warning'; }
+          echo "== config do motor/IA (presença)"; D "SELECT chave, CASE WHEN valor='' OR valor IS NULL THEN 'VAZIO' ELSE CONCAT('ok(',CHAR_LENGTH(valor),')') END FROM configuracoes WHERE chave IN ('ia_chamados_motor','ia_chamados_modo','agente_token_hash','ia_chamados_usuario_id','gemini_api_key','ia_chamados_limite_dia')"
+          echo "== tabela chamado_agente existe? quantas propostas?"; D "SELECT COUNT(*) total, SUM(status='rascunho') rascunho, SUM(status='enviada') enviada, MAX(criado_em) ultima FROM chamado_agente" 2>&1 | head -3
+          echo "== chamados recentes (últimos 10) e se têm resposta da equipe"; D "SELECT ch.id, ch.status, DATE_FORMAT(ch.criado_em,'%d/%m %H:%i') criado, (SELECT COUNT(*) FROM chamado_respostas r WHERE r.chamado_id=ch.id AND r.autor_tipo='equipe') resp_equipe FROM chamados ch ORDER BY ch.id DESC LIMIT 10"
+          echo "== chamados abertos/aguardando sem resposta da equipe"; D "SELECT COUNT(*) FROM chamados ch WHERE ch.status IN ('aberto','aguardando_equipe') AND NOT EXISTS (SELECT 1 FROM chamado_respostas r WHERE r.chamado_id=ch.id AND r.autor_tipo='equipe')"
+          R
