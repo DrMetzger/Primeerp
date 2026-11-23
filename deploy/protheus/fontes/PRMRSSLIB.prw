@@ -12,7 +12,7 @@ servidor REST (o que acontece ao recompilar um WSRESTFUL).
 @obs     PrimeERP - Solucoes em Tecnologia
 /*/
 
-/*/{Protheus.doc} U_PRMRSS
+/*/{Protheus.doc} U_PRMRST
 Reseta a senha de um usuario Protheus via FWUSERACCOUNTDATA, sem tela.
 Roda em contexto REST (ambiente PRIMEERP ja preparado pelo servidor).
 Retorna .T./.F. e devolve a mensagem de erro por referencia.
@@ -26,7 +26,7 @@ Retorna .T./.F. e devolve a mensagem de erro por referencia.
 @version P12
 @obs     PrimeERP - Solucoes em Tecnologia
 /*/
-User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
+User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet := .F.
     Local aErro

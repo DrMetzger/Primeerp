@@ -61,7 +61,7 @@ WSMETHOD POST WSSERVICE PRMRSS
         Return .F.
     EndIf
 
-    lOk := U_PRMRSS(cLogin, cSenha, @cErroP)
+    lOk := U_PRMRST(cLogin, cSenha, @cErroP)
 
     oResp['ok']    := lOk
     oResp['login'] := cLogin
