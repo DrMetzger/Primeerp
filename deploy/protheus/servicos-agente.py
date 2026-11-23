@@ -17,11 +17,11 @@ VERSOES = "/opt/totvs/versoes.json"
 
 SERVICOS = [
     {"id": "appserver", "unidade": "totvsappserver", "nome": "AppServer", "descricao": "Protheus (Webapp e TDS)", "portas": [1234, 8089], "critico": True},
+    {"id": "appserver_rest", "unidade": "totvsappserver-rest", "nome": "AppServer REST", "descricao": "API REST do Protheus (reset de senha automatico)", "portas": [8095], "critico": False},
     {"id": "dbaccess", "unidade": "totvsdbaccess", "nome": "DBAccess", "descricao": "Ponte do Protheus com o banco", "portas": [7890], "critico": True},
     {"id": "license", "unidade": "licenseVirtual", "nome": "License Server", "descricao": "Licenças TOTVS", "portas": [5555], "critico": True},
     {"id": "postgresql", "unidade": "postgresql@16-main", "nome": "PostgreSQL", "descricao": "Banco de dados do Protheus", "portas": [5432], "critico": True},
     {"id": "syncthing", "unidade": "syncthing@totvs", "nome": "Syncthing", "descricao": "Fontes sincronizados com o PC", "portas": [22000], "critico": False},
-    {"id": "appserver_rest", "unidade": "totvsappserver-rest", "nome": "AppServer REST", "descricao": "API REST do Protheus (reset de senha automatico)", "portas": [8095], "critico": False},
 ]
 ACOES = {"iniciar": "start", "parar": "stop", "reiniciar": "restart"}
 # "Todos": a pilha do Protheus, na ordem certa (para de cima para baixo, sobe de baixo para cima).
