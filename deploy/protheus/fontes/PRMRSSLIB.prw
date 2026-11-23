@@ -1,4 +1,5 @@
 #include 'protheus.ch'
+#include 'fwmvcdef.ch'
 
 /*/{Protheus.doc} PRMRSSLIB
 Biblioteca de funcoes de manutencao de usuarios (reset/criar/apagar) via
