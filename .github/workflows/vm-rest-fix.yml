@@ -15,44 +15,9 @@ jobs:
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           INI=$APP/appserver.ini
           cp -f $INI $INI.bkp-restfix
-          # remove tudo da secao [ONSTART] em diante (nossa config REST ficou no fim) e reescreve
-          python3 - "$INI" <<'PY'
-import sys,re
-p=sys.argv[1]
-t=open(p,encoding='latin-1').read()
-# corta a partir da primeira secao REST que adicionamos
-for mark in ['[ONSTART]']:
-    i=t.find(mark)
-    if i!=-1:
-        t=t[:i].rstrip()+"\n"
-        break
-rest="""
-[ONSTART]
-Jobs=HTTPJOB
-RefreshRate=120
-
-[HTTPJOB]
-Main=HTTP_START
-Environment=PRIMEERP
-
-[HTTPV11]
-Enable=1
-Port=8095
-Path=/rest
-Environment=PRIMEERP
-URIs=PRMREST
-PUBLIC=prmrss,/prmrss
-
-[PRMREST]
-URL=/rest
-Instances=1,2
-CORSEnable=1
-AllowOrigin=*
-Security=0
-"""
-open(p,'w',encoding='latin-1').write(t+rest)
-print("ini reescrito")
-PY
+          sed -i '/^\[ONSTART\]/,$d' $INI
+          CFG='\n[ONSTART]\nJobs=HTTPJOB\nRefreshRate=120\n\n[HTTPJOB]\nMain=HTTP_START\nEnvironment=PRIMEERP\n\n[HTTPV11]\nEnable=1\nPort=8095\nPath=/rest\nEnvironment=PRIMEERP\nURIs=PRMREST\nPUBLIC=prmrss,/prmrss\n\n[PRMREST]\nURL=/rest\nInstances=1,2\nCORSEnable=1\nAllowOrigin=*\nSecurity=0\n'
+          printf "$CFG" >> $INI
           echo "== secao REST agora:"; sed -n '/\[ONSTART\]/,$p' $INI | grep -aviE 'senha|password'
           MARK=$(wc -l < $APP/console.log)
           systemctl restart totvsappserver
@@ -65,9 +30,8 @@ PY
           echo "== compile de teste (checar se APP Monitor flapa):"
           D=$(mktemp -d); printf 'User Function XPRMFLAP()\nReturn .T.\n' > $D/xprmflap.prw
           systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base "$D" 2>/dev/null | tail -1
-          rm -rf $D
-          sleep 2
-          echo "== erros APP Monitor/-107 no console apos compile (vazio = estavel):"
+          rm -rf $D; sleep 2
+          echo "== erros APP Monitor/-107 apos compile (vazio = estavel):"
           tail -n +$MARK $APP/console.log | grep -aiE 'APP Monitor|-107|Invalid REST Port|terminated by the admin' | grep -aviE 'senha|password' | head -8
           echo "== base final: $(systemctl is-active totvsappserver) | 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/) | 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo NAO)"
           R
