@@ -20,7 +20,11 @@ jobs:
           T=http://127.0.0.1:8095/rest/api/oauth2/v1/token
           rm -rf /tmp/fontes-prmrss && mkdir -p /tmp/fontes-prmrss && tar -xzf /tmp/prmrss.tgz -C /tmp/fontes-prmrss
           OUT=$(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-prmrss 2>/dev/null | tail -1)
-          echo "compile: $OUT"; echo "$OUT" | grep -q '"ok": true' || { echo "!! compile falhou"; exit 1; }
+          echo "compile: $OUT"
+          if ! echo "$OUT" | grep -q '"ok": true'; then
+            echo "!! compile falhou - saida.txt:"; grep -aiE 'PRMRSS.PRW\(|SERVER MESSAGE|C[0-9]{4}|FATAL|Warning|error' /opt/totvs/tdscli/compilar/cli.log 2>/dev/null | grep -aviE 'senha|password|security_manager|ciphertext|INFO\|' | tail -20
+            exit 1
+          fi
           echo "== aguardando REST 8095 voltar apos reload do RPO"; for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && curl -s -o /dev/null -m 5 "$B" && break; sleep 3; done; sleep 3
           post(){ curl -s -m 30 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data "$1"; }
           tok(){ curl -s -m 20 -w ' <%{http_code}>\n' -X POST "$T" --data-urlencode "grant_type=password" --data-urlencode "username=$1" --data-urlencode "password=$2" | sed -E 's/("access_token":"[A-Za-z0-9._-]{6})[^"]*"/\1...TOKEN_OK"/'; }
