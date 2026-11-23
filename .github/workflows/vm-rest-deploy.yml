@@ -1,0 +1,51 @@
+name: VM - rest deploy final
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: recupera, compila, sobe REST sem monitor e testa coexistencia
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/src.tgz -C deploy/protheus/fontes PRMRSS.prw PRMRSSLIB.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/src.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/src.tgz "$USER_VM@$VM_IP:/tmp/src.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          CC=/usr/local/bin/primehub-tdscli
+          B=http://127.0.0.1:8095/rest/prmrss
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          RINI=$D/appserver_rest.ini
+          echo "== recupera base limpa:"
+          systemctl stop totvsappserver totvsappserver-rest 2>/dev/null || true
+          pkill -9 -f appsrvlinux 2>/dev/null || true; sleep 5
+          systemctl start totvsappserver
+          for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 25
+          echo "principal 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          echo "== compila LIB + WSRESTFUL (base limpa):"
+          sudo rm -rf /tmp/f-lib /tmp/f-rest; mkdir -p /tmp/f-lib /tmp/f-rest
+          tar -xzf /tmp/src.tgz -C /tmp/f-lib  PRMRSSLIB.prw
+          tar -xzf /tmp/src.tgz -C /tmp/f-rest PRMRSS.prw
+          echo " LIB:  $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1)"
+          echo " REST: $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-rest 2>/dev/null | tail -1)"
+          echo "== desliga monitor multiprotocolo na instancia REST (evita conflito APP_MONITOR 32033):"
+          sed -i 's/^MULTIPROTOCOLPORT=.*/MULTIPROTOCOLPORT=0/' $RINI
+          grep -q '^MULTIPROTOCOLPORT=' $RINI || sed -i '/^\[Drivers\]/a MULTIPROTOCOLPORT=0' $RINI
+          grep -q '^APPSERVERSTANDALONE=' $RINI || sed -i '/^\[GENERAL\]/a APPSERVERSTANDALONE=1' $RINI
+          echo "== sobe REST dedicado:"
+          systemctl start totvsappserver-rest
+          for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 18
+          echo "rest: $(systemctl is-active totvsappserver-rest) | 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo NAO)"
+          echo "== endpoint (login inexistente -> JSON tratado):"
+          for i in $(seq 1 10); do curl -s -o /dev/null -m 5 "$B" && break; sleep 3; done
+          curl -s -m 20 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"ZZNAOEXISTE","senha":"x","chave":"PrimeHub@2026"}'
+          echo "== compila COM REST rodando (testa coexistencia / APP_MONITOR):"
+          sudo rm -rf /tmp/f-cx; mkdir -p /tmp/f-cx; printf 'User Function XCOEX()\nReturn .T.\n' > /tmp/f-cx/xcoex.prw
+          echo " coex: $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-cx 2>/dev/null | tail -1)"
+          echo " APP_MONITOR -107 no console principal recente: $(tail -150 $D/console.log 2>/dev/null | grep -aicE 'Invalid REST Port|Fail to Restart - APP Monitor')"
+          echo "principal 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          R
