@@ -1,0 +1,19 @@
+name: VM - log rest
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: log console sobre http/rest
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          echo "== linhas de HTTP/REST/JOB/ONSTART no console"
+          grep -ainE 'http|rest|job|onstart|thread_start|prmrest|httpv|8095|could not|invalid|error|erro|fail' $APP/console.log 2>/dev/null | grep -aviE 'senha|password|webapp http server started|websocket' | tail -30
+          echo "== seção [HTTP] do ini (confere o que ficou)"
+          sed -n '/\[ONSTART\]/,$p' $APP/appserver.ini | grep -aviE 'senha|password'
+          R
