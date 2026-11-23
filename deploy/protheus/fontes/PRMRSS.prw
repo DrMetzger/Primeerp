@@ -30,6 +30,7 @@ WSMETHOD POST WSSERVICE PRMRSS
     Local cLogin  := ""
     Local cSenha  := ""
     Local cChave  := ""
+    Local cAcao   := ""
     Local lOk     := .F.
 
     ::SetContentType("application/json")
@@ -45,6 +46,10 @@ WSMETHOD POST WSSERVICE PRMRSS
     cLogin := AllTrim(cValToChar(oJson:GetJsonObject('login')))
     cSenha := cValToChar(oJson:GetJsonObject('senha'))
     cChave := AllTrim(cValToChar(oJson:GetJsonObject('chave')))
+    cAcao  := Lower(AllTrim(cValToChar(oJson:GetJsonObject('acao'))))
+    If Empty(cAcao)
+        cAcao := "reset"
+    EndIf
 
     If cChave != PR_CHAVE_RESET
         ::SetStatus(401)
@@ -61,9 +66,25 @@ WSMETHOD POST WSSERVICE PRMRSS
         Return .F.
     EndIf
 
-    lOk := U_PRMRSS(cLogin, cSenha, @cErroP)
+    // criar/apagar so e permitido para logins de teste (prefixo TST)
+    If (cAcao == "criar" .Or. cAcao == "apagar") .And. Upper(Left(cLogin,3)) != "TST"
+        oResp['ok']   := .F.
+        oResp['erro'] := "Acao '" + cAcao + "' so permitida para logins de teste (prefixo TST)"
+        ::SetResponse(oResp:ToJson())
+        Return .F.
+    EndIf
+
+    Do Case
+        Case cAcao == "criar"
+            lOk := U_PRMNEWU(cLogin, "Usuario de teste PrimeERP", cSenha, @cErroP)
+        Case cAcao == "apagar"
+            lOk := U_PRMDELU(cLogin, @cErroP)
+        Otherwise
+            lOk := U_PRMRSS(cLogin, cSenha, @cErroP)
+    EndCase
 
     oResp['ok']    := lOk
+    oResp['acao']  := cAcao
     oResp['login'] := cLogin
     oResp['erro']  := cErroP
     ::SetResponse(oResp:ToJson())
@@ -125,6 +146,101 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
             cErro += ": " + cValToChar(aErro[6])
         EndIf
         lRet  := .F.
+    EndIf
+
+    oModel:DeActivate()
+    oModel:Destroy()
+
+Return lRet
+
+/*/{Protheus.doc} U_PRMNEWU
+Cria um usuario de teste via FWUSERACCOUNTDATA (INSERT). Uso interno de
+validacao/QA. Retorna .T./.F. e a mensagem de erro por referencia.
+
+@author  Kleber Metzger
+@since   23/11/2026
+@version P12
+@obs     PrimeERP - Solucoes em Tecnologia
+/*/
+User Function PRMNEWU(cCode, cName, cSenha, cErro)
+    Local oModel
+    Local lRet := .F.
+    Local aErro
+
+    Default cCode  := ""
+    Default cName  := "Usuario de teste"
+    Default cSenha := ""
+    Default cErro  := ""
+    cErro := ""
+
+    PswOrder(1)
+    If PswSeek(AllTrim(cCode), .T.)
+        cErro := "Usuario ja existe: " + AllTrim(cCode)
+        Return .F.
+    EndIf
+
+    oModel := FWLoadModel("FWUSERACCOUNTDATA")
+    oModel:SetOperation(MODEL_OPERATION_INSERT)
+    oModel:Activate()
+
+    oModel:SetValue("DATAUSER", "USR_CODE", cCode)
+    oModel:SetValue("DATAUSER", "USR_NAME", cName)
+    oModel:SetValue("DATAUSER", "USR_PSW", cSenha)
+    oModel:SetValue("DATAUSER", "USR_PSWCMP", cSenha)
+
+    If oModel:VldData()
+        oModel:CommitData()
+        lRet := .T.
+    Else
+        aErro := oModel:GetErrorMessage()
+        cErro := "Falha ao criar"
+        If ValType(aErro) == "A" .And. Len(aErro) >= 6
+            cErro += ": " + cValToChar(aErro[6])
+        EndIf
+    EndIf
+
+    oModel:DeActivate()
+    oModel:Destroy()
+
+Return lRet
+
+/*/{Protheus.doc} U_PRMDELU
+Apaga um usuario de teste via FWUSERACCOUNTDATA (DELETE). Uso interno de
+validacao/QA. Retorna .T./.F. e a mensagem de erro por referencia.
+
+@author  Kleber Metzger
+@since   23/11/2026
+@version P12
+@obs     PrimeERP - Solucoes em Tecnologia
+/*/
+User Function PRMDELU(cCode, cErro)
+    Local oModel
+    Local lRet := .F.
+    Local aErro
+
+    Default cCode := ""
+    Default cErro := ""
+    cErro := ""
+
+    PswOrder(1)
+    If !PswSeek(AllTrim(cCode), .T.)
+        cErro := "Usuario nao encontrado: " + AllTrim(cCode)
+        Return .F.
+    EndIf
+
+    oModel := FWLoadModel("FWUSERACCOUNTDATA")
+    oModel:SetOperation(MODEL_OPERATION_DELETE)
+    oModel:Activate()
+
+    If oModel:VldData()
+        oModel:CommitData()
+        lRet := .T.
+    Else
+        aErro := oModel:GetErrorMessage()
+        cErro := "Falha ao apagar"
+        If ValType(aErro) == "A" .And. Len(aErro) >= 6
+            cErro += ": " + cValToChar(aErro[6])
+        EndIf
     EndIf
 
     oModel:DeActivate()
