@@ -41,6 +41,7 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Private __TTSINUSE := 0
     Private __TTSKEEP  := .F.
     Private __TTSPUSH  := {}
+    Private __TTSBREAK := {}
     Private __CLOGSIGA := ""
 
     Default cLoginUsr := ""
