@@ -36,11 +36,9 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet := .F.
     Local aErro
-    // Controle transacional exigido por BeginTran/RecLock/CommitData, que o
-    // ambiente REST/job nao inicializa. Declarado por escopo dinamico.
-    Private __TTSINUSE := 0
-    Private __TTSKEEP  := .F.
-    Private __TTSPUSH  := {}
+    // RpcSetEnv exige cEmpAnt/cFilAnt como Private (lidos pelo framework).
+    Private cEmpAnt := "99"
+    Private cFilAnt := "01"
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
@@ -52,12 +50,22 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
         Return .F.
     EndIf
 
+    // Prepara o ambiente Protheus completo (empresa 99 / filial 01 - MATRIZ).
+    // Em contexto REST/job o ambiente transacional nao vem pronto; RpcSetEnv
+    // inicializa tudo (controle de transacao, log, locks).
+    RpcSetType(3)
+    If !RpcSetEnv(cEmpAnt, cFilAnt)
+        cErro := "Falha ao preparar ambiente (" + cEmpAnt + "/" + cFilAnt + ")"
+        Return .F.
+    EndIf
+
     // tenta por nome de login (ordem 2) e, se nao achar, por codigo/ID (ordem 1)
     PswOrder(2)
     If !PswSeek(AllTrim(cLoginUsr), .T.)
         PswOrder(1)
         If !PswSeek(AllTrim(cLoginUsr), .T.)
             cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
+            RpcClearEnv()
             Return .F.
         EndIf
     EndIf
@@ -82,5 +90,6 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
 
     oModel:DeActivate()
     oModel:Destroy()
+    RpcClearEnv()
 
 Return lRet
