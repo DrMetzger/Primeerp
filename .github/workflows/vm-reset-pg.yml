@@ -6,17 +6,19 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: consulta SM0010 no postgres
+      - name: acha tabela SM0 no protheus
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "== bancos:"; sudo -u postgres psql -At -c "SELECT datname FROM pg_database WHERE datistemplate=false;" 2>/dev/null
-          for DB in $(sudo -u postgres psql -At -c "SELECT datname FROM pg_database WHERE datistemplate=false AND datname NOT IN ('postgres');" 2>/dev/null); do
-            T=$(sudo -u postgres psql -At -d "$DB" -c "SELECT to_regclass('public.sm0010');" 2>/dev/null)
-            if [ "$T" = "sm0010" ]; then
-              echo "== banco $DB tem sm0010:"
-              sudo -u postgres psql -d "$DB" -c "SELECT sm0_codigo, sm0_filial, sm0_nome, sm0_nomecom FROM sm0010 ORDER BY sm0_codigo, sm0_filial LIMIT 20;" 2>/dev/null
-            fi
-          done
+          echo "== schemas:"; sudo -u postgres psql -At -d protheus -c "SELECT schema_name FROM information_schema.schemata;" 2>/dev/null | head
+          echo "== tabelas que casam sm0:"; sudo -u postgres psql -At -d protheus -c "SELECT table_schema||'.'||table_name FROM information_schema.tables WHERE lower(table_name) LIKE 'sm0%';" 2>/dev/null | head
+          TN=$(sudo -u postgres psql -At -d protheus -c "SELECT table_schema||'.'||quote_ident(table_name) FROM information_schema.tables WHERE lower(table_name) LIKE 'sm0010%' LIMIT 1;" 2>/dev/null)
+          echo "tabela SM0 = [$TN]"
+          if [ -n "$TN" ]; then
+            echo "== colunas:"; sudo -u postgres psql -At -d protheus -c "SELECT column_name FROM information_schema.columns WHERE lower(table_name)=replace(lower('$TN'),'public.','') AND lower(column_name) LIKE 'sm0_%' ORDER BY column_name;" 2>/dev/null | head -20
+            echo "== dados empresa/filial:"
+            sudo -u postgres psql -d protheus -c "SELECT sm0_codigo, sm0_filial, sm0_nome FROM $TN ORDER BY sm0_codigo, sm0_filial LIMIT 20;" 2>/dev/null
+          fi
+          echo "== usuarios no SYS_USR (quantos):"; sudo -u postgres psql -At -d protheus -c "SELECT count(*) FROM (SELECT 1 FROM information_schema.tables WHERE lower(table_name) LIKE 'sys_usr%') x;" 2>/dev/null
           R
