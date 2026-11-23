@@ -1,0 +1,20 @@
+name: VM - admin cols
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: colunas e valores do admin em sys_usr
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
+          echo "== todas as colunas de sys_usr:"; Q "SELECT string_agg(column_name,', ' ORDER BY column_name) FROM information_schema.columns WHERE lower(table_name)='sys_usr';"
+          echo "== colunas candidatas a senha/login (nome + tamanho):"
+          Q "SELECT column_name||' ('||coalesce(character_maximum_length::text,'')||')' FROM information_schema.columns WHERE lower(table_name)='sys_usr' AND lower(column_name) ~ 'psw|senha|pass|cod|id|login|user|cript|hash' ORDER BY column_name;"
+          echo "== linha do admin (id/codigo/nome + md5 de colunas longas):"
+          Q "SELECT usr_id, btrim(usr_codigo), btrim(usr_nome) FROM sys_usr LIMIT 5;"
+          R
