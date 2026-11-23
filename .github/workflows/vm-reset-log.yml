@@ -1,0 +1,22 @@
+name: VM - reset log compile
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: le saida do tdscli
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== arquivos de saida recentes do tdscli"
+          ls -lt /opt/totvs/tdscli/compilar/ 2>/dev/null | head
+          echo "== procura saida.txt / logs"
+          find /opt/totvs/tdscli -name 'saida*.txt' -o -name '*.log' 2>/dev/null | head
+          echo "== conteudo da ultima saida (erros de compile):"
+          F=$(ls -t /opt/totvs/tdscli/compilar/saida*.txt 2>/dev/null | head -1)
+          echo "arquivo: $F"
+          [ -n "$F" ] && grep -aviE 'senha|password' "$F" | tail -50
+          R
