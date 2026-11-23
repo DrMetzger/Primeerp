@@ -1,0 +1,20 @@
+name: VM - ver ini monitor
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: dump ini monitor/webapp/general
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          I=$APP/appserver.ini.antes-rest
+          [ -f "$I" ] || I=$APP/appserver.ini
+          echo "== usando: $I"
+          echo "== secoes e chaves de monitor/webapp/http/general/onstart (ini PRE-REST):"
+          grep -anE '^\[|monitor|webapp|http|onstart|refresh|appserver|smart|console|port' "$I" | grep -aviE 'senha|password|psw=|ultimo' | head -60
+          R
