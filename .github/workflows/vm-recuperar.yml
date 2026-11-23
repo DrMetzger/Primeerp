@@ -1,0 +1,41 @@
+name: VM - recuperar compile
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: recupera base e mede estabilidade de compile
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          CC=/usr/local/bin/primehub-tdscli
+          RPO=/opt/totvs/protheus12/protheus/apo/custom.rpo
+          echo "== processos appserver antes:"; pgrep -a appsrvlinux | head
+          echo "== parando tudo e matando orfaos"
+          systemctl stop totvsappserver totvsappserver-rest 2>/dev/null || true
+          pkill -9 -f appsrvlinux 2>/dev/null || true; pkill -9 -f advpls 2>/dev/null || true
+          sleep 5
+          echo "== RPO custom: $(ls -la $RPO 2>/dev/null | awk '{print $5" bytes"}')"
+          echo "== ini principal tem REST? $(grep -qi '^\[HTTPREST\]\|^\[ONSTART\]' $D/appserver.ini && echo SIM || echo NAO)"
+          echo "== subindo principal limpo"
+          systemctl start totvsappserver
+          for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
+          echo "8089: $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8089/) | appserver: $(systemctl is-active totvsappserver)"
+          echo "== assenta 40s e testa 4 compiles de UF minima espacados:"
+          sleep 40
+          OKC=0
+          for t in 1 2 3 4; do
+            W=$(mktemp -d); printf 'User Function XPRMOK%s()\nReturn .T.\n' "$t" > $W/xprmok$t.prw
+            O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base "$W" 2>/dev/null | tail -1)
+            echo "$O" | grep -q '"ok": true' && { OKC=$((OKC+1)); echo " c$t: OK"; } || echo " c$t: FALHOU -> $O"
+            rm -rf $W; sleep 20
+          done
+          echo "== estabilidade: $OKC/4 compiles OK"
+          echo "== APPMON/flap no console recente:"
+          tail -200 $D/console.log 2>/dev/null | grep -aicE 'Invalid REST Port|Fail to Restart - APP Monitor|terminated by the admin'
+          R
