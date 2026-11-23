@@ -30,7 +30,6 @@ WSMETHOD POST WSSERVICE PRMRSS
     Local cLogin  := ""
     Local cSenha  := ""
     Local cChave  := ""
-    Local cAcao   := ""
     Local lOk     := .F.
 
     ::SetContentType("application/json")
@@ -46,10 +45,6 @@ WSMETHOD POST WSSERVICE PRMRSS
     cLogin := AllTrim(cValToChar(oJson:GetJsonObject('login')))
     cSenha := cValToChar(oJson:GetJsonObject('senha'))
     cChave := AllTrim(cValToChar(oJson:GetJsonObject('chave')))
-    cAcao  := Lower(AllTrim(cValToChar(oJson:GetJsonObject('acao'))))
-    If Empty(cAcao)
-        cAcao := "reset"
-    EndIf
 
     If cChave != PR_CHAVE_RESET
         ::SetStatus(401)
@@ -66,25 +61,9 @@ WSMETHOD POST WSSERVICE PRMRSS
         Return .F.
     EndIf
 
-    // criar/apagar so e permitido para logins de teste (prefixo TST)
-    If (cAcao == "criar" .Or. cAcao == "apagar") .And. Upper(Left(cLogin,3)) != "TST"
-        oResp['ok']   := .F.
-        oResp['erro'] := "Acao '" + cAcao + "' so permitida para logins de teste (prefixo TST)"
-        ::SetResponse(oResp:ToJson())
-        Return .F.
-    EndIf
-
-    Do Case
-        Case cAcao == "criar"
-            lOk := U_PRMNEWU(cLogin, "Usuario de teste PrimeERP", cSenha, @cErroP)
-        Case cAcao == "apagar"
-            lOk := U_PRMDELU(cLogin, @cErroP)
-        Otherwise
-            lOk := U_PRMRSS(cLogin, cSenha, @cErroP)
-    EndCase
+    lOk := U_PRMRSS(cLogin, cSenha, @cErroP)
 
     oResp['ok']    := lOk
-    oResp['acao']  := cAcao
     oResp['login'] := cLogin
     oResp['erro']  := cErroP
     ::SetResponse(oResp:ToJson())
