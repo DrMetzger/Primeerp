@@ -36,9 +36,6 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet := .F.
     Local aErro
-    // RpcSetEnv exige cEmpAnt/cFilAnt como Private (lidos pelo framework).
-    Private cEmpAnt := "99"
-    Private cFilAnt := "01"
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
@@ -50,14 +47,9 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
         Return .F.
     EndIf
 
-    // Prepara o ambiente Protheus completo (empresa 99 / filial 01 - MATRIZ).
-    // Em contexto REST/job o ambiente transacional nao vem pronto; RpcSetEnv
-    // inicializa tudo (controle de transacao, log, locks).
-    RpcSetType(3)
-    If !RpcSetEnv(cEmpAnt, cFilAnt)
-        cErro := "Falha ao preparar ambiente (" + cEmpAnt + "/" + cFilAnt + ")"
-        Return .F.
-    EndIf
+    // O ambiente (empresa 99 / filial 01) e o controle transacional sao
+    // preparados pelo PrepareIn configurado na URI REST (appserver_rest.ini),
+    // na thread da requisicao, antes deste handler.
 
     // tenta por nome de login (ordem 2) e, se nao achar, por codigo/ID (ordem 1)
     PswOrder(2)
@@ -65,7 +57,6 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
         PswOrder(1)
         If !PswSeek(AllTrim(cLoginUsr), .T.)
             cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
-            RpcClearEnv()
             Return .F.
         EndIf
     EndIf
@@ -90,6 +81,5 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
 
     oModel:DeActivate()
     oModel:Destroy()
-    RpcClearEnv()
 
 Return lRet
