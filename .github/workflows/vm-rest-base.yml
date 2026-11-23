@@ -1,0 +1,20 @@
+name: VM - rest base
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: conferir REST/ONSTART e portas
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          INI=/opt/totvs/protheus12/protheus/bin/appserver/appserver.ini
+          echo "== seções REST/HTTP/ONSTART/JOB do appserver.ini"
+          grep -inE '^\[|ONSTART|REST|HTTP|JOB|PORT|ENVIRONMENT|URIS|^SOURCE' "$INI" 2>/dev/null | grep -viE 'senha|password|psw' | head -50
+          echo "== portas TCP ouvindo na VM"; ss -tlnH | awk '{print $4}' | sed 's/.*://' | sort -n | uniq | tr '\n' ' '; echo
+          echo "== tenta /rest no 8089 e outras"
+          for p in 8089 1234 8080 8081 9090; do echo "porta $p: $(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:$p/rest/ 2>/dev/null) (/rest)"; done
+          R
