@@ -24,8 +24,8 @@ jobs:
           sudo rm -rf /tmp/f-lib; mkdir -p /tmp/f-lib; tar -xzf /tmp/lib.tgz -C /tmp/f-lib
           for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo " compile OK"; break; }; echo " retry$t"; sleep 8; done
           RINI=/opt/totvs/protheus12/protheus/bin/appserver/appserver_rest.ini
-          if grep -q '^PrepareIn=' $RINI; then sed -i 's/^PrepareIn=.*/PrepareIn=99,01/' $RINI; else sed -i '/^\[HTTPURI\]/a PrepareIn=99,01' $RINI; fi
-          echo "PrepareIn: $(grep '^PrepareIn=' $RINI)"
+          sed -i '/^PrepareIn=/d' $RINI
+          echo "PrepareIn removido (ambiente via Private no fonte)"
           systemctl start totvsappserver-rest
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 18
           H0=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")

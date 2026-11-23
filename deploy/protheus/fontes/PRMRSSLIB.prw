@@ -36,6 +36,12 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet := .F.
     Local aErro
+    // Variaveis do ambiente transacional/log que o contexto REST nao inicializa
+    // (BeginTran/RecLock/GravaLog em APLIB060). Declaradas por escopo dinamico.
+    Private __TTSINUSE := 0
+    Private __TTSKEEP  := .F.
+    Private __TTSPUSH  := {}
+    Private __CLOGSIGA := ""
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
@@ -46,10 +52,6 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
         cErro := "Login nao informado"
         Return .F.
     EndIf
-
-    // O ambiente (empresa 99 / filial 01) e o controle transacional sao
-    // preparados pelo PrepareIn configurado na URI REST (appserver_rest.ini),
-    // na thread da requisicao, antes deste handler.
 
     // tenta por nome de login (ordem 2) e, se nao achar, por codigo/ID (ordem 1)
     PswOrder(2)
