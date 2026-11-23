@@ -1,0 +1,25 @@
+name: VM - achar empresa db
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: acha SM0 no banco por coluna m0_codigo
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
+          echo "== tabelas com coluna m0_codigo (a SM0):"
+          T=$(Q "SELECT table_name FROM information_schema.columns WHERE lower(column_name)='m0_codigo' LIMIT 1;")
+          echo "tabela SM0 = [$T]"
+          if [ -n "$T" ]; then
+            echo "== empresas/filiais:"; Q "SELECT btrim(m0_codigo), btrim(m0_codfil), btrim(m0_filial) FROM $T ORDER BY m0_codigo, m0_codfil;"
+          else
+            echo "== procura por m0_codfil ou tabelas sm0/sx2 do sistema:"
+            Q "SELECT DISTINCT table_name FROM information_schema.columns WHERE lower(column_name) IN ('m0_codigo','m0_codfil','m0_filial') LIMIT 5;"
+            echo "-- tabelas comecando com sm:"; Q "SELECT table_name FROM information_schema.tables WHERE lower(table_name) ~ '^sm[0-9]' LIMIT 10;"
+          fi
+          R
