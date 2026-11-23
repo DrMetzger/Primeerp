@@ -1,0 +1,40 @@
+name: VM - reverter REST do principal e compilar
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: remove REST da ini principal, estabiliza e compila fontes
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/prmrss-src.tgz -C deploy/protheus/fontes PRMRSS.prw PRMRSSLIB.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/prmrss.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/prmrss-src.tgz "$USER_VM@$VM_IP:/tmp/prmrss.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          INI=$APP/appserver.ini
+          CC=/usr/local/bin/primehub-tdscli
+          echo "== removendo bloco REST (de [ONSTART] ate o fim) da ini principal"
+          cp -f $INI $INI.com-rest
+          sed -i '/^\[ONSTART\]/,$d' $INI
+          echo "== ini principal agora termina em:"; tail -6 $INI | grep -aviE 'senha|password'
+          MARK=$(wc -l < $APP/console.log)
+          systemctl restart totvsappserver
+          for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
+          echo "webapp 8089: $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8089/) | appserver: $(systemctl is-active totvsappserver) | REST 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo removido)"
+          echo "== 3 compiles espacados p/ confirmar estabilidade (sem APPMON -107):"
+          rm -rf /tmp/f-lib /tmp/f-rest && mkdir -p /tmp/f-lib /tmp/f-rest
+          tar -xzf /tmp/prmrss.tgz -C /tmp/f-lib  PRMRSSLIB.prw
+          tar -xzf /tmp/prmrss.tgz -C /tmp/f-rest PRMRSS.prw
+          echo "LIB:  $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1)"
+          echo "REST: $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-rest 2>/dev/null | tail -1)"
+          echo "LIB2: $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1)"
+          echo "== APPMON -107 apos compiles (vazio = estavel):"
+          tail -n +$MARK $APP/console.log | grep -aicE 'Invalid REST Port|Fail to Restart - APP Monitor'
+          echo "== base: $(systemctl is-active totvsappserver) | 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          R
