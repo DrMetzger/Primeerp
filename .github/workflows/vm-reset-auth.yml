@@ -6,17 +6,14 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: testar basic auth no REST
+      - name: testar oauth2 com variacoes de senha
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          U=http://127.0.0.1:8095/rest/prmrss
-          BODY='{"login":"ZZNAOEXISTE_PRIME","senha":"x","chave":"PrimeHub@2026"}'
-          for CRED in "admin:" "admin: " "admin:admin"; do
-            echo "== -u [$CRED]"
-            curl -s -m 15 -w ' <HTTP %{http_code}>\n' -u "$CRED" -X POST "$U" -H 'Content-Type: application/json' --data "$BODY"
+          T=http://127.0.0.1:8095/rest/api/oauth2/v1/token
+          for P in "%20" "+" "1234" "123456" "totvs" "Totvs%40123" "admin"; do
+            echo "== password=[$P]"
+            curl -s -m 12 -w ' <HTTP %{http_code}>\n' -X POST "$T?grant_type=password&username=admin&password=$P" | head -c 220; echo
           done
-          echo "== token oauth2 padrao TOTVS (gera token e usa Bearer)"
-          curl -s -m 15 -w ' <HTTP %{http_code}>\n' -X POST "http://127.0.0.1:8095/rest/api/oauth2/v1/token?grant_type=password&username=admin&password=" | head -c 300; echo
           R
