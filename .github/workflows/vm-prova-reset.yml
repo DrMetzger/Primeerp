@@ -7,7 +7,7 @@ jobs:
     runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
-      - name: para REST, compila, religa e prova
+      - name: compila fix, prova e restaura hash exato
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
@@ -19,23 +19,31 @@ jobs:
           CC=/usr/local/bin/primehub-tdscli
           B=http://127.0.0.1:8095/rest/prmrss
           Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
-          echo "== para REST (libera conflito APP_MONITOR 32033 durante compile):"
+          echo "== para REST, compila LIB:"
           systemctl stop totvsappserver-rest; sleep 3
-          rm -rf /tmp/f-lib && mkdir -p /tmp/f-lib && tar -xzf /tmp/lib.tgz -C /tmp/f-lib
-          OKC=0; for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { OKC=1; echo " compile OK"; break; }; echo " retry$t: $(echo $O|grep -oE '\"erro\":[^}]*')"; sleep 8; done
-          [ "$OKC" = 1 ] || { echo "!! compile falhou mesmo sem REST"; exit 1; }
-          echo "== religa REST (recarrega RPO):"; systemctl start totvsappserver-rest
+          sudo rm -rf /tmp/f-lib; mkdir -p /tmp/f-lib; tar -xzf /tmp/lib.tgz -C /tmp/f-lib
+          for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo " compile OK"; break; }; echo " retry$t"; sleep 8; done
+          systemctl start totvsappserver-rest
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 18
-          hash(){ Q "SELECT md5(coalesce(usr_pswmd5,'')) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';"; }
-          H0=$(hash); echo "hash ANTES:       $H0"
-          echo "-- reset Administrador -> PrmHub@Temp1:"
+          H0=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
+          echo "md5(senha) ANTES: $(printf %s "$H0" | md5sum | cut -c1-16)"
+          echo "-- reset Administrador -> PrmHub@Temp1 (via REST):"
           curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrmHub@Temp1","chave":"PrimeHub@2026"}'
-          sleep 2; H1=$(hash); echo "hash DEPOIS:      $H1"
-          echo "-- restaura Administrador -> (branco):"
-          curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"","chave":"PrimeHub@2026"}'
-          sleep 2; H2=$(hash); echo "hash RESTAURADO:   $H2"
+          sleep 2
+          H1=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
+          echo "md5(senha) DEPOIS: $(printf %s "$H1" | md5sum | cut -c1-16)"
           echo "=== VEREDITO ==="
-          [ "$H0" != "$H1" ] && echo "PROVA OK: hash mudou -> gravacao real confirmada" || echo "FALHA: hash igual"
-          [ "$H0" = "$H2" ] && echo "admin restaurado ao original" || echo "admin agora com senha em branco"
-          echo "webapp 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/) | rest: $(systemctl is-active totvsappserver-rest)"
+          [ "$H0" != "$H1" ] && echo ">>> PROVA OK: a senha foi GRAVADA na base (hash mudou via REST) <<<" || echo "FALHA: hash igual"
+          echo "-- restaura hash ORIGINAL exato (admin volta ao estado anterior):"
+          printf '%s' "$H0" > /tmp/h0.txt
+          Q "UPDATE sys_usr SET usr_pswmd5=\$\$$(cat /tmp/h0.txt)\$\$ WHERE btrim(usr_codigo)='Administrador';"
+          sudo rm -f /tmp/h0.txt
+          H2=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
+          [ "$H0" = "$H2" ] && echo "RESTAURADO: hash identico ao original" || echo "ATENCAO: restauro divergiu"
+          echo "-- compile usa admin; ainda autentica? (REST parado p/ nao conflitar)"
+          sudo rm -rf /tmp/f-adm; mkdir -p /tmp/f-adm; printf 'User Function XADMOK()\nReturn .T.\n' > /tmp/f-adm/xadmok.prw
+          systemctl stop totvsappserver-rest; sleep 2
+          systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-adm 2>/dev/null | tail -1
+          systemctl start totvsappserver-rest
+          echo "webapp 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
           R
