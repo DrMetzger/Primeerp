@@ -1,0 +1,24 @@
+name: VM - rest inspect service
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: inspeciona service/binario/ini do appserver
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== unit totvsappserver (ExecStart, WorkingDirectory, User):"
+          systemctl cat totvsappserver 2>/dev/null | grep -aiE 'ExecStart|WorkingDirectory|^User|Environment|Limit|Memory' | grep -aviE 'senha|password'
+          echo "== binario e dir:"
+          ls -la /opt/totvs/totvs12/appserver/appserver /opt/totvs/protheus12/protheus/bin/appserver/appserver 2>/dev/null | head
+          echo "== como o appserver aceita ini alternativo:"
+          B=$(systemctl cat totvsappserver 2>/dev/null | grep -aiE 'ExecStart' | head -1 | sed -E 's/.*ExecStart=//' | awk '{print $1}')
+          echo "binario=[$B]"
+          [ -x "$B" ] && "$B" --help 2>&1 | grep -aiE 'configfile|config|ini|console|port|-f ' | head -15
+          echo "== secoes do ini principal (nomes, p/ clonar):"
+          D=$(dirname "$B"); grep -anE '^\[' "$D/appserver.ini" 2>/dev/null | grep -aviE 'senha|password'
+          R
