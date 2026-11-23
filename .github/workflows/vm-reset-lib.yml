@@ -1,0 +1,25 @@
+name: VM - reset compila lib
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: compila so a LIB e le console
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/lib-src.tgz -C deploy/protheus/fontes PRMRSSLIB.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/lib.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/lib-src.tgz "$USER_VM@$VM_IP:/tmp/lib.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          rm -rf /tmp/f-lib && mkdir -p /tmp/f-lib && tar -xzf /tmp/lib.tgz -C /tmp/f-lib
+          MARK=$(wc -l < $APP/console.log)
+          systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/f-lib 2>/dev/null | tail -1
+          sleep 1
+          echo "== console novas linhas (compile LIB):"
+          tail -n +$MARK $APP/console.log | grep -aiE 'prmrss|C[0-9]{4}|warn|syntax|error|undefined|does not|aborting|compil|recommend|\.prw' | grep -aviE 'senha|password' | head -25
+          R
