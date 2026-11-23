@@ -1,0 +1,55 @@
+name: VM - appserver REST dedicado
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: compila fontes e sobe instancia REST isolada
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/prmrss-src.tgz -C deploy/protheus/fontes PRMRSS.prw PRMRSSLIB.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/prmrss.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/prmrss-src.tgz "$USER_VM@$VM_IP:/tmp/prmrss.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          CC=/usr/local/bin/primehub-tdscli
+          BIN=$D/appsrvlinux
+          RESTINI=$D/appserver_rest.ini
+          echo "== 1) compila LIB + WSRESTFUL no RPO (via principal estavel, com retry):"
+          rm -rf /tmp/f-lib /tmp/f-rest && mkdir -p /tmp/f-lib /tmp/f-rest
+          tar -xzf /tmp/prmrss.tgz -C /tmp/f-lib  PRMRSSLIB.prw
+          tar -xzf /tmp/prmrss.tgz -C /tmp/f-rest PRMRSS.prw
+          cmp(){ for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base "$1" 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo "   OK: $O"; return 0; }; echo "   retry$t: $O"; sleep 10; done; return 1; }
+          echo " LIB:";  cmp /tmp/f-lib  || { echo "!! LIB nao compilou"; exit 1; }
+          echo " REST:"; cmp /tmp/f-rest || { echo "!! WSRESTFUL nao compilou"; exit 1; }
+          echo "== 2) cria appserver_rest.ini (clone sem WebApp, TCP 1235, + REST)"
+          SRC=$D/appserver.ini.antes-rest; [ -f "$SRC" ] || SRC=$D/appserver.ini
+          sed -e '/^\[WEBAPP\]/,$d' "$SRC" > $RESTINI
+          sed -i 's/^Port=1234/Port=1235/' $RESTINI
+          sed -i 's/^Name=totvsappserver/Name=totvsappserver-rest/' $RESTINI
+          CFG='\n[ONSTART]\nJobs=HTTPJOB\nRefreshInterval=120\n\n[HTTPJOB]\nMain=HTTP_START\nEnvironment=PRIMEERP\n\n[HTTPV11]\nEnable=1\nSockets=HTTPREST\n\n[HTTPREST]\nPort=8095\nURIs=HTTPURI\nSecurity=0\n\n[HTTPURI]\nURL=/rest\nPrepareIn=99\nCORSEnable=1\nAllowOrigin=*\nPUBLIC=prmrss,/prmrss\n'
+          printf "$CFG" >> $RESTINI
+          echo "secoes do rest.ini:"; grep -anE '^\[' $RESTINI
+          echo "== 3) cria unit systemd totvsappserver-rest"
+          printf "[Unit]\nDescription=TOTVS AppServer REST (PrimeERP)\nAfter=network.target totvsappserver.service\n\n[Service]\nType=simple\nWorkingDirectory=$D\nEnvironment=LD_LIBRARY_PATH=$D\nExecStart=$BIN -ini=$RESTINI -console\nLimitNOFILE=65536\nLimitSTACK=1048576\nMemoryMax=1500M\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n" > /etc/systemd/system/totvsappserver-rest.service
+          systemctl daemon-reload
+          systemctl enable totvsappserver-rest >/dev/null 2>&1 || true
+          systemctl restart totvsappserver-rest
+          echo "== 4) aguarda REST 8095 na instancia dedicada"
+          for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done
+          echo "rest-service: $(systemctl is-active totvsappserver-rest) | 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo NAO) | 1235: $(ss -tlnH|grep -q ':1235 '&&echo LISTEN||echo NAO)"
+          echo "principal intacto: appserver $(systemctl is-active totvsappserver) | 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          echo "== 5) testa endpoint reset (login inexistente -> JSON tratado):"
+          for i in $(seq 1 20); do curl -s -o /dev/null -m 5 http://127.0.0.1:8095/rest/prmrss && break; sleep 3; done
+          curl -s -m 20 -w ' <%{http_code}>\n' -X POST http://127.0.0.1:8095/rest/prmrss -H 'Content-Type: application/json' --data '{"login":"ZZNAOEXISTE","senha":"x","chave":"PrimeHub@2026"}'
+          echo "== 6) estabilidade: espera 80s cobrindo um ciclo, checa flap no REST dedicado:"
+          sleep 80
+          echo "8095 apos 80s: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo CAIU)"
+          journalctl -u totvsappserver-rest --since '2 min ago' 2>/dev/null | grep -aiE 'Invalid REST Port|Fail to Restart|APP Monitor' | grep -aviE 'senha|password' | head -4
+          echo "FIM"
+          R
