@@ -41,10 +41,14 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
         Return .F.
     EndIf
 
-    PswOrder(1)
+    // tenta por nome de login (ordem 2) e, se nao achar, por codigo/ID (ordem 1)
+    PswOrder(2)
     If !PswSeek(AllTrim(cLoginUsr), .T.)
-        cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
-        Return .F.
+        PswOrder(1)
+        If !PswSeek(AllTrim(cLoginUsr), .T.)
+            cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
+            Return .F.
+        EndIf
     EndIf
 
     oModel := FWLoadModel("FWUSERACCOUNTDATA")
