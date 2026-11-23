@@ -89,9 +89,6 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet    := .F.
     Local aErro
-    Local lEnv    := .F.
-    Private cEmpAnt := "99"
-    Private cFilAnt := "01"
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
@@ -104,27 +101,10 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
         Return .F.
     EndIf
 
-    // prepara ambiente: descobre empresa/filial pela SM0 e abre as tabelas
-    OpenSM0()
-    If Select("SM0") > 0
-        SM0->(dbGoTop())
-        If !SM0->(Eof())
-            cEmpAnt := SM0->SM0_CODIGO
-            cFilAnt := SM0->SM0_FILIAL
-        EndIf
-    EndIf
-    RpcSetType(3)
-    lEnv := RpcSetEnv(cEmpAnt, cFilAnt)
-    If !lEnv
-        cErro := "Falha ao preparar ambiente (" + cEmpAnt + "/" + cFilAnt + ")"
-        Return .F.
-    EndIf
-
     // posiciona no usuario para o model carregar o registro certo
     PswOrder(1)
     If !PswSeek(AllTrim(cLoginUsr), .T.)
         cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
-        RpcClearEnv()
         Return .F.
     EndIf
 
@@ -149,6 +129,5 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
 
     oModel:DeActivate()
     oModel:Destroy()
-    RpcClearEnv()
 
 Return lRet
