@@ -6,7 +6,7 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: erro do model no console_rest
+      - name: erro 500 do reset com senha
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
@@ -16,6 +16,6 @@ jobs:
           M=$(wc -l < $D/console_rest.log 2>/dev/null || echo 1)
           curl -s -o /dev/null -m 25 -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrmHub@Temp1","chave":"PrimeHub@2026"}'
           sleep 2
-          echo "== erro no console_rest apos o POST:"
-          tail -n +$M $D/console_rest.log 2>/dev/null | grep -aiE 'PRMRST|PRMRSSLIB|DATAUSER|USR_|FWLOADMODEL|FWUSERACCOUNT|SetValue|does not|nao existe|invalid|error|erro|THREAD ERROR|Called from|GetModel|componente|field|campo' | grep -aviE 'senha|password|GET,' | head -25
+          echo "== console_rest apos POST com senha:"
+          tail -n +$M $D/console_rest.log 2>/dev/null | grep -aiE 'PRMRST|PRMRSSLIB|THREAD ERROR|Called from|does not|nao existe|invalid|inv.lido|error|erro|Commit|VldData|GetErrorMessage|array|subscript|bound|senha|confirme|line :' | grep -aviE 'GET,|password=|psw=' | head -22
           R
