@@ -6,25 +6,27 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: corrige ExecStart (-ini bare) e sobe REST dedicado
+      - name: console proprio + sobe REST dedicado
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           set -u
           D=/opt/totvs/protheus12/protheus/bin/appserver
-          BIN=$D/appsrvlinux
-          U=/etc/systemd/system/totvsappserver-rest.service
-          printf "[Unit]\nDescription=TOTVS AppServer REST (PrimeERP)\nAfter=network.target totvsappserver.service\n\n[Service]\nType=simple\nWorkingDirectory=$D\nEnvironment=LD_LIBRARY_PATH=$D\nExecStart=$BIN -console -ini=appserver_rest.ini\nLimitNOFILE=65536\nLimitSTACK=1048576\nMemoryMax=1500M\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n" > $U
-          systemctl daemon-reload
+          INI=$D/appserver_rest.ini
+          systemctl stop totvsappserver-rest 2>/dev/null || true
+          pkill -9 -f appserver_rest.ini 2>/dev/null || true; sleep 2
+          grep -q '^ConsoleFile=' $INI || sed -i '/^\[GENERAL\]/a ConsoleFile=console_rest.log' $INI
+          echo "== [GENERAL] agora:"; sed -n '/^\[GENERAL\]/,/^\[/p' $INI | grep -aviE 'senha|password'
+          systemctl reset-failed totvsappserver-rest 2>/dev/null || true
           systemctl restart totvsappserver-rest
-          sleep 4
-          echo "status imediato: $(systemctl is-active totvsappserver-rest)"
-          echo "== journal:"; journalctl -u totvsappserver-rest -n 20 --no-pager 2>/dev/null | sed -E 's/.*appsrvlinux(\[[0-9]+\])?://' | grep -aiE 'FATAL|error|started|listen|http|rest|8095|license|port' | grep -aviE 'senha|password' | tail -12
+          sleep 6
+          echo "status: $(systemctl is-active totvsappserver-rest)"
+          echo "== journal:"; journalctl -u totvsappserver-rest -n 15 --no-pager 2>/dev/null | sed -E 's/.*appsrvlinux(\[[0-9]+\])?: //' | grep -aiE 'FATAL|error|started|listen|http.*(server|start)|rest|8095|license|console' | grep -aviE 'senha|password' | tail -10
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done
           echo "rest-service: $(systemctl is-active totvsappserver-rest) | 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo NAO) | 1235: $(ss -tlnH|grep -q ':1235 '&&echo LISTEN||echo NAO)"
-          echo "principal: appserver $(systemctl is-active totvsappserver) | 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
-          echo "== teste endpoint (login inexistente):"
+          echo "principal: $(systemctl is-active totvsappserver) | 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          echo "== teste endpoint (login inexistente -> JSON tratado):"
           for i in $(seq 1 15); do curl -s -o /dev/null -m 5 http://127.0.0.1:8095/rest/prmrss && break; sleep 3; done
           curl -s -m 20 -w ' <%{http_code}>\n' -X POST http://127.0.0.1:8095/rest/prmrss -H 'Content-Type: application/json' --data '{"login":"ZZNAOEXISTE","senha":"x","chave":"PrimeHub@2026"}'
           R
