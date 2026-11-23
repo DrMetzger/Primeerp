@@ -68,9 +68,7 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     oModel:SetOperation(MODEL_OPERATION_UPDATE)
     // Desliga a validacao de checksum na carga: o CommitData regrava o
     // checksum correto. Evita erro de checkSum em registros divergentes.
-    If __objHasMethod(oModel:GetModel("DATAUSER"), "SETCHECKSUM")
-        oModel:GetModel("DATAUSER"):SetCheckSum(.F.)
-    EndIf
+    oModel:GetModel("DATAUSER"):SetCheckSum(.F.)
     oModel:Activate()
 
     oModel:SetValue("DATAUSER", "USR_PSW", cSenhaUsr)
