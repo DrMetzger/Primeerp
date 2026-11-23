@@ -36,9 +36,11 @@ User Function PRMRST(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet := .F.
     Local aErro
-    // Controle transacional exigido por BeginTran/CommitData, que o ambiente
-    // REST/job nao inicializa. Declarado por escopo dinamico para o commit.
+    // Controle transacional exigido por BeginTran/RecLock/CommitData, que o
+    // ambiente REST/job nao inicializa. Declarado por escopo dinamico.
     Private __TTSINUSE := 0
+    Private __TTSKEEP  := .F.
+    Private __TTSPUSH  := {}
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
