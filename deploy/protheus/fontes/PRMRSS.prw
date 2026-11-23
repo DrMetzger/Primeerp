@@ -1,6 +1,8 @@
 #include 'protheus.ch'
 #include 'restful.ch'
 
+#define PR_CHAVE_RESET "PrimeHub@2026"
+
 /*/{Protheus.doc} PRMRSS
 Reset de senha de usuario Protheus via REST.
 Consumido pelo Prime Hub (agente administrador) para reiniciar a
@@ -28,7 +30,6 @@ WSMETHOD POST WSSERVICE PRMRSS
     Local cLogin  := ""
     Local cSenha  := ""
     Local cChave  := ""
-    Local cChaveOk := GetNewPar("PR_RSSCHV", "PrimeHub@2026")
     Local lOk     := .F.
 
     ::SetContentType("application/json")
@@ -45,7 +46,7 @@ WSMETHOD POST WSSERVICE PRMRSS
     cSenha := cValToChar(oJson:GetJsonObject('senha'))
     cChave := AllTrim(cValToChar(oJson:GetJsonObject('chave')))
 
-    If cChave != cChaveOk
+    If cChave != PR_CHAVE_RESET
         ::SetStatus(401)
         oResp['ok']   := .F.
         oResp['erro'] := "Chave de autorizacao invalida"
@@ -70,10 +71,12 @@ WSMETHOD POST WSSERVICE PRMRSS
 Return lOk
 
 /*/{Protheus.doc} U_PRMRSS
-Reseta a senha de um usuario Protheus via FWUSERACCOUNTDATA (ExecAuto),
-sem abrir tela. Retorna .T./.F. e devolve a mensagem de erro por referencia.
+Reseta a senha de um usuario Protheus via FWUSERACCOUNTDATA, sem tela.
+Prepara o ambiente (empresa/filial detectadas pela SM0) pois roda em
+contexto REST/job sem ambiente logado. Retorna .T./.F. e devolve a
+mensagem de erro por referencia.
 
-@param  cLoginUsr  Login do usuario (campo USR_ID / USR_CODE)
+@param  cLoginUsr  Login do usuario (campo USR_CODE)
 @param  cSenhaUsr  Nova senha em texto
 @param  cErro      (referencia) mensagem de erro, se houver
 
@@ -86,6 +89,9 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
     Local oModel
     Local lRet    := .F.
     Local aErro
+    Local lEnv    := .F.
+    Private cEmpAnt := "99"
+    Private cFilAnt := "01"
 
     Default cLoginUsr := ""
     Default cSenhaUsr := ""
@@ -98,10 +104,27 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
         Return .F.
     EndIf
 
-    // posiciona no usuario (USR_ID) para o model carregar o registro certo
+    // prepara ambiente: descobre empresa/filial pela SM0 e abre as tabelas
+    OpenSM0()
+    If Select("SM0") > 0
+        SM0->(dbGoTop())
+        If !SM0->(Eof())
+            cEmpAnt := SM0->SM0_CODIGO
+            cFilAnt := SM0->SM0_FILIAL
+        EndIf
+    EndIf
+    RpcSetType(3)
+    lEnv := RpcSetEnv(cEmpAnt, cFilAnt)
+    If !lEnv
+        cErro := "Falha ao preparar ambiente (" + cEmpAnt + "/" + cFilAnt + ")"
+        Return .F.
+    EndIf
+
+    // posiciona no usuario para o model carregar o registro certo
     PswOrder(1)
     If !PswSeek(AllTrim(cLoginUsr), .T.)
         cErro := "Usuario nao encontrado: " + AllTrim(cLoginUsr)
+        RpcClearEnv()
         Return .F.
     EndIf
 
@@ -126,6 +149,6 @@ User Function PRMRSS(cLoginUsr, cSenhaUsr, cErro)
 
     oModel:DeActivate()
     oModel:Destroy()
+    RpcClearEnv()
 
 Return lRet
-
