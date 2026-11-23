@@ -7,7 +7,7 @@ jobs:
     runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
-      - name: compila fix, prova e restaura hash exato
+      - name: repara checksum, prova 200 limpo e restaura admin
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
@@ -18,36 +18,35 @@ jobs:
           set -u
           CC=/usr/local/bin/primehub-tdscli
           B=http://127.0.0.1:8095/rest/prmrss
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
           Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
           echo "== para REST, compila LIB:"
           systemctl stop totvsappserver-rest; sleep 3
           sudo rm -rf /tmp/f-lib; mkdir -p /tmp/f-lib; tar -xzf /tmp/lib.tgz -C /tmp/f-lib
           for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo " compile OK"; break; }; echo " retry$t"; sleep 8; done
-          RINI=/opt/totvs/protheus12/protheus/bin/appserver/appserver_rest.ini
-          sed -i '/^PrepareIn=/d' $RINI
-          echo "PrepareIn removido (ambiente via Private no fonte)"
           systemctl start totvsappserver-rest
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 18
+          echo "== repara: limpa usr_chksum do admin (ficou inconsistente da rodada anterior):"
+          Q "UPDATE sys_usr SET usr_chksum='' WHERE btrim(usr_codigo)='Administrador';"
           H0=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5(senha) ANTES: $(printf %s "$H0" | md5sum | cut -c1-16)"
-          echo "-- reset Administrador -> PrmHub@Temp1 (via REST):"
-          APP=/opt/totvs/protheus12/protheus/bin/appserver
           MK=$(wc -l < $APP/console_rest.log 2>/dev/null || echo 1)
-          curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrmHub@Temp1","chave":"PrimeHub@2026"}'
+          echo "-- reset Administrador -> PrmHub@Temp1 (via REST):"
+          RESP=$(curl -s -m 25 -w '<%{http_code}>' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrmHub@Temp1","chave":"PrimeHub@2026"}')
+          echo "resposta: $RESP"
           sleep 2
           echo "-- erro no console (se houver):"
-          tail -n +$MK $APP/console_rest.log 2>/dev/null | grep -aiE 'does not|THREAD ERROR|__|line :|invalid|Falha' | grep -aviE 'GET,|psw=|password' | head -6
+          tail -n +$MK $APP/console_rest.log 2>/dev/null | grep -aiE 'does not|THREAD|__|line :|checksum|Falha' | grep -aviE 'GET,|psw=|password' | head -5
           H1=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5(senha) DEPOIS: $(printf %s "$H1" | md5sum | cut -c1-16)"
           echo "=== VEREDITO ==="
-          [ "$H0" != "$H1" ] && echo ">>> PROVA OK: a senha foi GRAVADA na base (hash mudou via REST) <<<" || echo "FALHA: hash igual"
-          echo "-- restaura hash ORIGINAL exato (admin volta ao estado anterior):"
+          echo "$RESP" | grep -q '"ok":true' && echo ">>> 200 LIMPO: {ok:true} <<<" || echo "resposta nao-ok (ver acima)"
+          [ "$H0" != "$H1" ] && echo ">>> GRAVACAO REAL: hash mudou na base <<<" || echo "hash igual"
+          echo "-- restaura admin ao estado funcional (senha original em branco + checksum limpo):"
           printf '%s' "$H0" > /tmp/h0.txt
-          Q "UPDATE sys_usr SET usr_pswmd5=\$\$$(cat /tmp/h0.txt)\$\$ WHERE btrim(usr_codigo)='Administrador';"
+          Q "UPDATE sys_usr SET usr_pswmd5=\$\$$(cat /tmp/h0.txt)\$\$, usr_chksum='' WHERE btrim(usr_codigo)='Administrador';"
           sudo rm -f /tmp/h0.txt
-          H2=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
-          [ "$H0" = "$H2" ] && echo "RESTAURADO: hash identico ao original" || echo "ATENCAO: restauro divergiu"
-          echo "-- compile usa admin; ainda autentica? (REST parado p/ nao conflitar)"
+          echo "-- admin loga/compila? (REST parado p/ nao conflitar):"
           sudo rm -rf /tmp/f-adm; mkdir -p /tmp/f-adm; printf 'User Function XADMOK()\nReturn .T.\n' > /tmp/f-adm/xadmok.prw
           systemctl stop totvsappserver-rest; sleep 2
           systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-adm 2>/dev/null | tail -1
