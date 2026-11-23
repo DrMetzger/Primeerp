@@ -6,43 +6,15 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: ligar REST com recuperação
+      - name: ligar REST com recuperacao
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           APP=/opt/totvs/protheus12/protheus/bin/appserver
           INI=$APP/appserver.ini
-          if grep -q '^\[HTTPREST\]' $INI; then echo "REST já configurado"; else
-            cp -f $INI $INI.antes-rest
-            cat >> $INI <<'CFG'
-
-[ONSTART]
-Jobs=HTTPJOB
-RefreshRate=120
-
-[HTTPJOB]
-Main=HTTP_START
-Environment=PRIMEERP
-
-[HTTPV11]
-Enable=1
-Sockets=HTTPREST
-
-[HTTPREST]
-Port=8095
-Environment=PRIMEERP
-URIs=PRMREST
-
-[PRMREST]
-URL=/rest
-Instances=1,2
-CORSEnable=1
-AllowOrigin=*
-Security=0
-CFG
-            echo "REST adicionado ao ini"
-          fi
+          CFG='\n[ONSTART]\nJobs=HTTPJOB\nRefreshRate=120\n\n[HTTPJOB]\nMain=HTTP_START\nEnvironment=PRIMEERP\n\n[HTTPV11]\nEnable=1\nSockets=HTTPREST\n\n[HTTPREST]\nPort=8095\nEnvironment=PRIMEERP\nURIs=PRMREST\n\n[PRMREST]\nURL=/rest\nInstances=1,2\nCORSEnable=1\nAllowOrigin=*\nSecurity=0\n'
+          if grep -q '^\[HTTPREST\]' $INI; then echo "REST ja configurado"; else cp -f $INI $INI.antes-rest; printf "$CFG" >> $INI; echo "REST adicionado ao ini"; fi
           cp -f $APP/console.log $APP/console.rest-antes.log 2>/dev/null || true
           systemctl restart totvsappserver
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 5
@@ -50,12 +22,12 @@ CFG
           REST=$(ss -tlnH | grep -q ':8095 ' && echo ok || echo NAO)
           echo "appserver: $(systemctl is-active totvsappserver) | webapp 8089: $W | REST 8095: $REST"
           if [ "$(systemctl is-active totvsappserver)" != "active" ] || [ "$W" != "200" ]; then
-            echo "!! FALHOU — restaurando ini e subindo"
+            echo "!! FALHOU - restaurando ini e subindo"
             [ -f $INI.antes-rest ] && cp -f $INI.antes-rest $INI
             systemctl restart totvsappserver; for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
             echo "restaurado: webapp $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8089/)"
           else
-            echo "REST tenta responder: $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8095/rest/ 2>/dev/null)"
-            grep -aiE 'REST|HTTP.*start|FATAL|FAILURE' $APP/console.log 2>/dev/null | tail -8
+            echo "REST responde: $(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8095/rest/ 2>/dev/null)"
+            grep -aiE 'REST|HTTP.*(start|server)|FATAL|FAILURE' $APP/console.log 2>/dev/null | grep -aviE 'senha|password' | tail -8
           fi
           R
