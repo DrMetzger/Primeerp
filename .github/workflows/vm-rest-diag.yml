@@ -6,12 +6,18 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: journal atual do rest
+      - name: quem ouve 8095 + console rest + curl -v
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "== 25 linhas cruas mais recentes do journal:"
-          journalctl -u totvsappserver-rest -n 25 --no-pager 2>/dev/null | sed -E 's/.*appsrvlinux(\[[0-9]+\])?: //' | grep -aviE 'senha|password' | tail -25
-          echo "== console.log do rest existe separado?"; ls -la /opt/totvs/protheus12/protheus/bin/appserver/console*.log 2>/dev/null | head
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          echo "== quem ouve 8095 e 1235:"; ss -tlnp 2>/dev/null | grep -E ':8095|:1235' | sed -E 's/users:\(\("([^"]+)",pid=([0-9]+).*/ -> \1 pid \2/'
+          echo "== PID do rest-service:"; systemctl show totvsappserver-rest -p MainPID --value
+          echo "== console_rest.log: REST/HTTPV11/WSRESTFUL registrados?"
+          grep -aiE 'HTTPV11|Listening port|URL Paths|HTTPREST|WSRESTFUL|PRMRSS|REST server|8095|ready' $D/console_rest.log 2>/dev/null | grep -aviE 'senha|password' | tail -15
+          echo "== erros no console_rest.log:"
+          grep -aiE 'FATAL|ERROR|Invalid REST|APP Monitor|Fail|bind|already in use' $D/console_rest.log 2>/dev/null | grep -aviE 'senha|password' | tail -8
+          echo "== curl -v no 8095:"
+          curl -sv -m 10 -X POST http://127.0.0.1:8095/rest/prmrss -H 'Content-Type: application/json' --data '{"login":"X","chave":"PrimeHub@2026"}' 2>&1 | grep -aiE 'Connected|refused|reset|closed|empty|HTTP/|< |> POST' | head -12
           R
