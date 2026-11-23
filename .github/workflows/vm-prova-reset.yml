@@ -28,8 +28,12 @@ jobs:
           H0=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5(senha) ANTES: $(printf %s "$H0" | md5sum | cut -c1-16)"
           echo "-- reset Administrador -> PrmHub@Temp1 (via REST):"
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          MK=$(wc -l < $APP/console_rest.log 2>/dev/null || echo 1)
           curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrmHub@Temp1","chave":"PrimeHub@2026"}'
           sleep 2
+          echo "-- erro no console (se houver):"
+          tail -n +$MK $APP/console_rest.log 2>/dev/null | grep -aiE 'does not|THREAD ERROR|__|line :|invalid|Falha' | grep -aviE 'GET,|psw=|password' | head -6
           H1=$(Q "SELECT usr_pswmd5 FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5(senha) DEPOIS: $(printf %s "$H1" | md5sum | cut -c1-16)"
           echo "=== VEREDITO ==="
