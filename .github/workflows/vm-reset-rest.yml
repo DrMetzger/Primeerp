@@ -1,0 +1,50 @@
+name: VM - reset senha via REST (compila + testa)
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: compilar PRMRSS e testar REST
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/prmrss-src.tgz -C deploy/protheus/fontes PRMRSS.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/prmrss.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/prmrss-src.tgz "$USER_VM@$VM_IP:/tmp/prmrss.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          RPO=/opt/totvs/protheus12/protheus/apo/custom.rpo
+          echo "== backup do RPO antes de compilar"
+          cp -f $RPO $RPO.antes-prmrss 2>/dev/null || true
+          echo "== compilando PRMRSS.prw na base (slug base)"
+          rm -rf /tmp/fontes-prmrss && mkdir -p /tmp/fontes-prmrss
+          tar -xzf /tmp/prmrss.tgz -C /tmp/fontes-prmrss
+          OUT=$(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-prmrss 2>/dev/null | tail -1)
+          echo "resultado compile: $OUT"
+          echo "$OUT" | grep -q '"ok": true' || { echo "!! COMPILE FALHOU - restaurando RPO"; cp -f $RPO.antes-prmrss $RPO 2>/dev/null || true; exit 1; }
+
+          echo "== reiniciando para o HTTPREST expor o WSRESTFUL"
+          cp -f $RPO $RPO.pos-prmrss 2>/dev/null || true
+          systemctl restart totvsappserver
+          for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
+          W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8089/)
+          echo "webapp 8089: $W | appserver: $(systemctl is-active totvsappserver)"
+          if [ "$W" != "200" ]; then echo "!! base nao subiu - restaurando RPO"; cp -f $RPO.antes-prmrss $RPO; systemctl restart totvsappserver; exit 1; fi
+          echo "== esperando REST na 8095 (job HTTP sobe ~15s depois)"
+          for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done
+          ss -tlnH | grep -q ':8095 ' && echo "REST 8095: ok" || echo "REST 8095: NAO"
+
+          echo "== teste 1: chave errada (espera 401, sem mexer em conta)"
+          curl -s -m 15 -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:8095/rest/prmrss \
+            -H 'Content-Type: application/json' \
+            --data '{"login":"ZZNAOEXISTE","senha":"x","chave":"ERRADA"}' | sed 's/[0-9]\{6,\}//g'
+          echo "== teste 2: chave certa + login inexistente (espera ok:false usuario nao encontrado)"
+          curl -s -m 15 -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:8095/rest/prmrss \
+            -H 'Content-Type: application/json' \
+            --data '{"login":"ZZNAOEXISTE_PRIME","senha":"x","chave":"PrimeHub@2026"}' | sed 's/[0-9]\{6,\}//g'
+          echo "== fim"
+          R
