@@ -1,5 +1,11 @@
 #include 'protheus.ch'
 
+// Constante do MVC (fwmvcdef.ch nao esta no path deste ambiente);
+// valor padrao TOTVS para operacao de alteracao.
+#ifndef MODEL_OPERATION_UPDATE
+    #define MODEL_OPERATION_UPDATE 4
+#endif
+
 /*/{Protheus.doc} PRMRSSLIB
 Biblioteca de funcoes de manutencao de usuarios (reset/criar/apagar) via
 FWUSERACCOUNTDATA, usada pelo servico REST PRMRSS (fonte PRMRSS.prw).
