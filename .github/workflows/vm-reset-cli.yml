@@ -1,0 +1,15 @@
+name: VM - reset cli log
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: le cli.log com a mensagem do servidor
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          grep -aiE 'PRMRSS.PRW\(|SERVER MESSAGE|C[0-9]{4}|FATAL|Warning|Error' /opt/totvs/tdscli/compilar/cli.log 2>/dev/null | grep -aviE 'senha|password' | tail -25
+          R
