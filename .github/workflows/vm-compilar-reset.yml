@@ -11,7 +11,7 @@ jobs:
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
-          tar -czf /tmp/f.tgz -C deploy/protheus/fontes PRMRSS.prw
+          tar -czf /tmp/f-src.tgz -C deploy/protheus/fontes PRMRSS.prw
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/f.tgz' || true
-          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/f.tgz "$USER_VM@$VM_IP:/tmp/f.tgz"
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/f-src.tgz "$USER_VM@$VM_IP:/tmp/f.tgz"
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/fontes-reset && mkdir -p /tmp/fontes-reset && tar -xzf /tmp/f.tgz -C /tmp/fontes-reset && systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-reset 2>/dev/null | tail -1"'
