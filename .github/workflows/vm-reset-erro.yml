@@ -1,0 +1,22 @@
+name: VM - reset erro console
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: dispara request e le o erro no console
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          APP=/opt/totvs/protheus12/protheus/bin/appserver
+          MARK=$(wc -l < $APP/console.log)
+          curl -s -m 15 -o /dev/null -X POST http://127.0.0.1:8095/rest/prmrss -H 'Content-Type: application/json' --data '{"login":"ZZNAOEXISTE","senha":"x","chave":"PrimeHub@2026"}'
+          sleep 2
+          echo "== novas linhas do console apos o request:"
+          tail -n +$MARK $APP/console.log | grep -aviE 'senha|password' | grep -aiE 'error|erro|rest|prmrss|exception|thread error|rpc|json|getcontent|setresponse|not found|undefined|variable|funcao|function|type|aborted|trace' | head -40
+          echo "== (se vazio) ultimas 25 linhas:"
+          tail -25 $APP/console.log | grep -aviE 'senha|password'
+          R
