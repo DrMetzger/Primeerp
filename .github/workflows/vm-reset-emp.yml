@@ -1,0 +1,22 @@
+name: VM - reset acha empresa
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: localiza e le sigamat.emp
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== procurando sigamat.emp e .dtc:"
+          find /opt/totvs -iname 'sigamat.*' -print 2>/dev/null | head
+          F=$(find /opt/totvs -iname 'sigamat.emp' -print 2>/dev/null | head -1)
+          echo "arquivo: [$F]"
+          if [ -n "$F" ]; then
+            echo "== strings (primeiros trechos legiveis, codigos/nomes de empresa):"
+            strings -n 2 "$F" 2>/dev/null | head -40
+          fi
+          R
