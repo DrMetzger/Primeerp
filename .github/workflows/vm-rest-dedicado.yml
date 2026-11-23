@@ -20,11 +20,16 @@ jobs:
           CC=/usr/local/bin/primehub-tdscli
           BIN=$D/appsrvlinux
           RESTINI=$D/appserver_rest.ini
+          cmp(){ for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base "$1" 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo "   OK: $O"; return 0; }; echo "   retry$t: $O"; sleep 10; done; return 1; }
+          echo "== 0) neutraliza fontes-lixo do bisect (PRMRSS1/PRMNEW) que duplicam U_PRMRSS:"
+          J=/tmp/f-junk; rm -rf $J && mkdir -p $J
+          printf "#include 'protheus.ch'\nUser Function ZZPRMLIXO1()\nReturn .T.\n" > $J/prmrss1.prw
+          printf "#include 'protheus.ch'\nUser Function ZZPRMLIXO2()\nReturn .T.\n" > $J/prmnew.prw
+          echo " junk: $(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base $J 2>/dev/null | tail -1)"
           echo "== 1) compila LIB + WSRESTFUL no RPO (via principal estavel, com retry):"
           rm -rf /tmp/f-lib /tmp/f-rest && mkdir -p /tmp/f-lib /tmp/f-rest
           tar -xzf /tmp/prmrss.tgz -C /tmp/f-lib  PRMRSSLIB.prw
           tar -xzf /tmp/prmrss.tgz -C /tmp/f-rest PRMRSS.prw
-          cmp(){ for t in 1 2 3 4; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base "$1" 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo "   OK: $O"; return 0; }; echo "   retry$t: $O"; sleep 10; done; return 1; }
           echo " LIB:";  cmp /tmp/f-lib  || { echo "!! LIB nao compilou"; exit 1; }
           echo " REST:"; cmp /tmp/f-rest || { echo "!! WSRESTFUL nao compilou"; exit 1; }
           echo "== 2) cria appserver_rest.ini (clone sem WebApp, TCP 1235, + REST)"
