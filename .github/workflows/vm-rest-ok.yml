@@ -7,7 +7,7 @@ jobs:
     runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
-      - name: aplica REST (HTTPURI/PrepareIn) e prova reset com login real
+      - name: aplica REST (HTTPV11 Port p/ APPMON) e prova reset com login real
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
@@ -21,31 +21,31 @@ jobs:
           B=http://127.0.0.1:8095/rest/prmrss
           T=http://127.0.0.1:8095/rest/api/oauth2/v1/token
           CC=/usr/local/bin/primehub-tdscli
-          cp -f $INI $INI.bkp-restok
+          cp -f $INI $INI.bkp-restok2
           sed -i '/^\[ONSTART\]/,$d' $INI
-          CFG='\n[ONSTART]\nJobs=HTTPJOB\nRefreshInterval=60\n\n[HTTPJOB]\nMain=HTTP_START\nEnvironment=PRIMEERP\n\n[HTTPV11]\nEnable=1\nSockets=HTTPREST\n\n[HTTPREST]\nPort=8095\nURIs=HTTPURI\nSecurity=0\n\n[HTTPURI]\nURL=/rest\nPrepareIn=99\nCORSEnable=1\nAllowOrigin=*\nPUBLIC=prmrss,/prmrss\n'
+          CFG='\n[ONSTART]\nJobs=HTTPJOB\nRefreshInterval=120\n\n[HTTPJOB]\nMain=HTTP_START\nEnvironment=PRIMEERP\n\n[HTTPV11]\nEnable=1\nPort=8095\nSockets=HTTPREST\n\n[HTTPREST]\nPort=8095\nURIs=HTTPURI\nSecurity=0\n\n[HTTPURI]\nURL=/rest\nPrepareIn=99\nCORSEnable=1\nAllowOrigin=*\nPUBLIC=prmrss,/prmrss\n'
           printf "$CFG" >> $INI
-          echo "== secao REST:"; sed -n '/\[ONSTART\]/,$p' $INI | grep -aviE 'senha|password'
           MARK=$(wc -l < $APP/console.log)
           systemctl restart totvsappserver
           for i in $(seq 1 40); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done
           W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8089/)
           echo "webapp 8089: $W | appserver: $(systemctl is-active totvsappserver)"
-          if [ "$W" != "200" ]; then echo "!! base caiu - restaurando"; cp -f $INI.bkp-restok $INI; systemctl restart totvsappserver; for i in $(seq 1 40); do ss -tlnH|grep -q ':8089 '&&break; sleep 3; done; echo "restaurado 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"; exit 1; fi
+          if [ "$W" != "200" ]; then echo "!! base caiu - restaurando"; cp -f $INI.bkp-restok2 $INI; systemctl restart totvsappserver; for i in $(seq 1 40); do ss -tlnH|grep -q ':8089 '&&break; sleep 3; done; echo "restaurado 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"; exit 1; fi
           for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done
           echo "REST 8095: $(ss -tlnH | grep -q ':8095 ' && echo LISTEN || echo NAO)"
-          echo "== compila LIB (deve ser estavel agora):"
+          echo "== teste de estabilidade: espera 70s cobrindo um ciclo e checa APPMON:"
+          sleep 70
+          FLAP=$(tail -n +$MARK $APP/console.log | grep -aicE 'Invalid REST Port|Fail to Restart - APP Monitor')
+          echo "ocorrencias APPMON -107 no periodo: $FLAP"
+          cmp(){ for t in 1 2 3; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base "$1" 2>/dev/null | tail -1); echo "$O" | grep -q '"ok": true' && { echo "$O"; return 0; }; echo "   retry $t: $O"; sleep 10; done; echo "$O"; return 1; }
           rm -rf /tmp/f-lib /tmp/f-rest && mkdir -p /tmp/f-lib /tmp/f-rest
           tar -xzf /tmp/prmrss.tgz -C /tmp/f-lib  PRMRSSLIB.prw
           tar -xzf /tmp/prmrss.tgz -C /tmp/f-rest PRMRSS.prw
-          systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-lib 2>/dev/null | tail -1
-          echo "== compila WSRESTFUL:"
-          systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-rest 2>/dev/null | tail -1
-          echo "== erros APP Monitor/-107 apos compiles (vazio = estavel):"
-          tail -n +$MARK $APP/console.log | grep -aiE 'APP Monitor|-107|Invalid REST Port|terminated by the admin' | grep -aviE 'senha|password' | head -5
+          echo "== compila LIB (retry):";       cmp /tmp/f-lib
+          echo "== compila WSRESTFUL (retry):"; cmp /tmp/f-rest
           for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && curl -s -o /dev/null -m 5 "$B" && break; sleep 3; done; sleep 3
-          post(){ curl -s -m 30 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data "$1"; }
-          tok(){ curl -s -m 20 -w ' <%{http_code}>\n' -X POST "$T" --data-urlencode "grant_type=password" --data-urlencode "username=$1" --data-urlencode "password=$2" | sed -E 's/("access_token":"[A-Za-z0-9._-]{6})[^"]*"/\1...TOKEN_OK"/'; }
+          post(){ curl -s -m 30 --retry 3 --retry-connrefused -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data "$1"; }
+          tok(){ curl -s -m 20 --retry 3 --retry-connrefused -w ' <%{http_code}>\n' -X POST "$T" --data-urlencode "grant_type=password" --data-urlencode "username=$1" --data-urlencode "password=$2" | sed -E 's/("access_token":"[A-Za-z0-9._-]{6})[^"]*"/\1...TOKEN_OK"/'; }
           echo "1) CRIAR TSTPRIME:";        post '{"acao":"criar","login":"TSTPRIME","senha":"Prime@2026","chave":"PrimeHub@2026"}'
           echo "2) LOGIN Prime@2026:";       tok TSTPRIME 'Prime@2026'
           echo "3) RESET Novo@2026:";        post '{"acao":"reset","login":"TSTPRIME","senha":"Novo@2026","chave":"PrimeHub@2026"}'
