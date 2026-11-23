@@ -1,0 +1,22 @@
+name: VM - reset auth test
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: testar basic auth no REST
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          U=http://127.0.0.1:8095/rest/prmrss
+          BODY='{"login":"ZZNAOEXISTE_PRIME","senha":"x","chave":"PrimeHub@2026"}'
+          for CRED in "admin:" "admin: " "admin:admin"; do
+            echo "== -u [$CRED]"
+            curl -s -m 15 -w ' <HTTP %{http_code}>\n' -u "$CRED" -X POST "$U" -H 'Content-Type: application/json' --data "$BODY"
+          done
+          echo "== token oauth2 padrao TOTVS (gera token e usa Bearer)"
+          curl -s -m 15 -w ' <HTTP %{http_code}>\n' -X POST "http://127.0.0.1:8095/rest/api/oauth2/v1/token?grant_type=password&username=admin&password=" | head -c 300; echo
+          R
