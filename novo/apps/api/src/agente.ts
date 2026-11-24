@@ -252,6 +252,21 @@ export async function eventosDoChamado(chamadoId: number, limite = 12): Promise<
   return l.reverse();
 }
 
+export interface EtapaPipeline { chamadoId: number; chamadoTitulo: string; cliente: string; prioridade: string; fase: string; texto: string; desde: string; propostaId: number | null }
+/** Pipeline (kanban): o ESTÁGIO ATUAL de cada chamado que o agente tocou nos últimos dias. */
+export async function pipelineAgente(): Promise<EtapaPipeline[]> {
+  return consulta<EtapaPipeline>(
+    `SELECT e.chamado_id chamadoId, ch.titulo chamadoTitulo, c.nome cliente, ch.prioridade, e.fase, e.texto, e.criado_em desde,
+            (SELECT a.id FROM chamado_agente a WHERE a.chamado_id = e.chamado_id AND a.status IN ('rascunho','aprovado_execucao') ORDER BY a.id DESC LIMIT 1) propostaId
+       FROM chamado_agente_eventos e
+       JOIN chamados ch ON ch.id = e.chamado_id
+       JOIN clientes c ON c.id = ch.cliente_id
+      WHERE e.id IN (SELECT MAX(id) FROM chamado_agente_eventos GROUP BY chamado_id)
+        AND e.criado_em > NOW() - INTERVAL 10 DAY
+      ORDER BY FIELD(ch.prioridade,'urgente','alta','media','baixa'), e.criado_em DESC`)
+    .then((l) => l.map((x) => ({ ...x, propostaId: x.propostaId === null ? null : Number(x.propostaId) }))).catch(() => []);
+}
+
 export interface AtividadeAgente { chamadoId: number; chamadoTitulo: string; cliente: string; fase: string; texto: string; em: string }
 /** Feed de TODAS as ações do agente (todos os chamados), mais novo primeiro. */
 export async function atividadesAgente(limite = 60): Promise<AtividadeAgente[]> {

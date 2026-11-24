@@ -279,6 +279,16 @@ export interface PropostaAgente {
 }
 export interface EventoAgente { fase: string; texto: string; em: string }
 export interface AtividadeAgente { chamadoId: number; chamadoTitulo: string; cliente: string; fase: string; texto: string; em: string }
+export interface EtapaPipeline { chamadoId: number; chamadoTitulo: string; cliente: string; prioridade: string; fase: string; texto: string; desde: string; propostaId: number | null }
+/** Colunas do quadro (kanban) do agente, na ordem do fluxo. Cada fase cai numa coluna. */
+export const COLUNAS_PIPELINE: { id: string; rotulo: string; cor: string; fases: string[] }[] = [
+  { id: 'fila', rotulo: 'Na fila', cor: '#64748b', fases: ['recebido'] },
+  { id: 'trabalhando', rotulo: 'Trabalhando', cor: '#6366f1', fases: ['aprovado', 'analisando', 'desenvolvendo'] },
+  { id: 'compilando', rotulo: 'Compilando', cor: '#f59e0b', fases: ['compilando'] },
+  { id: 'erro', rotulo: 'Com erro', cor: '#ef4444', fases: ['erro'] },
+  { id: 'revisar', rotulo: 'Pronto p/ revisar', cor: '#10b981', fases: ['rascunho', 'pronto'] },
+  { id: 'enviado', rotulo: 'Enviado', cor: '#22c55e', fases: ['enviado', 'descartado'] },
+];
 /** Fases do pipeline do agente, em ordem, com rótulo e cor para a tela. */
 export const FASES_AGENTE: { fase: string; rotulo: string; cor: string }[] = [
   { fase: 'recebido', rotulo: 'Recebido', cor: '#64748b' },
