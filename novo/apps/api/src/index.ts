@@ -19,7 +19,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { agente, ErroVm, podePainelVm } from './vm-servicos';
-import { anexoAgente, aprovarExecucao, arquivoDaProposta, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, processarChamadosPendentes, registrarProposta, type Proposta } from './agente';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -179,6 +179,17 @@ app.get('/api/agente/anexos/:id', async (c) => {
   catch (e) { return c.json({ erro: e instanceof Error ? e.message : 'erro' }, e instanceof ErroAgente ? e.status : 500); }
 });
 app.post('/api/agente/chamados/:id/proposta', (c) => soAgente(c, async () => registrarProposta(idDe(c.req.param('id')), (await corpoJson(c)) as unknown as Proposta)));
+// Agente reporta um passo do pipeline (analisando, desenvolvendo, compilando, erro…).
+app.post('/api/agente/chamados/:id/evento', (c) => soAgente(c, async () => {
+  const b = await corpoJson(c);
+  await registrarEvento(idDe(c.req.param('id')), String(b.fase ?? 'analisando'), String(b.texto ?? ''));
+  return { ok: true };
+}));
+// Agente baixa um arquivo de referência que a equipe anexou para a execução.
+app.get('/api/agente/entrada/:id', async (c) => {
+  try { await conferirTokenAgente(c.req.header('x-agente-token')); return arquivoResp(await arquivoEntrada(idDe(c.req.param('id')))); }
+  catch (e) { return c.json({ erro: e instanceof Error ? e.message : 'erro' }, e instanceof ErroAgente ? e.status : 500); }
+});
 
 app.get('/api/agente/mesa', exigirLogin('equipe'), (c) => agenteResp(c, () => mesaDoAgente()));
 app.post('/api/agente/propostas/:pid/enviar', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
@@ -187,7 +198,7 @@ app.post('/api/agente/propostas/:pid/enviar', exigirLogin('equipe'), (c) => agen
 }));
 app.post('/api/agente/propostas/:pid/executar', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
   const b = await corpoJson(c);
-  await aprovarExecucao(idDe(c.req.param('pid')), c.get('usuario'), String(b.tipo ?? ''), String(b.instrucoes ?? ''));
+  await aprovarExecucao(idDe(c.req.param('pid')), c.get('usuario'), String(b.tipo ?? ''), String(b.instrucoes ?? ''), Array.isArray(b.arquivos) ? b.arquivos as { nome?: string; conteudo_base64?: string }[] : []);
   return { mensagem: 'Aprovado. O agente vai executar na próxima rodada e devolver para você revisar.' };
 }));
 app.post('/api/agente/propostas/:pid/descartar', exigirLogin('equipe'), (c) => agenteResp(c, async () => { await descartarProposta(idDe(c.req.param('pid'))); return { mensagem: 'Proposta descartada.' }; }));

@@ -1,7 +1,7 @@
 'use client';
 
-import { TIPOS_CASO_AGENTE, type PropostaAgente } from '@primehub/shared';
-import { Bot, CheckCircle2, ClipboardList, Download, ExternalLink, FileCode2, Hammer, Send, Trash2, TriangleAlert } from 'lucide-react';
+import { FASES_AGENTE, TIPOS_CASO_AGENTE, type EventoAgente, type PropostaAgente } from '@primehub/shared';
+import { Bot, CheckCircle2, ClipboardList, Download, ExternalLink, FileCode2, Hammer, Paperclip, Send, Trash2, TriangleAlert, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Aviso, BotaoPrimario, BotaoSecundario, CLASSE_AREA, CLASSE_ENTRADA, Campo, tempoRelativo } from './ui/basico';
@@ -10,6 +10,46 @@ import { api } from '@/lib/api';
 const COR_TIPO: Record<string, string> = { resposta: '#0ea5e9', duvida: '#64748b', correcao: '#ef4444', melhoria: '#10b981', proposta: '#f59e0b', desenvolvimento: '#8b5cf6', outro: '#94a3b8' };
 const COR_CONF: Record<string, string> = { alta: '#10b981', media: '#f59e0b', baixa: '#ef4444' };
 const STATUS_APOS: Record<string, string> = { aguardando_cliente: 'Aguardando cliente', aguardando_equipe: 'Aguardando nós', fechado: 'Encerrar o chamado' };
+const FASE_INFO = Object.fromEntries(FASES_AGENTE.map((f) => [f.fase, f]));
+
+function lerBase64(f: File): Promise<string> {
+  return new Promise((ok, falha) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(',')[1] ?? '');
+    r.onerror = () => falha(new Error('erro ao ler'));
+    r.readAsDataURL(f);
+  });
+}
+function tamanhoHumano(n: number): string { return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`; }
+
+/** Linha do tempo das ações do agente no chamado (pipeline). */
+function Pipeline({ eventos }: { eventos: EventoAgente[] }) {
+  if (!eventos.length) return null;
+  const hora = (s: string) => { try { return new Date(s.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  return (
+    <details className="rounded-2xl bg-superficie-alta/40 p-3 text-sm" open>
+      <summary className="cursor-pointer font-semibold text-texto">Andamento do agente ({eventos.length})</summary>
+      <ol className="mt-3 space-y-2">
+        {eventos.map((e, i) => {
+          const info = FASE_INFO[e.fase] ?? { rotulo: e.fase, cor: '#94a3b8' };
+          const ultimo = i === eventos.length - 1;
+          return (
+            <li key={i} className="flex items-start gap-2.5">
+              <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: info.cor, boxShadow: ultimo ? `0 0 0 3px ${info.cor}33` : 'none' }} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-x-2 leading-tight">
+                  <span className="font-semibold" style={{ color: info.cor }}>{info.rotulo}</span>
+                  <span className="text-xs text-suave">{hora(e.em)}</span>
+                </p>
+                {e.texto && <p className="text-suave">{e.texto}</p>}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </details>
+  );
+}
 
 /**
  * Uma proposta do agente para a equipe decidir: enviar a resposta (pode
@@ -20,6 +60,7 @@ export function CartaoProposta({ p, aoMudar, mostrarChamado = true }: { p: Propo
   const [texto, setTexto] = useState(p.resposta);
   const [status, setStatus] = useState(p.statusSugerido ?? 'aguardando_cliente');
   const [executar, setExecutar] = useState<{ tipo: string; instrucoes: string } | null>(null);
+  const [refs, setRefs] = useState<File[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState<{ t: string; e: boolean }>({ t: '', e: false });
   const emExecucao = p.status === 'aprovado_execucao';
@@ -30,6 +71,16 @@ export function CartaoProposta({ p, aoMudar, mostrarChamado = true }: { p: Propo
     try { const r = await api<{ mensagem?: string }>(`/api/agente/propostas/${p.id}/${caminho}`, { method: 'POST', body: JSON.stringify(corpo) }); setAviso({ t: r.mensagem ?? ok, e: false }); setTimeout(aoMudar, 900); }
     catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); }
     setOcupado(false);
+  }
+  /** Aprova a execução levando os arquivos de referência que a equipe anexou. */
+  async function mandarFazer() {
+    if (!executar) return;
+    setOcupado(true); setAviso({ t: '', e: false });
+    try {
+      const arquivos = await Promise.all(refs.slice(0, 10).map(async (f) => ({ nome: f.name, conteudo_base64: await lerBase64(f) })));
+      const r = await api<{ mensagem?: string }>(`/api/agente/propostas/${p.id}/executar`, { method: 'POST', body: JSON.stringify({ ...executar, arquivos }) });
+      setAviso({ t: r.mensagem ?? 'Aprovado.', e: false }); setTimeout(aoMudar, 900);
+    } catch (e) { setAviso({ t: e instanceof Error ? e.message : 'Não deu certo.', e: true }); setOcupado(false); }
   }
   async function baixar(id: number) {
     try { const { url } = await api<{ url: string }>(`/api/agente/arquivos/${id}/link`, { method: 'POST', body: '{}' }); location.href = url; }
@@ -49,11 +100,25 @@ export function CartaoProposta({ p, aoMudar, mostrarChamado = true }: { p: Propo
       {mostrarChamado && <p className="font-semibold text-texto">{p.chamadoTitulo}</p>}
 
       {emExecucao ? (
-        <div className="flex items-start gap-3 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm">
-          <Hammer className="mt-0.5 shrink-0 text-violet-500" size={18} aria-hidden="true" />
-          <div><p className="font-semibold text-texto">Execução aprovada: o agente está fazendo.</p><p className="text-suave">Quando terminar, volta aqui para você revisar antes de qualquer envio.{p.instrucoes ? ` Suas instruções: "${p.instrucoes}"` : ''}</p></div>
+        <div className="space-y-2 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm">
+          <div className="flex items-start gap-3">
+            <Hammer className="mt-0.5 shrink-0 text-violet-500" size={18} aria-hidden="true" />
+            <div><p className="font-semibold text-texto">Execução aprovada: o agente está fazendo.</p><p className="text-suave">Quando terminar, volta aqui para você revisar antes de qualquer envio.{p.instrucoes ? ` Suas instruções: "${p.instrucoes}"` : ''}</p></div>
+          </div>
+          {p.entrada && p.entrada.length > 0 && (
+            <div className="flex flex-wrap gap-2 pl-7">
+              <span className="text-xs font-semibold text-suave">Referências enviadas:</span>
+              {p.entrada.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-xs text-violet-500">
+                  <FileCode2 size={12} aria-hidden="true" />{a.nome}<span className="text-suave">{tamanhoHumano(a.tamanho)}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
+
+      {p.eventos && p.eventos.length > 0 && <Pipeline eventos={p.eventos} />}
 
       {p.plano && (
         <section className="space-y-1">
@@ -112,9 +177,31 @@ export function CartaoProposta({ p, aoMudar, mostrarChamado = true }: { p: Propo
               <Campo rotulo="Instruções para o agente (opcional)">
                 <textarea rows={3} value={executar.instrucoes} onChange={(e) => setExecutar({ ...executar, instrucoes: e.target.value })} className={CLASSE_AREA} placeholder="Ex.: corrigir no PE M410STTS, não mexer na rotina padrão; proposta com 2 opções de escopo." />
               </Campo>
+              <div>
+                <p className="mb-1.5 text-sm font-semibold text-texto">Arquivos de referência para o agente (fontes, PDFs, prints)</p>
+                <label
+                  onDragOver={(ev) => ev.preventDefault()}
+                  onDrop={(ev) => { ev.preventDefault(); setRefs((l) => [...l, ...Array.from(ev.dataTransfer.files)].slice(0, 10)); }}
+                  className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-violet-500/50 bg-violet-500/5 px-3 py-3 text-sm text-violet-500 hover:bg-violet-500/10">
+                  <Paperclip size={16} aria-hidden="true" /> Arraste aqui ou escolha arquivos (.prw, .tlpp, PDF, imagens…)
+                  <input type="file" multiple className="sr-only" onChange={(ev) => { setRefs((l) => [...l, ...Array.from(ev.target.files ?? [])].slice(0, 10)); ev.target.value = ''; }} />
+                </label>
+                {refs.length > 0 && (
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {refs.map((f, i) => (
+                      <li key={`${f.name}-${i}`} className="inline-flex items-center gap-2 rounded-lg bg-superficie-alta px-2 py-1 text-xs text-texto">
+                        <FileCode2 size={13} className="text-violet-500" aria-hidden="true" />
+                        <span className="max-w-[12rem] truncate" title={f.name}>{f.name}</span>
+                        <span className="text-suave">{tamanhoHumano(f.size)}</span>
+                        <button type="button" aria-label={`Remover ${f.name}`} onClick={() => setRefs((l) => l.filter((_, n) => n !== i))} className="toque text-suave hover:text-perigo"><X size={13} /></button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <div className="flex justify-end gap-2">
-                <BotaoSecundario onClick={() => setExecutar(null)}>Cancelar</BotaoSecundario>
-                <BotaoPrimario disabled={ocupado} onClick={() => void agir('executar', executar, 'Aprovado.')}><CheckCircle2 size={16} aria-hidden="true" /> Aprovar e mandar fazer</BotaoPrimario>
+                <BotaoSecundario onClick={() => { setExecutar(null); setRefs([]); }}>Cancelar</BotaoSecundario>
+                <BotaoPrimario disabled={ocupado} onClick={() => void mandarFazer()}><CheckCircle2 size={16} aria-hidden="true" /> Aprovar e mandar fazer{refs.length ? ` (${refs.length})` : ''}</BotaoPrimario>
               </div>
             </div>
           )}

@@ -272,7 +272,25 @@ export interface PropostaAgente {
   status: string; etapa: string; tipo: string; plano: string | null; instrucoes: string | null;
   resposta: string; statusSugerido: string | null; confianca: string; fontes: { titulo: string; url: string }[];
   resumoInterno: string | null; motivo: string | null; atendente: string | null; arquivos: { id: number; nome: string }[]; criadoEm: string; sessao: string | null;
+  /** Arquivos que a equipe anexou ao mandar o agente fazer (referência de desenvolvimento). */
+  entrada?: { id: number; nome: string; tamanho: number }[];
+  /** Linha do tempo das ações do agente neste chamado (pipeline). */
+  eventos?: EventoAgente[];
 }
+export interface EventoAgente { fase: string; texto: string; em: string }
+/** Fases do pipeline do agente, em ordem, com rótulo e cor para a tela. */
+export const FASES_AGENTE: { fase: string; rotulo: string; cor: string }[] = [
+  { fase: 'recebido', rotulo: 'Recebido', cor: '#64748b' },
+  { fase: 'rascunho', rotulo: 'Rascunho pronto', cor: '#0ea5e9' },
+  { fase: 'aprovado', rotulo: 'Execução aprovada', cor: '#8b5cf6' },
+  { fase: 'analisando', rotulo: 'Analisando', cor: '#6366f1' },
+  { fase: 'desenvolvendo', rotulo: 'Desenvolvendo', cor: '#a855f7' },
+  { fase: 'compilando', rotulo: 'Compilando', cor: '#f59e0b' },
+  { fase: 'erro', rotulo: 'Erro', cor: '#ef4444' },
+  { fase: 'pronto', rotulo: 'Pronto para revisar', cor: '#10b981' },
+  { fase: 'enviado', rotulo: 'Enviado ao cliente', cor: '#22c55e' },
+  { fase: 'descartado', rotulo: 'Descartado', cor: '#94a3b8' },
+];
 export const TIPOS_CASO_AGENTE: Record<string, string> = {
   resposta: 'Resposta / orientação', duvida: 'Dúvida (falta informação)', correcao: 'Correção', melhoria: 'Melhoria',
   proposta: 'Proposta / orçamento', desenvolvimento: 'Desenvolvimento', outro: 'Outro',

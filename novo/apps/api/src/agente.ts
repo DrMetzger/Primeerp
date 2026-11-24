@@ -59,6 +59,27 @@ export async function garantirEstruturaAgente(): Promise<void> {
       criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_agente_arquivo FOREIGN KEY (proposta_id) REFERENCES chamado_agente(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  // Arquivos que a EQUIPE anexa ao mandar o agente desenvolver (fontes, PDFs,
+  // prints de referência). Não vão ao cliente: são insumo para o agente.
+  await executar(`CREATE TABLE IF NOT EXISTS chamado_agente_entrada (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      proposta_id INT NOT NULL,
+      nome VARCHAR(255) NOT NULL,
+      dados LONGBLOB NOT NULL,
+      criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_agente_entrada FOREIGN KEY (proposta_id) REFERENCES chamado_agente(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+  // Linha do tempo (pipeline) das ações do agente num chamado, para a equipe
+  // acompanhar: recebido, rascunho, aprovado, desenvolvendo, compilando, pronto…
+  await executar(`CREATE TABLE IF NOT EXISTS chamado_agente_eventos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      chamado_id INT NOT NULL,
+      proposta_id INT NULL,
+      fase VARCHAR(20) NOT NULL,
+      texto VARCHAR(500) NOT NULL DEFAULT '',
+      criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY ix_evt_chamado (chamado_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
   await executar(`CREATE TABLE IF NOT EXISTS chamado_agente_reservas (
       chamado_id INT PRIMARY KEY,
       reservado_ate DATETIME NOT NULL
@@ -168,9 +189,14 @@ export async function detalheAgente(id: number): Promise<Record<string, unknown>
     conversa: conversa.map((m) => ({ id: m.id, de: m.autor_tipo === 'equipe' ? `Equipe (${m.autor_nome ?? ''})` : `Cliente (${m.autor_nome ?? ''})`, quando: m.criado_em, mensagem: m.mensagem })),
     anexos: anexos.map((a) => ({ id: a.id, nome: a.nome, tamanho: Number(a.tamanho), baixar: `/api/agente/anexos/${a.id}` })),
     chamadosParecidosResolvidos: resolvidos,
-    execucaoAprovada: await primeira(
-      `SELECT a.id propostaId, a.tipo, a.plano, a.instrucoes_equipe instrucoesDaEquipe, a.resposta rascunhoAnterior, u.nome aprovadoPor
-         FROM chamado_agente a LEFT JOIN usuarios u ON u.id = a.aprovado_por WHERE a.chamado_id = ? AND a.status = 'aprovado_execucao' ORDER BY a.id DESC LIMIT 1`, [id]),
+    execucaoAprovada: await (async () => {
+      const ex = await primeira<{ propostaId: number } & Record<string, unknown>>(
+        `SELECT a.id propostaId, a.tipo, a.plano, a.instrucoes_equipe instrucoesDaEquipe, a.resposta rascunhoAnterior, u.nome aprovadoPor
+           FROM chamado_agente a LEFT JOIN usuarios u ON u.id = a.aprovado_por WHERE a.chamado_id = ? AND a.status = 'aprovado_execucao' ORDER BY a.id DESC LIMIT 1`, [id]);
+      if (!ex) return null;
+      const refs = await consulta<{ id: number; nome: string; tamanho: number }>('SELECT id, nome, LENGTH(dados) tamanho FROM chamado_agente_entrada WHERE proposta_id = ?', [ex.propostaId]).catch(() => []);
+      return { ...ex, arquivosReferencia: refs.map((a) => ({ id: Number(a.id), nome: a.nome, tamanho: Number(a.tamanho), baixar: `/api/agente/entrada/${a.id}` })) };
+    })(),
   };
 }
 
@@ -211,6 +237,21 @@ export interface Proposta {
 
 const STATUS_OK = ['aguardando_cliente', 'aguardando_equipe', 'fechado'];
 
+const FASES_VALIDAS = new Set(['recebido', 'rascunho', 'aprovado', 'analisando', 'desenvolvendo', 'compilando', 'erro', 'pronto', 'enviado', 'descartado']);
+
+/** Registra um passo do pipeline do agente (para a equipe acompanhar). */
+export async function registrarEvento(chamadoId: number, fase: string, texto = '', propostaId: number | null = null): Promise<void> {
+  if (!FASES_VALIDAS.has(fase)) fase = 'analisando';
+  await executar('INSERT INTO chamado_agente_eventos (chamado_id, proposta_id, fase, texto) VALUES (?,?,?,?)', [chamadoId, propostaId, fase, texto.slice(0, 500)]).catch(() => undefined);
+}
+
+/** Últimos eventos do pipeline de um chamado (mais novo por último). */
+export async function eventosDoChamado(chamadoId: number, limite = 12): Promise<{ fase: string; texto: string; em: string }[]> {
+  const l = await consulta<{ fase: string; texto: string; em: string }>(
+    'SELECT fase, texto, criado_em em FROM chamado_agente_eventos WHERE chamado_id = ? ORDER BY id DESC LIMIT ?', [chamadoId, Math.max(1, Math.min(50, limite))]).catch(() => []);
+  return l.reverse();
+}
+
 /** Guarda a proposta para a equipe revisar. Nunca envia nada ao cliente. */
 export async function registrarProposta(chamadoId: number, p: Proposta): Promise<{ id: number; avisos: string[] }> {
   const ch = await primeira<{ id: number; cliente_id: number; responsavel_id: number | null }>('SELECT id, cliente_id, responsavel_id FROM chamados WHERE id = ?', [chamadoId]);
@@ -240,14 +281,22 @@ export async function registrarProposta(chamadoId: number, p: Proposta): Promise
     JSON.stringify(fontes), (p.resumo_interno ?? '').slice(0, 8000) || null, avisos.join('; ').slice(0, 300) || null, atendente?.id ?? null, (p.sessao ?? '').slice(0, 300) || null]);
   for (const a of arquivos) await executar('INSERT INTO chamado_agente_arquivos (proposta_id, nome, dados) VALUES (?, ?, ?)', [r.insertId, a.nome, a.bytes]);
   await executar('DELETE FROM chamado_agente_reservas WHERE chamado_id = ?', [chamadoId]);
+  await registrarEvento(chamadoId, execucao ? 'pronto' : 'rascunho', execucao ? 'Agente terminou — pronto para a equipe revisar.' : 'Rascunho pronto para revisão.', r.insertId);
   return { id: r.insertId, avisos };
 }
 
 /** Equipe aprova o plano: a próxima rodada do agente executa (e devolve para revisão). */
-export async function aprovarExecucao(propostaId: number, quem: { id: number }, tipo: string, instrucoes: string): Promise<void> {
+export async function aprovarExecucao(propostaId: number, quem: { id: number }, tipo: string, instrucoes: string, arquivos: { nome?: string; conteudo_base64?: string }[] = []): Promise<void> {
   if (!(tipo in TIPOS_CASO)) throw new ErroAgente('Tipo inválido.');
   const ok = await executar("UPDATE chamado_agente SET status = 'aprovado_execucao', tipo = ?, instrucoes_equipe = ?, aprovado_por = ? WHERE id = ? AND status = 'rascunho'", [tipo, instrucoes.trim().slice(0, 4000) || null, quem.id, propostaId]);
   if (!ok.affectedRows) throw new ErroAgente('Essa proposta não está mais aguardando revisão.', 409);
+  const chamadoId = Number((await primeira<{ chamado_id: number }>('SELECT chamado_id FROM chamado_agente WHERE id = ?', [propostaId]))?.chamado_id ?? 0);
+  // Arquivos de referência que a equipe mandou junto (fontes, PDFs): insumo do agente.
+  const limpos = (arquivos ?? []).slice(0, 10)
+    .map((a) => ({ nome: String(a.nome ?? 'arquivo').replace(/[^\w.\-]/g, '_').slice(0, 160), bytes: Buffer.from(String(a.conteudo_base64 ?? ''), 'base64') }))
+    .filter((a) => a.bytes.length > 0 && a.bytes.length <= 10 * 1024 * 1024);
+  for (const a of limpos) await executar('INSERT INTO chamado_agente_entrada (proposta_id, nome, dados) VALUES (?,?,?)', [propostaId, a.nome, a.bytes]);
+  if (chamadoId) await registrarEvento(chamadoId, 'aprovado', `Execução aprovada (${TIPOS_CASO[tipo] ?? tipo})${limpos.length ? ` · ${limpos.length} arquivo(s) de referência` : ''}.`, propostaId);
 }
 
 // ---------------------------------------------------------------- Envio (pelo mesmo caminho da resposta manual)
@@ -282,11 +331,21 @@ export async function enviarProposta(propostaId: number, quem: { id: number }, m
   const j = (await r.json().catch(() => null)) as { ok?: boolean; erro?: string } | null;
   if (!r.ok || !j?.ok) throw new ErroAgente(j?.erro ?? `Não deu para enviar (HTTP ${r.status}).`, 409);
   await executar("UPDATE chamado_agente SET status = 'enviada', aprovado_por = ? WHERE id = ?", [quem.id, propostaId]);
+  await registrarEvento(p.chamado_id, 'enviado', 'Resposta enviada ao cliente.', propostaId);
   return { ok: true };
 }
 
 export async function descartarProposta(propostaId: number): Promise<void> {
+  const p = await primeira<{ chamado_id: number }>('SELECT chamado_id FROM chamado_agente WHERE id = ?', [propostaId]);
   await executar("UPDATE chamado_agente SET status = 'descartada' WHERE id = ? AND status = 'rascunho'", [propostaId]);
+  if (p) await registrarEvento(p.chamado_id, 'descartado', 'Proposta descartada pela equipe.', propostaId);
+}
+
+/** Arquivo de referência que a equipe anexou para o agente (download pelo agente). */
+export async function arquivoEntrada(arquivoId: number): Promise<{ nome: string; bytes: Buffer }> {
+  const a = await primeira<{ nome: string; dados: Buffer }>('SELECT nome, dados FROM chamado_agente_entrada WHERE id = ?', [arquivoId]);
+  if (!a) throw new ErroAgente('Arquivo não encontrado.', 404);
+  return { nome: a.nome, bytes: Buffer.from(a.dados) };
 }
 
 /** Proposta atual do chamado, para a tela da equipe. */
@@ -310,10 +369,14 @@ const SQL_PROPOSTA = `SELECT a.id, a.chamado_id chamadoId, ch.titulo chamadoTitu
   FROM chamado_agente a JOIN chamados ch ON ch.id = a.chamado_id JOIN clientes c ON c.id = ch.cliente_id LEFT JOIN usuarios u ON u.id = a.atendente_id`;
 
 async function completar(p: Omit<PropostaAgente, 'fontes' | 'arquivos'> & { fontes: string | null }): Promise<PropostaAgente> {
-  const arquivos = (await consulta<{ id: number; nome: string }>('SELECT id, nome FROM chamado_agente_arquivos WHERE proposta_id = ?', [p.id])).map((a) => ({ id: Number(a.id), nome: a.nome }));
+  const [arquivos, entrada, eventos] = await Promise.all([
+    consulta<{ id: number; nome: string }>('SELECT id, nome FROM chamado_agente_arquivos WHERE proposta_id = ?', [p.id]).then((l) => l.map((a) => ({ id: Number(a.id), nome: a.nome }))),
+    consulta<{ id: number; nome: string; tamanho: number }>('SELECT id, nome, LENGTH(dados) tamanho FROM chamado_agente_entrada WHERE proposta_id = ?', [p.id]).then((l) => l.map((a) => ({ id: Number(a.id), nome: a.nome, tamanho: Number(a.tamanho) }))).catch(() => []),
+    eventosDoChamado(p.chamadoId, 12),
+  ]);
   let fontes: { titulo: string; url: string }[] = [];
   try { fontes = JSON.parse(p.fontes ?? '[]') as typeof fontes; } catch { /* sem fontes */ }
-  return { ...p, fontes, arquivos };
+  return { ...p, fontes, arquivos, entrada, eventos };
 }
 
 export async function arquivoDaProposta(arquivoId: number): Promise<{ nome: string; bytes: Buffer }> {
@@ -349,6 +412,7 @@ export async function processarChamadosPendentes(): Promise<void> {
 }
 
 async function rascunharChamado(id: number): Promise<void> {
+  await registrarEvento(id, 'recebido', 'Chamado recebido pelo agente.');
   const det = (await detalheAgente(id)) as Record<string, any>;
   const conversa: any[] = det.conversa ?? [];
   const anexos: any[] = det.anexos ?? [];
