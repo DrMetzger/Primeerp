@@ -1,0 +1,25 @@
+name: VM - dead tuples check
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: viabilidade de recuperar tuplas mortas
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>&1; }
+          echo "== dead tuples e vacuum em sys_usr:"
+          Q "SELECT 'n_dead='||n_dead_tup||' n_live='||n_live_tup||' last_autovac='||coalesce(last_autovacuum::text,'nunca')||' last_vac='||coalesce(last_vacuum::text,'nunca') FROM pg_stat_user_tables WHERE relname='sys_usr';"
+          echo "== pg_dirtyread disponivel?"
+          Q "CREATE EXTENSION IF NOT EXISTS pg_dirtyread;" | head -3
+          Q "SELECT 'pg_dirtyread OK' FROM pg_extension WHERE extname='pg_dirtyread';"
+          echo "== pageinspect disponivel?"
+          Q "CREATE EXTENSION IF NOT EXISTS pageinspect;" | head -3
+          Q "SELECT 'pageinspect OK' FROM pg_extension WHERE extname='pageinspect';"
+          echo "== paginas da sys_usr:"
+          Q "SELECT 'relpages='||relpages FROM pg_class WHERE relname='sys_usr';"
+          R
