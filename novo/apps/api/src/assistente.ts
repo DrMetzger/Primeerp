@@ -2,6 +2,7 @@ import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
 import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
+import { podePainelVm, resetarSenhaProtheus } from './vm-servicos';
 
 /**
  * DOIS assistentes separados, ambos no Gemini pago da Prime:
@@ -205,6 +206,32 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.erro, dica: 'confira ambiente/senha do servidor e se o fonte compila' };
       const tokenFonte = await guardarArtefato(nomeArquivo, Buffer.from(fonte, 'utf8'));
       return { ok: true, servidor: alvo.nome, conversao: resumoConversao || undefined, nome_patch: r.nome, nome_fonte: nomeArquivo, baixar_patch: `/api/compilacao/arquivo/${r.token}`, baixar_fonte: `/api/compilacao/arquivo/${tokenFonte}`, instrucao_resposta: 'Diga o que mudou e entregue OS DOIS links: o do fonte (.prw) e o do patch (.ptm), dizendo em qual servidor compilou.' };
+    },
+  },
+  {
+    declaracao: {
+      name: 'resetar_senha',
+      description: 'SÓ PARA ADMINISTRADORES. Reseta a senha de um usuário do Protheus num servidor cadastrado, sem tela e sem precisar de login (útil quando o admin perdeu a senha). A senha nova precisa de caractere especial (política do Protheus). Use quando pedirem para resetar/reiniciar a senha de um usuário do Protheus.',
+      parameters: { type: 'OBJECT', properties: {
+        servidor: { type: 'STRING', description: 'nome ou identificador do servidor cadastrado (ex.: "base", "3LIFE")' },
+        login: { type: 'STRING', description: 'login do usuário Protheus a resetar, ex.: admin ou Administrador' },
+        senha: { type: 'STRING', description: 'nova senha (precisa de caractere especial, ex.: Prime@2026)' },
+      }, required: ['servidor', 'login'] },
+    },
+    executar: async (u, a) => {
+      if (!podePainelVm(u)) return { erro: 'Resetar senha é só para administradores (admin/diretor/CEO).' };
+      const alvos = await listarAlvos(u);
+      const termo = txt(a, 'servidor').toLowerCase();
+      const alvo = alvos.find((x) => x.slug === termo || x.nome.toLowerCase().includes(termo) || `${x.grupo} ${x.nome}`.toLowerCase().includes(termo));
+      if (!alvo) return { erro: `Servidor "${txt(a, 'servidor')}" não encontrado. Disponíveis: ${alvos.map((x) => x.nome).join(', ')}` };
+      const login = txt(a, 'login');
+      if (!login) return { erro: 'Informe o login do usuário a resetar.' };
+      const senha = txt(a, 'senha') || 'Prime@2026';
+      if (!/[^A-Za-z0-9]/.test(senha)) return { erro: 'A nova senha precisa de pelo menos um caractere especial (política do Protheus). Ex.: Prime@2026.' };
+      const restBase = `http://${alvo.host}:8095`;
+      const r = await resetarSenhaProtheus(u.nome, login, senha, restBase);
+      if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.resposta || r.erro || 'não deu para resetar', dica: 'confira se o REST (porta 8095) do ambiente está ligado e se o U_PRMRST está compilado lá' };
+      return { ok: true, servidor: alvo.nome, login, senha, instrucao_resposta: `Confirme que a senha do usuário ${login} foi resetada em ${alvo.nome} e diga a nova senha (${senha}).` };
     },
   },
 ];

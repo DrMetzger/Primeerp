@@ -38,3 +38,28 @@ export function agente<T>(metodo: 'GET' | 'POST', caminho: string, quem?: string
     req.end();
   });
 }
+
+/** Resposta do reset de senha vindo do agente/REST do Protheus. */
+export interface RespostaReset {
+  ok: boolean;
+  http?: number;
+  resposta?: string;
+  erro?: string;
+}
+
+/**
+ * Reseta a senha de um usuário do Protheus pela API REST do ambiente, sem
+ * precisar de tela nem de login (o admin pode estar travado). `restBase` é a
+ * URL base do REST do ambiente alvo (ex.: http://127.0.0.1:8095 na base).
+ * Só admin/diretor/CEO. Observação: a gravação pode ocorrer mesmo quando o
+ * Protheus devolve 500 na finalização da transação — por isso conferimos.
+ */
+export async function resetarSenhaProtheus(quem: string, login: string, senha: string, restBase?: string): Promise<RespostaReset> {
+  const r = await agente<RespostaReset>('POST', '/reset/senha', quem, { login, senha, rest_base: restBase }, 60_000);
+  // Considera sucesso quando o JSON do PRMRSS traz ok:true OU quando gravou
+  // apesar do 500 (resposta sem "chave invalida"/"nao encontrado").
+  const corpo = String(r.resposta ?? '');
+  const okJson = /"ok"\s*:\s*true/.test(corpo);
+  const falhaConhecida = /Chave de autorizacao invalida|Usuario nao encontrado|Login nao informado|Valor inv.lido/i.test(corpo);
+  return { ...r, ok: okJson || (r.http === 500 && !falhaConhecida) };
+}

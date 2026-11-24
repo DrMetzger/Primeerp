@@ -249,6 +249,31 @@ class Agente(BaseHTTPRequestHandler):
                 return self.responder(200, {"ok": False, "erro": str(e)[:200]})
             finally:
                 shutil.rmtree(d, ignore_errors=True)
+        if partes == ["reset", "senha"]:
+            # Reseta a senha de um usuario Protheus chamando a API REST do
+            # proprio ambiente (endpoint publico PRMRSS + chave secreta).
+            try:
+                corpo = self._corpo()
+            except Exception:
+                return self.responder(400, {"ok": False, "erro": "corpo inválido"})
+            import urllib.request, urllib.error
+            base = str(corpo.get("rest_base") or "http://127.0.0.1:8095").rstrip("/")
+            login = str(corpo.get("login", "")).strip()
+            senha = str(corpo.get("senha", ""))
+            if not login:
+                return self.responder(400, {"ok": False, "erro": "informe o login"})
+            chave = os.environ.get("PRM_RESET_CHAVE", "PrimeHub@2026")
+            dados = json.dumps({"login": login, "senha": senha, "chave": chave}).encode()
+            req = urllib.request.Request(base + "/rest/prmrss", data=dados,
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=40) as r:
+                    return self.responder(200, {"ok": True, "http": r.status, "resposta": r.read().decode("utf-8", "replace")})
+            except urllib.error.HTTPError as e:
+                # a gravacao da senha pode ocorrer mesmo com 500 na finalizacao
+                return self.responder(200, {"ok": False, "http": e.code, "resposta": e.read().decode("utf-8", "replace")})
+            except Exception as e:
+                return self.responder(200, {"ok": False, "erro": str(e)[:200]})
         if len(partes) != 3 or partes[0] != "servicos":
             return self.responder(404, {"erro": "Caminho desconhecido."})
         alvo, acao = partes[1], partes[2]
