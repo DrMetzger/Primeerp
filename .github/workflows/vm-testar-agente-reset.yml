@@ -1,0 +1,20 @@
+name: VM - testar agente reset
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: testa a cadeia agente -> REST (login fake)
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          systemctl start totvsappserver-rest 2>/dev/null || true
+          for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 8
+          echo "== chama o agente de servicos (/reset/senha) com login fake, rest_base da base:"
+          curl -s --max-time 40 --unix-socket /run/primehub/servicos.sock \
+            -X POST http://local/reset/senha -H 'Content-Type: application/json' \
+            --data '{"login":"ZZTESTEAGENTE","senha":"Teste@1","rest_base":"http://127.0.0.1:8095"}' ; echo
+          R
