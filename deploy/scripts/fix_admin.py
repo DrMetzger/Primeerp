@@ -3,7 +3,11 @@
 # copiando todas as colunas de texto/char da tupla mais antiga (tupla morta,
 # ainda no heap pois vacuum nunca rodou) via pageinspect.
 # Conserta o erro de checkSum do registro introduzido por UPDATE manual.
-import subprocess
+import subprocess, os
+
+# md5 (do valor decodificado) do usr_pswmd5 alvo a restaurar.
+# Vazio = restaura a tupla mais antiga (qualquer senha).
+TARGET = os.environ.get("TARGET_MD5", "").strip()
 
 def psql(sql, db="protheus"):
     r = subprocess.run(["sudo", "-u", "postgres", "psql", "-At", "-d", db, "-c", sql],
@@ -32,15 +36,22 @@ if raw.startswith("__ERR__"):
 cols = [r.split("~", 1) for r in raw.strip().split("\n") if r]
 print(f"colunas de texto a restaurar: {len(cols)}")
 
+# filtro opcional por md5 do pswmd5 (coluna 4) para escolher o estado desejado
+FILT = f"WHERE md5(btrim({dec(4)}))='{TARGET}' " if TARGET else ""
+print("alvo de restauracao:", ("pswmd5 md5="+TARGET) if TARGET else "tupla mais antiga")
+
 sets = []
 restored = {}
 for n, name in cols:
-    v = psql(f"SELECT btrim({dec(n)}) FROM ({ITEMS}) o ORDER BY x::text::bigint LIMIT 1")
+    v = psql(f"SELECT btrim({dec(n)}) FROM ({ITEMS}) o {FILT}ORDER BY x::text::bigint LIMIT 1")
     if v.startswith("__ERR__"):
         print(f"ERRO coluna {name}:", v[:120]); raise SystemExit(1)
     v = v.rstrip("\n")
     restored[name] = v
     sets.append(name + "='" + v.replace("'", "''") + "'")
+
+if not restored.get("usr_chksum"):
+    print("nenhuma tupla casou o alvo; abortando"); raise SystemExit(1)
 
 print("pswmd5 original len:", len(restored.get("usr_pswmd5", "")),
       "| chksum original len:", len(restored.get("usr_chksum", "")))

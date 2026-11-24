@@ -7,7 +7,7 @@ jobs:
     runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
-      - name: restaura registro completo do admin e testa auth
+      - name: restaura admin para estado de senha VAZIA e testa compile
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
@@ -15,12 +15,12 @@ jobs:
           sshpass -e scp -o StrictHostKeyChecking=accept-new deploy/scripts/fix_admin.py "$USER_VM@$VM_IP:/tmp/fix_admin.py"
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           set -u
-          echo "== roda restauracao completa do registro do admin:"
-          sudo python3 /tmp/fix_admin.py
-          echo "== reinicia principal e testa auth do admin (compile):"
+          echo "== restaura admin para tupla de senha VAZIA (md5 3ddb92...):"
+          sudo TARGET_MD5=3ddb92cf9ca4639c9571e8f0b1f580a0 python3 /tmp/fix_admin.py
+          echo "== reinicia principal e testa compile (admin senha vazia):"
           systemctl restart totvsappserver
           for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 15
           sudo rm -rf /tmp/f-adm; mkdir -p /tmp/f-adm; printf 'User Function XADM()\nReturn .T.\n' > /tmp/f-adm/xadm.prw
-          echo "compile (auth admin): $(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/f-adm 2>/dev/null | tail -1)"
+          echo "compile (auth admin vazia): $(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/f-adm 2>/dev/null | tail -1)"
           echo "webapp 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
           R
