@@ -1,12 +1,14 @@
 'use client';
 
-import type { Dashboard } from '@primehub/shared';
-import { Bot, RefreshCw } from 'lucide-react';
+import type { ClienteResumo, Dashboard } from '@primehub/shared';
+import { Bot, RefreshCw, Siren } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { ListaChamados } from '@/components/chamados';
 import { EsqueletoDashboard } from '@/components/esqueleto';
 import { BarraStatus, CartaoKpi, GraficoSemanas, Ranking } from '@/components/graficos';
+import { LogoEmpresa } from '@/components/ui/logo-empresa';
 import { api } from '@/lib/api';
 
 function Painel({ titulo, children, className = '' }: { titulo: string; children: React.ReactNode; className?: string }) {
@@ -20,12 +22,18 @@ function Painel({ titulo, children, className = '' }: { titulo: string; children
 
 export default function PaginaDashboard() {
   const [dados, setDados] = useState<Dashboard | null>(null);
+  const [clientes, setClientes] = useState<ClienteResumo[]>([]);
   const [erro, setErro] = useState('');
 
   function carregar() {
     setErro('');
     api<Dashboard>('/api/dashboard').then(setDados).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Erro'));
+    api<ClienteResumo[]>('/api/clientes').then(setClientes).catch(() => setClientes([]));
   }
+  // Clientes com pendência, dos mais urgentes para os menos (urgentes, depois pendentes).
+  const urgentes = clientes
+    .filter((c) => c.pendentes > 0)
+    .sort((a, b) => b.urgentes - a.urgentes || b.pendentes - a.pendentes || a.nome.localeCompare(b.nome));
   useEffect(() => {
     carregar();
     const id = setInterval(carregar, 60_000);
@@ -51,6 +59,29 @@ export default function PaginaDashboard() {
             <CartaoKpi kpi={dados.kpis.primeiraRespostaHoras} />
             <CartaoKpi kpi={dados.kpis.resolucaoHoras} />
           </div>
+
+          {urgentes.length > 0 && (
+            <Painel titulo="Clientes com pendências (toque para ver os chamados)">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {urgentes.map((c) => (
+                  <Link key={c.id} href={`/painel/cliente?id=${c.id}#chamados`}
+                    className="toque group flex flex-col items-center gap-3 rounded-3xl border border-borda bg-superficie-alta/40 p-4 text-center transition hover:border-primaria/60 hover:bg-superficie-alta"
+                    style={c.urgentes > 0 ? { borderColor: 'color-mix(in srgb, var(--perigo) 45%, transparent)' } : undefined}>
+                    <LogoEmpresa nome={c.nome} logo={c.logo} tamanho="g" />
+                    <p className="line-clamp-2 text-sm font-bold leading-tight text-texto">{c.nome}</p>
+                    <div className="mt-auto flex flex-wrap items-center justify-center gap-1.5">
+                      {c.urgentes > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-perigo/15 px-2.5 py-1 text-xs font-bold text-perigo">
+                          <Siren size={12} aria-hidden="true" /> {c.urgentes} urgente{c.urgentes > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      <span className="rounded-full bg-superficie px-2.5 py-1 text-xs font-semibold text-suave">{c.pendentes} pendente{c.pendentes > 1 ? 's' : ''}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </Painel>
+          )}
 
           <div className="grid gap-5 lg:grid-cols-3">
             <Painel titulo="Abertos x fechados por semana" className="lg:col-span-2"><GraficoSemanas semanas={dados.semanas} /></Painel>

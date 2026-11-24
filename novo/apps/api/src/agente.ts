@@ -252,6 +252,15 @@ export async function eventosDoChamado(chamadoId: number, limite = 12): Promise<
   return l.reverse();
 }
 
+export interface AtividadeAgente { chamadoId: number; chamadoTitulo: string; cliente: string; fase: string; texto: string; em: string }
+/** Feed de TODAS as ações do agente (todos os chamados), mais novo primeiro. */
+export async function atividadesAgente(limite = 60): Promise<AtividadeAgente[]> {
+  return consulta<AtividadeAgente>(
+    `SELECT e.chamado_id chamadoId, ch.titulo chamadoTitulo, c.nome cliente, e.fase, e.texto, e.criado_em em
+       FROM chamado_agente_eventos e JOIN chamados ch ON ch.id = e.chamado_id JOIN clientes c ON c.id = ch.cliente_id
+      ORDER BY e.id DESC LIMIT ?`, [Math.max(1, Math.min(200, limite))]).catch(() => []);
+}
+
 /** Guarda a proposta para a equipe revisar. Nunca envia nada ao cliente. */
 export async function registrarProposta(chamadoId: number, p: Proposta): Promise<{ id: number; avisos: string[] }> {
   const ch = await primeira<{ id: number; cliente_id: number; responsavel_id: number | null }>('SELECT id, cliente_id, responsavel_id FROM chamados WHERE id = ?', [chamadoId]);

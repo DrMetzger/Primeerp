@@ -179,6 +179,11 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
             </button>
             <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight text-texto">{titulo}</h1>
             {acoes}
+            {tipo === 'equipe' && (
+              <a href="/painel/agente" className="toque inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 text-sm font-semibold text-violet-500 hover:bg-violet-500/20" aria-label="Ações do Agente">
+                <Bot size={18} aria-hidden="true" /> <span className="hidden sm:inline">Ações do Agente</span>
+              </a>
+            )}
             <TemaBotao />
           </div>
         </header>

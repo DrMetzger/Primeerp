@@ -19,7 +19,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { agente, ErroVm, podePainelVm } from './vm-servicos';
-import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, atividadesAgente, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -192,6 +192,7 @@ app.get('/api/agente/entrada/:id', async (c) => {
 });
 
 app.get('/api/agente/mesa', exigirLogin('equipe'), (c) => agenteResp(c, () => mesaDoAgente()));
+app.get('/api/agente/atividades', exigirLogin('equipe'), (c) => agenteResp(c, () => atividadesAgente(Number(c.req.query('limite') ?? 60))));
 app.post('/api/agente/propostas/:pid/enviar', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
   const b = await corpoJson(c);
   return enviarProposta(idDe(c.req.param('pid')), c.get('usuario'), typeof b.mensagem === 'string' ? b.mensagem : null, typeof b.status === 'string' ? b.status : null, b.comoAtendente !== false);

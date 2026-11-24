@@ -278,6 +278,7 @@ export interface PropostaAgente {
   eventos?: EventoAgente[];
 }
 export interface EventoAgente { fase: string; texto: string; em: string }
+export interface AtividadeAgente { chamadoId: number; chamadoTitulo: string; cliente: string; fase: string; texto: string; em: string }
 /** Fases do pipeline do agente, em ordem, com rótulo e cor para a tela. */
 export const FASES_AGENTE: { fase: string; rotulo: string; cor: string }[] = [
   { fase: 'recebido', rotulo: 'Recebido', cor: '#64748b' },
