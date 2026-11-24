@@ -1,0 +1,19 @@
+name: VM - achar politica senha
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: procura politica de senha
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
+          echo "== params SX6 com 'senha' na descricao ou nome ligado a politica:"
+          Q "SELECT btrim(x6_var)||' = ['||btrim(x6_conteud)||']  '||btrim(x6_descric) FROM sx6990 WHERE lower(x6_var) ~ 'sen|psw|pol|complex' OR lower(x6_descric) ~ 'senha|complex|caracter|especial|minim' ORDER BY x6_var;" | head -40
+          echo "== tabela de politica de senha (sys_* com 'pol' ou 'senha'):"
+          Q "SELECT table_name FROM information_schema.tables WHERE lower(table_name) ~ 'polit|pswpol|senha|pwpolicy|sec' LIMIT 15;"
+          R
