@@ -1,0 +1,17 @@
+name: VM - ler erro 500 reset
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: le console do ultimo reset (erro de finalizacao)
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          echo "== ultimo THREAD ERROR do console_rest (finalizacao da transacao):"
+          tac $D/console_rest.log 2>/dev/null | grep -aiE 'THREAD ERROR|Called from|does not exist|__|line :|U_PRMRST|ENDTRAN|COMMIT|FINAL' | grep -aviE 'GET,|psw=|password|senha' | head -16 | tac
+          R
