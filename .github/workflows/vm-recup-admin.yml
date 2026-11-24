@@ -20,9 +20,9 @@ jobs:
           LIVEPW=$(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5 pswmd5 LIVE: $LIVEPW"
           echo "== tuplas no heap (xmin | md5 pswmd5 | md5 chksum | len | cod):"
-          Q "SELECT x::text::bigint, md5(convert_from($D4,'LATIN1')), md5(convert_from($D16,'LATIN1')), length(convert_from($D16,'LATIN1')), btrim(convert_from($D3,'LATIN1')) FROM ($ITEMS) q ORDER BY x::text::bigint;" | sed 's/|/ | /g'
+          Q "SELECT x::text::bigint, md5(convert_from($D4,'SQL_ASCII')), md5(convert_from($D16,'SQL_ASCII')), length(convert_from($D16,'SQL_ASCII')), btrim(convert_from($D3,'SQL_ASCII')) FROM ($ITEMS) q ORDER BY x::text::bigint;" | sed 's/|/ | /g'
           echo "== original = tupla mais antiga com pswmd5=LIVE, chksum nao-vazio, cod=Administrador:"
-          ORIG=$(Q "SELECT btrim(convert_from($D16,'LATIN1')) FROM ($ITEMS) q WHERE md5(convert_from($D4,'LATIN1'))='$LIVEPW' AND btrim(convert_from($D16,'LATIN1'))<>'' AND btrim(convert_from($D3,'LATIN1'))='Administrador' ORDER BY x::text::bigint LIMIT 1;")
+          ORIG=$(Q "SELECT btrim(convert_from($D16,'SQL_ASCII')) FROM ($ITEMS) q WHERE md5(convert_from($D4,'SQL_ASCII'))='$LIVEPW' AND btrim(convert_from($D16,'SQL_ASCII'))<>'' AND btrim(convert_from($D3,'SQL_ASCII'))='Administrador' ORDER BY x::text::bigint LIMIT 1;")
           echo "recuperado: len=$(printf %s "$ORIG" | wc -c) md5=$(printf %s "$ORIG" | md5sum | cut -c1-12)"
           if [ -n "$ORIG" ] && [ "$(printf %s "$ORIG" | wc -c)" -ge 10 ]; then
             printf '%s' "$ORIG" > /tmp/ck.txt
