@@ -1,0 +1,27 @@
+name: VM - achar param checksum
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: procura parametro de checksum de usuario
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
+          echo "== tabela de parametros SX6 (nome real):"
+          T6=$(Q "SELECT table_name FROM information_schema.columns WHERE lower(column_name)='x6_var' LIMIT 1;")
+          echo "SX6=[$T6]"
+          if [ -n "$T6" ]; then
+            echo "== params com chk/check/integ/crc no nome:"
+            Q "SELECT btrim(x6_var)||' = '||btrim(x6_conteud) FROM $T6 WHERE lower(x6_var) ~ 'chk|check|integ|crc|hash|chec' LIMIT 20;"
+          fi
+          echo "== appserver.ini principal - chaves checksum/integridade:"
+          grep -aiE 'checksum|integ|chkfile|chkrec|userchk' $D/appserver.ini | grep -aviE 'senha|password' | head
+          echo "== outros usuarios? (quantos no SYS_USR):"; Q "SELECT count(*) FROM sys_usr;"
+          echo "== admin: usr_chksum vazio ou preenchido?"; Q "SELECT CASE WHEN coalesce(btrim(usr_chksum),'')='' THEN 'VAZIO' ELSE 'tem '||length(btrim(usr_chksum))||' chars' END FROM sys_usr WHERE btrim(usr_codigo)='Administrador';"
+          R
