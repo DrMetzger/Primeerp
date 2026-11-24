@@ -1,0 +1,27 @@
+name: VM - alvo base e compile
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: aponta alvo base p/ senha nova e compila o reset
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/reset-src.tgz -C deploy/protheus/fontes PRMRSS.prw PRMRSSLIB.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/reset.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/reset-src.tgz "$USER_VM@$VM_IP:/tmp/reset.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          CC=/usr/local/bin/primehub-tdscli
+          echo "== aponta alvo 'base' para a senha Prime@Hub2026 (cifrada no cofre):"
+          docker exec primehub-api node /app/index.mjs --definir-senha-alvo base 'Prime@Hub2026' 2>&1 | tail -2
+          echo "== para REST (evita conflito) e compila o reset na base:"
+          systemctl stop totvsappserver-rest 2>/dev/null || true; sleep 3
+          sudo rm -rf /tmp/f-reset; mkdir -p /tmp/f-reset; tar -xzf /tmp/reset.tgz -C /tmp/f-reset
+          for t in 1 2 3; do O=$(systemd-run --scope --quiet -p MemoryMax=2G $CC compilar base /tmp/f-reset 2>/dev/null | tail -1); echo " t$t: $O"; echo "$O" | grep -q '"ok": true' && break; sleep 8; done
+          systemctl start totvsappserver-rest 2>/dev/null || true
+          R
