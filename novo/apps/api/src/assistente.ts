@@ -3,6 +3,7 @@ import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
 import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
 import { podePainelVm, resetarSenhaProtheus } from './vm-servicos';
+import { marcarProgresso } from './progresso-agente';
 
 /**
  * DOIS assistentes separados, ambos no Gemini pago da Prime:
@@ -201,8 +202,11 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       const base = (txt(a, 'nome_programa') || 'FONTE').replace(/\.(prw|tlpp|prx)$/i, '');
       let nomeArquivo = `${base || 'FONTE'}.prw`;
       let resumoConversao = '';
-      if (a.converter_relatorio) { const c = converterRelatorio(fonte, base || 'FONTE', u.nome); fonte = c.fonte; nomeArquivo = c.nomeArquivo; resumoConversao = `Convertido para ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).`; }
+      if (a.converter_relatorio) { marcarProgresso(u.id, 'convertendo', 'Convertendo o relatório em User Function…'); const c = converterRelatorio(fonte, base || 'FONTE', u.nome); fonte = c.fonte; nomeArquivo = c.nomeArquivo; resumoConversao = `Convertido para ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).`; }
+      marcarProgresso(u.id, 'compilando', `Compilando ${nomeArquivo} na ${alvo.nome}…`);
       const r = await compilarFonte(u, alvo.slug, [{ nome: nomeArquivo, conteudo_base64: Buffer.from(fonte, 'utf8').toString('base64') }]);
+      if (!r.ok) marcarProgresso(u.id, 'erro', `Erro ao compilar na ${alvo.nome}`, r.erro);
+      else marcarProgresso(u.id, 'concluido', `Compilado na ${alvo.nome}`);
       if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.erro, dica: 'confira ambiente/senha do servidor e se o fonte compila' };
       const tokenFonte = await guardarArtefato(nomeArquivo, Buffer.from(fonte, 'utf8'));
       return { ok: true, servidor: alvo.nome, conversao: resumoConversao || undefined, nome_patch: r.nome, nome_fonte: nomeArquivo, baixar_patch: `/api/compilacao/arquivo/${r.token}`, baixar_fonte: `/api/compilacao/arquivo/${tokenFonte}`, instrucao_resposta: 'Diga o que mudou e entregue OS DOIS links: o do fonte (.prw) e o do patch (.ptm), dizendo em qual servidor compilou.' };
@@ -229,7 +233,9 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       const senha = txt(a, 'senha') || 'Prime@2026';
       if (!/[^A-Za-z0-9]/.test(senha)) return { erro: 'A nova senha precisa de pelo menos um caractere especial (política do Protheus). Ex.: Prime@2026.' };
       const restBase = `http://${alvo.host}:8095`;
+      marcarProgresso(u.id, 'resetando', `Resetando a senha de ${login} em ${alvo.nome}…`);
       const r = await resetarSenhaProtheus(u.nome, login, senha, restBase);
+      marcarProgresso(u.id, r.ok ? 'concluido' : 'erro', r.ok ? `Senha resetada em ${alvo.nome}` : `Falha ao resetar em ${alvo.nome}`, r.ok ? undefined : (r.resposta || r.erro));
       if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.resposta || r.erro || 'não deu para resetar', dica: 'confira se o REST (porta 8095) do ambiente está ligado e se o U_PRMRST está compilado lá' };
       return { ok: true, servidor: alvo.nome, login, senha, instrucao_resposta: `Confirme que a senha do usuário ${login} foi resetada em ${alvo.nome} e diga a nova senha (${senha}).` };
     },
@@ -360,6 +366,7 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
   const equipe = usuario.tipo === 'equipe';
   const ferramentas = equipe ? FERRAMENTAS_EQUIPE : FERRAMENTAS_CLIENTE;
   const sistema = (equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente())) + blocoTela(tela);
+  marcarProgresso(usuario.id, 'gerando', 'O assistente está pensando…');
 
   for (const [tentativa, modelo] of MODELOS.entries()) {
     if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));

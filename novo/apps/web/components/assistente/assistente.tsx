@@ -52,6 +52,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   const [texto, setTexto] = useState('');
   const [anexos, setAnexos] = useState<{ nome: string; conteudo: string }[]>([]);
   const [pensando, setPensando] = useState(false);
+  const [fase, setFase] = useState('');
   const [digitando, setDigitando] = useState('');
   const fim = useRef<HTMLDivElement>(null);
   const [tamanho, setTamanho] = useState(150);
@@ -156,18 +157,30 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     }
 
     setPensando(true);
+    setFase('');
     robo.current?.agir(Math.random() > 0.5 ? 'anotar' : 'escrever', 60_000);
+    // Acompanha ao vivo o que a IA está fazendo (gerando / compilando / erro).
+    const acompanhar = setInterval(() => {
+      void fetch('/api/assistente/progresso', { credentials: 'same-origin' })
+        .then((x) => x.json())
+        .then((pj: { fase?: string | null; rotulo?: string; detalhe?: string }) => {
+          if (pj?.fase && pj.rotulo) setFase(pj.detalhe ? `${pj.rotulo} — ${pj.detalhe.slice(0, 140)}` : pj.rotulo);
+        })
+        .catch(() => undefined);
+    }, 1500);
     try {
       const r = await fetch('/api/assistente', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, tela: contextoDaTela(), ...(enviados.length ? { anexos: enviados } : {}) }),
       });
       const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[] };
-      setPensando(false);
+      clearInterval(acompanhar);
+      setPensando(false); setFase('');
       responder(corpo.texto ?? corpo.erro ?? 'Não consegui responder agora.');
       if (corpo.acoes?.length) setAcoes((a) => [...a, ...(corpo.acoes ?? []).map((x) => ({ ...x, estado: 'pendente' as const }))]);
     } catch {
-      setPensando(false);
+      clearInterval(acompanhar);
+      setPensando(false); setFase('');
       responder('Fiquei sem conexão. Tenta de novo?');
     }
   }
@@ -255,7 +268,16 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
               </div>
             ))}
             {digitando && <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-superficie-alta px-3 py-2 text-[15px] leading-snug text-texto">{digitando}<span className="animate-pulse">▍</span></p>}
-            {pensando && <p className="inline-flex gap-1 rounded-2xl bg-superficie-alta px-3 py-3" aria-label="Pensando"><span className="h-2 w-2 animate-bounce rounded-full bg-suave" /><span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:.15s]" /><span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:.3s]" /></p>}
+            {pensando && (
+              <div className="inline-flex max-w-[85%] items-center gap-2 rounded-2xl bg-superficie-alta px-3 py-3" aria-label={fase || 'Pensando'}>
+                <span className="inline-flex gap-1">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-suave" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:.15s]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:.3s]" />
+                </span>
+                {fase && <span className="text-[13px] leading-snug text-suave">{fase}</span>}
+              </div>
+            )}
             {mensagens.length <= 1 && !digitando && (
               <div className="flex flex-wrap gap-2 pt-1">
                 {SUGESTOES[tipo].map((s) => (

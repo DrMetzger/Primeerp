@@ -9,6 +9,7 @@ import { converterRelatorio } from '@primehub/shared';
 import { alvoComSenha, compilarFonte, definirSenhaAlvo, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
+import { lerProgresso } from './progresso-agente';
 import { listarChamados } from './chamados';
 import { detalharChamado, detalharCliente, detalharSetor, listarClientes } from './clientes';
 import { garantirEstrutura } from './pessoas';
@@ -314,6 +315,10 @@ app.post('/api/assistente', exigirLogin(), async (c) => {
   const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem, dados.data.tela, dados.data.anexos);
   return 'erro' in r ? c.json(r, 200) : c.json(r);
 });
+
+// Progresso ao vivo da operação do assistente (gerando/compilando/erro),
+// para o site mostrar o que a IA está fazendo enquanto a resposta não volta.
+app.get('/api/assistente/progresso', exigirLogin(), (c) => c.json(lerProgresso(c.get('usuario').id) ?? { fase: null }));
 
 // WhatsApp (Meta Cloud API): verificação do endereço e mensagens recebidas.
 app.get('/api/whatsapp/webhook', (c) => {
