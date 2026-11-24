@@ -1,0 +1,18 @@
+name: VM - checar werk
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: checa credencial e conectividade da Werk
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== alvo werk-dev-exc tem credencial? (via API, sem expor senha):"
+          docker exec primehub-api node /app/index.mjs --alvo-compilacao werk-dev-exc 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print('host:',d.get('host'),'porta:',d.get('porta'),'usuario:',d.get('usuario'),'ambiente:',d.get('ambiente') or '(vazio)','| tem_senha:', bool((d.get('senha') or '').strip()))" 2>/dev/null || echo "nao consegui ler o alvo (API/json)"
+          echo "== a VM alcança a Werk (189.126.155.148:1228)?"
+          timeout 8 bash -c 'cat < /dev/null > /dev/tcp/189.126.155.148/1228' 2>/dev/null && echo "porta 1228: ALCANCA" || echo "porta 1228: NAO alcanca (bloqueio de rede/firewall)"
+          R
