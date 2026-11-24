@@ -1,0 +1,22 @@
+name: VM - listar heap
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: lista tuplas atuais do heap sys_usr
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>&1; }
+          D4="substring(cols[4] from (CASE WHEN get_byte(cols[4],0)&1=1 THEN 2 ELSE 5 END))"
+          D16="substring(cols[16] from (CASE WHEN get_byte(cols[16],0)&1=1 THEN 2 ELSE 5 END))"
+          ITEMS="SELECT t_xmin x, tuple_data_split('sys_usr'::regclass,t_data,t_infomask,t_infomask2,t_bits) cols FROM generate_series(0,(pg_relation_size('sys_usr')/8192)::int-1) p, heap_page_items(get_raw_page('sys_usr',p)) WHERE t_data IS NOT NULL"
+          echo "LIVE pswmd5 md5: $(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")"
+          echo "== heap atual (xmin | md5 pswmd5 | md5 chksum):"
+          Q "SELECT x::text::bigint, md5(convert_from($D4,'SQL_ASCII')), md5(convert_from($D16,'SQL_ASCII')) FROM ($ITEMS) q ORDER BY x::text::bigint;" | sed 's/|/ | /g'
+          echo "n_dead: $(Q "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='sys_usr';")"
+          R
