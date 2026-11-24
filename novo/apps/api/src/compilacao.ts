@@ -175,3 +175,9 @@ export async function lerArtefato(token: string): Promise<{ nome: string; bytes:
     return { nome, bytes };
   } catch { return null; }
 }
+
+/** Define (cifrada) a senha do alvo de compilação. Uso interno via CLI. */
+export async function definirSenhaAlvo(slug: string, senha: string): Promise<boolean> {
+  const r = await executar('UPDATE compilacao_alvos SET senha_cifrada=? WHERE slug=?', [cifrar(senha), slug]);
+  return Boolean((r as { affectedRows?: number }).affectedRows);
+}

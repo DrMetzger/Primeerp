@@ -6,7 +6,7 @@ import { conferirCodigo, dispositivoConfiavel, iniciarDesafio, lembrarDispositiv
 import { primeira } from './db';
 import type { UsuarioLogado } from '@primehub/shared';
 import { converterRelatorio } from '@primehub/shared';
-import { alvoComSenha, compilarFonte, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
+import { alvoComSenha, compilarFonte, definirSenhaAlvo, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
 import { listarChamados } from './chamados';
@@ -349,7 +349,16 @@ if (iAlvo >= 0) {
     .then((a) => { if (!a) { console.error('alvo não encontrado'); process.exit(3); } process.stdout.write(JSON.stringify(a)); process.exit(0); })
     .catch((e: unknown) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });
 }
-const comando = iAlvo >= 0 ? '--alvo-compilacao' : process.argv.find((a) => a.startsWith('--') && ['--recifrar-cofre', '--conferir-cofre'].includes(a));
+const iSenhaAlvo = process.argv.indexOf('--definir-senha-alvo');
+if (iSenhaAlvo >= 0) {
+  const slug = process.argv[iSenhaAlvo + 1] ?? '';
+  const senha = process.argv[iSenhaAlvo + 2] ?? '';
+  if (!slug || !senha) { console.error('uso: --definir-senha-alvo <slug> <senha>'); process.exit(2); }
+  definirSenhaAlvo(slug, senha)
+    .then((ok) => { console.log(ok ? `senha do alvo ${slug} definida` : `alvo ${slug} nao encontrado`); process.exit(ok ? 0 : 3); })
+    .catch((e: unknown) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });
+}
+const comando = iAlvo >= 0 ? '--alvo-compilacao' : iSenhaAlvo >= 0 ? '--definir-senha-alvo' : process.argv.find((a) => a.startsWith('--') && ['--recifrar-cofre', '--conferir-cofre'].includes(a));
 if (comando === '--recifrar-cofre') {
   recifrarCofre(process.env.CHAVE_ANTIGA ?? '', process.env.CHAVE_NOVA ?? '')
     .then((r) => { console.log(`cofre: ${r.total} senha(s); recifradas ${r.recifradas}; já na chave nova ${r.jaNaNova}; ilegíveis ${r.ilegiveis}`); process.exit(0); })
