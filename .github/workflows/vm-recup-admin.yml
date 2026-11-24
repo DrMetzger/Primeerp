@@ -12,28 +12,28 @@ jobs:
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           set -u
-          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
-          AP=$(Q "SELECT attnum FROM pg_attribute WHERE attrelid='sys_usr'::regclass AND attname='usr_pswmd5';")
-          AC=$(Q "SELECT attnum FROM pg_attribute WHERE attrelid='sys_usr'::regclass AND attname='usr_chksum';")
-          ACOD=$(Q "SELECT attnum FROM pg_attribute WHERE attrelid='sys_usr'::regclass AND attname='usr_codigo';")
-          echo "attnums: pswmd5=$AP chksum=$AC codigo=$ACOD"
-          DEC="CASE WHEN get_byte(c,0)&1=1 THEN substring(c from 2) ELSE substring(c from 5) END"
+          Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>&1; }
+          D4="substring(cols[4] from (CASE WHEN get_byte(cols[4],0)&1=1 THEN 2 ELSE 5 END))"
+          D16="substring(cols[16] from (CASE WHEN get_byte(cols[16],0)&1=1 THEN 2 ELSE 5 END))"
+          D3="substring(cols[3] from (CASE WHEN get_byte(cols[3],0)&1=1 THEN 2 ELSE 5 END))"
+          ITEMS="SELECT t_xmin x, tuple_data_split('sys_usr'::regclass,t_data,t_infomask,t_infomask2,t_bits) cols FROM generate_series(0,(pg_relation_size('sys_usr')/8192)::int-1) p, heap_page_items(get_raw_page('sys_usr',p)) WHERE t_data IS NOT NULL"
           LIVEPW=$(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
           echo "md5 pswmd5 LIVE: $LIVEPW"
-          echo "== tuplas (xmin | md5 pswmd5 | md5 chksum | len chksum | cod):"
-          Q "SELECT t_xmin, md5(convert_from((SELECT $DEC FROM (SELECT cols[$AP] c) z),'LATIN1')), md5(convert_from((SELECT $DEC FROM (SELECT cols[$AC] c) z),'LATIN1')), length(convert_from((SELECT $DEC FROM (SELECT cols[$AC] c) z),'LATIN1')), btrim(convert_from((SELECT $DEC FROM (SELECT cols[$ACOD] c) z),'LATIN1')) FROM (SELECT t_xmin, tuple_data_split('sys_usr'::regclass,t_data,t_infomask,t_infomask2,t_bits) cols FROM heap_page_items(get_raw_page('sys_usr',0)) WHERE t_data IS NOT NULL) q ORDER BY t_xmin;" | sed 's/|/ | /g'
-          ORIG=$(Q "SELECT convert_from((SELECT $DEC FROM (SELECT cols[$AC] c) z),'LATIN1') FROM (SELECT t_xmin, tuple_data_split('sys_usr'::regclass,t_data,t_infomask,t_infomask2,t_bits) cols FROM heap_page_items(get_raw_page('sys_usr',0)) WHERE t_data IS NOT NULL) q WHERE md5(convert_from((SELECT $DEC FROM (SELECT cols[$AP] c) z),'LATIN1'))='$LIVEPW' AND btrim(convert_from((SELECT $DEC FROM (SELECT cols[$AC] c) z),'LATIN1'))<>'' ORDER BY t_xmin LIMIT 1;")
-          echo "chksum original recuperado? len=$(printf %s "$ORIG" | wc -c) md5=$(printf %s "$ORIG" | md5sum | cut -c1-12)"
-          if [ -n "$ORIG" ]; then
+          echo "== tuplas no heap (xmin | md5 pswmd5 | md5 chksum | len | cod):"
+          Q "SELECT x, md5(convert_from($D4,'LATIN1')), md5(convert_from($D16,'LATIN1')), length(convert_from($D16,'LATIN1')), btrim(convert_from($D3,'LATIN1')) FROM ($ITEMS) q ORDER BY x;" | sed 's/|/ | /g'
+          echo "== original = tupla mais antiga com pswmd5=LIVE, chksum nao-vazio, cod=Administrador:"
+          ORIG=$(Q "SELECT convert_from($D16,'LATIN1') FROM ($ITEMS) q WHERE md5(convert_from($D4,'LATIN1'))='$LIVEPW' AND btrim(convert_from($D16,'LATIN1'))<>'' AND btrim(convert_from($D3,'LATIN1'))='Administrador' ORDER BY x LIMIT 1;")
+          echo "recuperado: len=$(printf %s "$ORIG" | wc -c) md5=$(printf %s "$ORIG" | md5sum | cut -c1-12)"
+          if [ -n "$ORIG" ] && [ "$(printf %s "$ORIG" | wc -c)" -ge 10 ]; then
             printf '%s' "$ORIG" > /tmp/ck.txt
-            Q "UPDATE sys_usr SET usr_chksum=\$\$$(cat /tmp/ck.txt)\$\$ WHERE btrim(usr_codigo)='Administrador';"
+            sudo -u postgres psql -At -d protheus -c "UPDATE sys_usr SET usr_chksum=\$CK\$$(cat /tmp/ck.txt)\$CK\$ WHERE btrim(usr_codigo)='Administrador';"
             sudo rm -f /tmp/ck.txt
-            echo "== restaurado. reinicia principal e testa auth:"
+            echo "== restaurado. reinicia principal e testa auth do admin:"
             systemctl restart totvsappserver
             for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 15
             sudo rm -rf /tmp/f-adm; mkdir -p /tmp/f-adm; printf 'User Function XADM()\nReturn .T.\n' > /tmp/f-adm/xadm.prw
-            echo "compile: $(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/f-adm 2>/dev/null | tail -1)"
+            echo "compile (auth admin): $(systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/f-adm 2>/dev/null | tail -1)"
           else
-            echo "nao achei tupla original com pswmd5 = LIVE"
+            echo "nao recuperou chksum valido"
           fi
           R
