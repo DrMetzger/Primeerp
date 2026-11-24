@@ -365,6 +365,15 @@ export async function descartarProposta(propostaId: number): Promise<void> {
   if (p) await registrarEvento(p.chamado_id, 'descartado', 'Proposta descartada pela equipe.', propostaId);
 }
 
+/** Destrava uma execução que ficou parada: volta ao rascunho para a equipe redecidir. */
+export async function cancelarExecucao(propostaId: number): Promise<void> {
+  const p = await primeira<{ chamado_id: number }>('SELECT chamado_id FROM chamado_agente WHERE id = ?', [propostaId]);
+  const ok = await executar("UPDATE chamado_agente SET status = 'rascunho', etapa = 'triagem', aprovado_por = NULL WHERE id = ? AND status = 'aprovado_execucao'", [propostaId]);
+  if (!ok.affectedRows) throw new ErroAgente('Essa execução não está mais em andamento.', 409);
+  await executar('DELETE FROM chamado_agente_reservas WHERE chamado_id = ?', [p?.chamado_id ?? 0]).catch(() => undefined);
+  if (p) await registrarEvento(p.chamado_id, 'rascunho', 'Execução cancelada pela equipe — voltou para revisão.', propostaId);
+}
+
 /** Arquivo de referência que a equipe anexou para o agente (download pelo agente). */
 export async function arquivoEntrada(arquivoId: number): Promise<{ nome: string; bytes: Buffer }> {
   const a = await primeira<{ nome: string; dados: Buffer }>('SELECT nome, dados FROM chamado_agente_entrada WHERE id = ?', [arquivoId]);

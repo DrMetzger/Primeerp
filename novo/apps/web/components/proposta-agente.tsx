@@ -103,7 +103,8 @@ export function CartaoProposta({ p, aoMudar, mostrarChamado = true }: { p: Propo
         <div className="space-y-2 rounded-2xl border border-violet-500/40 bg-violet-500/10 p-4 text-sm">
           <div className="flex items-start gap-3">
             <Hammer className="mt-0.5 shrink-0 text-violet-500" size={18} aria-hidden="true" />
-            <div><p className="font-semibold text-texto">Execução aprovada: o agente está fazendo.</p><p className="text-suave">Quando terminar, volta aqui para você revisar antes de qualquer envio.{p.instrucoes ? ` Suas instruções: "${p.instrucoes}"` : ''}</p></div>
+            <div className="flex-1"><p className="font-semibold text-texto">Execução aprovada: o agente está fazendo.</p><p className="text-suave">Quando terminar, volta aqui para você revisar antes de qualquer envio.{p.instrucoes ? ` Suas instruções: "${p.instrucoes}"` : ''}</p></div>
+            <BotaoSecundario disabled={ocupado} className="shrink-0 text-perigo" onClick={() => { if (confirm('Cancelar a execução? A proposta volta para revisão (rascunho).')) void agir('cancelar', {}, 'Execução cancelada.'); }}>Cancelar execução</BotaoSecundario>
           </div>
           {p.entrada && p.entrada.length > 0 && (
             <div className="flex flex-wrap gap-2 pl-7">

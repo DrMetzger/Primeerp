@@ -19,7 +19,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { agente, ErroVm, podePainelVm } from './vm-servicos';
-import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, atividadesAgente, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, pipelineAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, atividadesAgente, cancelarExecucao, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, pipelineAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -204,6 +204,7 @@ app.post('/api/agente/propostas/:pid/executar', exigirLogin('equipe'), (c) => ag
   return { mensagem: 'Aprovado. O agente vai executar na próxima rodada e devolver para você revisar.' };
 }));
 app.post('/api/agente/propostas/:pid/descartar', exigirLogin('equipe'), (c) => agenteResp(c, async () => { await descartarProposta(idDe(c.req.param('pid'))); return { mensagem: 'Proposta descartada.' }; }));
+app.post('/api/agente/propostas/:pid/cancelar', exigirLogin('equipe'), (c) => agenteResp(c, async () => { await cancelarExecucao(idDe(c.req.param('pid'))); return { mensagem: 'Execução cancelada. Voltou para revisão.' }; }));
 app.post('/api/agente/arquivos/:aid/link', exigirLogin('equipe'), (c) => agenteResp(c, async () => {
   const t = await new SignJWT({ a: idDe(c.req.param('aid')) }).setProtectedHeader({ alg: 'HS256' }).setSubject('agente-arquivo').setExpirationTime('2m').sign(config.jwtSegredo);
   return { url: `/api/agente/arquivo?t=${encodeURIComponent(t)}` };

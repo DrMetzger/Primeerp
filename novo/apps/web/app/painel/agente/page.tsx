@@ -13,6 +13,9 @@ import { api } from '@/lib/api';
 const FASE_INFO = Object.fromEntries(FASES_AGENTE.map((f) => [f.fase, f]));
 const COR_PRIO: Record<string, string> = { urgente: '#ef4444', alta: '#f59e0b', media: '#64748b', baixa: '#94a3b8' };
 function horaCurta(s: string): string { try { return new Date(s.replace(' ', 'T')).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } }
+/** Minutos desde o carimbo (para mostrar "há X" e marcar o que travou). */
+function minutosDesde(s: string): number { try { return Math.max(0, Math.round((Date.now() - new Date(s.replace(' ', 'T')).getTime()) / 60000)); } catch { return 0; } }
+function haQuanto(min: number): string { return min < 1 ? 'agora' : min < 60 ? `há ${min} min` : min < 1440 ? `há ${Math.round(min / 60)}h` : `há ${Math.round(min / 1440)}d`; }
 
 /** Quadro (kanban) do agente: cada chamado aparece na coluna do estágio atual. */
 function Quadro({ etapas }: { etapas: EtapaPipeline[] }) {
@@ -30,15 +33,20 @@ function Quadro({ etapas }: { etapas: EtapaPipeline[] }) {
                 <span className="rounded-full bg-superficie px-1.5 text-suave">{cards.length}</span>
               </p>
               <div className="space-y-2">
-                {cards.map((e) => (
-                  <Link key={e.chamadoId} href={`/painel/chamado?id=${e.chamadoId}`}
-                    className="toque block rounded-xl border border-borda bg-superficie p-2.5 text-left transition hover:border-primaria/60"
-                    style={{ borderLeft: `3px solid ${COR_PRIO[e.prioridade] ?? '#64748b'}` }}>
-                    <p className="flex items-center gap-1.5 text-xs font-semibold text-primaria">#{e.chamadoId} · <span className="truncate text-suave">{e.cliente}</span></p>
-                    <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-texto">{e.chamadoTitulo}</p>
-                    <p className="mt-1 text-[11px] text-suave">{horaCurta(e.desde)}</p>
-                  </Link>
-                ))}
+                {cards.map((e) => {
+                  const min = minutosDesde(e.desde);
+                  // Trabalhando/Compilando devia ser rápido: passou de 15 min, provavelmente travou.
+                  const travou = ['trabalhando', 'compilando'].includes(col.id) && min > 15;
+                  return (
+                    <Link key={e.chamadoId} href={`/painel/chamado?id=${e.chamadoId}`}
+                      className="toque block rounded-xl border border-borda bg-superficie p-2.5 text-left transition hover:border-primaria/60"
+                      style={{ borderLeft: `3px solid ${travou ? '#ef4444' : (COR_PRIO[e.prioridade] ?? '#64748b')}` }}>
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-primaria">#{e.chamadoId} · <span className="truncate text-suave">{e.cliente}</span></p>
+                      <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-texto">{e.chamadoTitulo}</p>
+                      <p className={`mt-1 text-[11px] ${travou ? 'font-semibold text-perigo' : 'text-suave'}`}>{travou ? `⚠ parado ${haQuanto(min)}` : haQuanto(min)}</p>
+                    </Link>
+                  );
+                })}
                 {cards.length === 0 && <p className="px-1 text-[11px] text-suave/60">—</p>}
               </div>
             </div>
