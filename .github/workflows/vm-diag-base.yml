@@ -1,0 +1,31 @@
+name: VM - diag base compile
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: diagnostica erro de compile/auth no principal
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set -u
+          D=/opt/totvs/protheus12/protheus/bin/appserver
+          RPO=/opt/totvs/protheus12/protheus/apo/custom.rpo
+          echo "== recupera base limpa:"
+          systemctl stop totvsappserver totvsappserver-rest 2>/dev/null || true
+          pkill -9 -f appsrvlinux 2>/dev/null || true; sleep 5
+          echo "custom.rpo: $(ls -la $RPO 2>/dev/null | awk '{print $5}') bytes"
+          systemctl start totvsappserver
+          for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 25
+          echo "principal 8089: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/)"
+          MK=$(wc -l < $D/console.log 2>/dev/null || echo 1)
+          echo "== compila UF trivial:"
+          W=$(mktemp -d); printf 'User Function XDG()\nReturn .T.\n' > $W/xdg.prw
+          systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base "$W" 2>/dev/null | tail -1
+          sudo rm -rf "$W"; sleep 2
+          echo "== console do principal durante o compile (auth/checksum/rpo/erro):"
+          tail -n +$MK $D/console.log 2>/dev/null | grep -aiE 'auth|login|checksum|checkSum|rpo|non numeric|FINAL|THREAD ERROR|does not|FWUSER|Administrador|crash|segmentation|erro' | grep -aviE 'password|senha|GET,' | head -15
+          R
