@@ -37,7 +37,7 @@ cols = [r.split("~", 1) for r in raw.strip().split("\n") if r]
 print(f"colunas de texto a restaurar: {len(cols)}")
 
 # filtro opcional por md5 do pswmd5 (coluna 4) para escolher o estado desejado
-FILT = f"WHERE md5(btrim({dec(4)}))='{TARGET}' " if TARGET else ""
+FILT = f"WHERE md5({dec(4)})='{TARGET}' " if TARGET else ""
 print("alvo de restauracao:", ("pswmd5 md5="+TARGET) if TARGET else "tupla mais antiga")
 
 sets = []
