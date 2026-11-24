@@ -10,7 +10,25 @@ interface Mensagem { autor: 'pessoa' | 'assistente'; texto: string }
 interface Acao { id: string; titulo: string; detalhe: string; arquivo: string; campos: Record<string, string>; perigo?: boolean; estado?: 'pendente' | 'rodando' | 'feita' | 'cancelada' | 'erro'; aviso?: string }
 
 const CHAVE_OCULTO = 'ph_assistente_oculto';
+const CHAVE_CONVERSA = 'ph_assistente_conversa';
 export const EVENTO_CHAMAR = 'primehub:assistente';
+
+/** Guarda a conversa (texto só, sem anexos) pra não sumir quando fechar/recarregar. */
+function salvarConversa(mensagens: Mensagem[], acoes: Acao[]): void {
+  try {
+    if (!mensagens.length && !acoes.length) { localStorage.removeItem(CHAVE_CONVERSA); return; }
+    localStorage.setItem(CHAVE_CONVERSA, JSON.stringify({ v: 1, em: Date.now(), mensagens: mensagens.slice(-40), acoes: acoes.slice(-20) }));
+  } catch { /* aba privada / sem espaço */ }
+}
+function lerConversa(): { mensagens: Mensagem[]; acoes: Acao[] } | null {
+  try {
+    const d = JSON.parse(localStorage.getItem(CHAVE_CONVERSA) ?? 'null') as { em?: number; mensagens?: Mensagem[]; acoes?: Acao[] } | null;
+    if (!d?.mensagens?.length) return null;
+    // Descarta conversa muito antiga (12 h) pra não reabrir algo esquecido.
+    if (d.em && Date.now() - d.em > 12 * 3600_000) { localStorage.removeItem(CHAVE_CONVERSA); return null; }
+    return { mensagens: d.mensagens, acoes: Array.isArray(d.acoes) ? d.acoes.map((x) => ({ ...x, estado: x.estado && x.estado !== 'rodando' ? x.estado : 'pendente' })) : [] };
+  } catch { return null; }
+}
 
 /**
  * O que a pessoa está vendo agora (endereço, título e o texto visível da
@@ -61,7 +79,11 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   const arrasto = useRef<{ x: number; y: number; d: number; b: number; moveu: boolean } | null>(null);
   useEffect(() => {
     try { const p = JSON.parse(localStorage.getItem('ph_assistente_pos') ?? 'null') as { d: number; b: number } | null; if (p) setPos(p); } catch { /* sem armazenamento */ }
-  }, []);
+    if (modo !== 'login') { const c = lerConversa(); if (c) { setMensagens(c.mensagens); setAcoes(c.acoes); } }
+  }, [modo]);
+
+  // Sempre que a conversa muda, guarda — assim fechar a janela ou recarregar não perde nada.
+  useEffect(() => { if (modo !== 'login') salvarConversa(mensagens, acoes); }, [mensagens, acoes, modo]);
 
   const tipo = modo === 'login' ? 'login' : (usuarioSalvo()?.tipo ?? 'cliente');
   const primeiroNome = modo === 'login' ? '' : (usuarioSalvo()?.nome.split(' ')[0] ?? '');
@@ -138,6 +160,13 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     setAberto(false);
     setVisivel(false);
     try { localStorage.setItem(CHAVE_OCULTO, '1'); } catch { /* ignore */ }
+  }
+
+  /** Zera a conversa guardada e recomeça com a saudação. */
+  function novaConversa() {
+    setMensagens([]); setAcoes([]); setDigitando(''); setTexto(''); setAnexos([]);
+    try { localStorage.removeItem(CHAVE_CONVERSA); } catch { /* ignore */ }
+    setTimeout(() => abrir(), 50);
   }
 
   async function enviar(pergunta: string) {
@@ -247,6 +276,9 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
               <p className="font-semibold leading-tight">{tipo === 'equipe' ? 'Assistente da equipe' : 'Atendimento PrimeERP'}</p>
               <p className="text-xs opacity-85">{tipo === 'equipe' ? 'Conhece o manual, consulta e age por você' : 'Especialista em TOTVS Protheus'}</p>
             </div>
+            {mensagens.length > 1 && (
+              <button type="button" onClick={novaConversa} className="toque flex items-center justify-center rounded-xl px-2 text-xs font-semibold opacity-90 hover:opacity-100" aria-label="Começar uma nova conversa">Nova</button>
+            )}
             <button type="button" onClick={() => setAberto(false)} className="toque -mr-2 flex items-center justify-center rounded-xl" aria-label="Minimizar conversa"><X size={20} /></button>
           </header>
           <div className="flex-1 space-y-2 overflow-y-auto p-4" aria-live="polite">

@@ -14,7 +14,14 @@ export function NovoChamado({ visao, clienteInicial, aoFechar }: { visao: 'equip
   const [form, setForm] = useState({ titulo: '', categoria: '', prioridade: 'media', setor_id: '', responsavel_id: '', descricao: '' });
   const [anexos, setAnexos] = useState<File[]>([]);
   const [enviando, setEnviando] = useState(false);
+  const [arrastando, setArrastando] = useState(false);
   const [erro, setErro] = useState('');
+
+  const adicionar = (fs: FileList | File[] | null | undefined) => {
+    const arr = Array.from(fs ?? []).filter((f) => f.size <= 25 * 1024 * 1024);
+    if (arr.length) setAnexos((l) => [...l, ...arr].slice(0, 20));
+  };
+  const remover = (i: number) => setAnexos((l) => l.filter((_, n) => n !== i));
 
   useEffect(() => {
     acaoPhp<Opcoes>('api_acoes.php', { acao: 'opcoes_chamado', cliente_id: clienteId }).then(setOpcoes).catch(() => setOpcoes({ categorias: ['Geral'], setores: [], clientes: [], responsaveis: [] }));
@@ -43,7 +50,12 @@ export function NovoChamado({ visao, clienteInicial, aoFechar }: { visao: 'equip
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label="Abrir chamado">
       <button type="button" aria-label="Fechar" className="absolute inset-0 bg-black/55" onClick={aoFechar} />
-      <form onSubmit={(e) => void enviar(e)} className="relative max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-borda bg-superficie p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl">
+      <form onSubmit={(e) => void enviar(e)}
+        onPaste={(e) => { if (e.clipboardData?.files?.length) adicionar(e.clipboardData.files); }}
+        onDragOver={(e) => { e.preventDefault(); setArrastando(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setArrastando(false); }}
+        onDrop={(e) => { e.preventDefault(); setArrastando(false); adicionar(e.dataTransfer?.files); }}
+        className={`relative max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border bg-superficie p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl ${arrastando ? 'border-primaria ring-2 ring-primaria/40' : 'border-borda'}`}>
         <div className="mb-4 flex items-center gap-3">
           <h2 className="flex-1 text-lg font-bold text-texto">Abrir chamado</h2>
           <button type="button" onClick={aoFechar} aria-label="Fechar" className="toque flex items-center justify-center rounded-xl text-suave"><X size={22} /></button>
@@ -95,12 +107,33 @@ export function NovoChamado({ visao, clienteInicial, aoFechar }: { visao: 'equip
             </Campo>
           </div>
         </div>
-        {anexos.length > 0 && <p className="mt-3 text-sm text-suave">{anexos.length} anexo(s): {anexos.map((a) => a.name).join(', ')}</p>}
+        <div className="mt-4">
+          <div className={`rounded-xl border border-dashed p-3 text-center text-sm transition-colors ${arrastando ? 'border-primaria bg-primaria/5 text-primaria' : 'border-borda text-suave'}`}>
+            {arrastando ? 'Solte os arquivos aqui…' : 'Arraste arquivos aqui, cole (Ctrl+V) ou use "Anexar arquivos".'}
+          </div>
+          {anexos.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {anexos.map((a, i) => (
+                <li key={`${a.name}-${i}`} className="inline-flex items-center gap-2 rounded-lg bg-superficie-alta px-2 py-1 text-xs text-texto">
+                  <span className="max-w-[12rem] truncate" title={a.name}>{a.name}</span>
+                  <span className="text-suave">{a.size >= 1048576 ? `${(a.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(a.size / 1024))} KB`}</span>
+                  <button type="button" aria-label={`Remover ${a.name}`} onClick={() => remover(i)} className="toque text-suave hover:text-perigo"><X size={14} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {enviando && (
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-superficie-alta" role="progressbar" aria-label="Enviando chamado e anexos">
+            <div className="h-full w-2/5 animate-pulse rounded-full bg-primaria" style={{ animation: 'carregando 1.1s ease-in-out infinite' }} />
+          </div>
+        )}
+        <style>{'@keyframes carregando{0%{margin-left:-40%}100%{margin-left:100%}}'}</style>
         {erro && <p className="mt-3 text-sm text-perigo" role="alert">{erro}</p>}
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center">
           <label className="toque inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-borda px-4 font-semibold text-texto hover:bg-superficie-alta">
             <Paperclip size={18} aria-hidden="true" /> Anexar arquivos
-            <input type="file" multiple className="sr-only" onChange={(e) => { setAnexos((l) => [...l, ...Array.from(e.target.files ?? [])]); e.target.value = ''; }} />
+            <input type="file" multiple className="sr-only" onChange={(e) => { adicionar(e.target.files); e.target.value = ''; }} />
           </label>
           <BotaoSecundario onClick={aoFechar} className="sm:ml-auto">Cancelar</BotaoSecundario>
           <BotaoPrimario type="submit" disabled={enviando}><Send size={18} aria-hidden="true" /> {enviando ? 'Abrindo…' : 'Abrir chamado'}</BotaoPrimario>

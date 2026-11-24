@@ -182,6 +182,18 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
   },
   {
     declaracao: {
+      name: 'listar_servidores',
+      description: 'SÓ PARA ADMINISTRADORES. Lista os servidores Protheus cadastrados (os mesmos do VS Code) com o cliente/grupo de cada um. Use ANTES de compilar ou resetar senha para descobrir o servidor certo pelo cliente do chamado, ou para perguntar em qual servidor é.',
+      parameters: { type: 'OBJECT', properties: {} },
+    },
+    executar: async (u) => {
+      if (!podeCompilacao(u)) return { erro: 'Ver servidores de compilação é só para administradores.' };
+      const alvos = await listarAlvos(u);
+      return { servidores: alvos.map((x) => ({ identificador: x.slug, cliente: x.grupo || '(Prime)', nome: x.nome })) };
+    },
+  },
+  {
+    declaracao: {
       name: 'gerar_patch',
       description: 'SÓ PARA ADMINISTRADORES. Compila um fonte ADVPL/TLPP em um servidor cadastrado (os mesmos do VS Code, no painel Protheus) e gera um patch .ptm pronto para aplicar. Pode antes converter um relatório padrão em User Function no padrão PrimeERP. Devolve um link para baixar o .ptm. Use quando pedirem para compilar, gerar patch, ou converter um relatório em user function.',
       parameters: { type: 'OBJECT', properties: {
@@ -196,7 +208,7 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       const alvos = await listarAlvos(u);
       const termo = txt(a, 'servidor').toLowerCase();
       const alvo = alvos.find((x) => x.slug === termo || x.nome.toLowerCase().includes(termo) || `${x.grupo} ${x.nome}`.toLowerCase().includes(termo));
-      if (!alvo) return { erro: `Servidor "${txt(a, 'servidor')}" não encontrado. Disponíveis: ${alvos.map((x) => x.nome).join(', ')}` };
+      if (!alvo) return { erro: `Servidor "${txt(a, 'servidor')}" não encontrado. Disponíveis: ${alvos.map((x) => `${x.grupo ? `${x.grupo} — ` : ''}${x.nome}`).join('; ')}. Pergunte em qual é pra compilar.` };
       let fonte = typeof a.fonte === 'string' ? a.fonte : '';
       if (!fonte.trim()) return { erro: 'Preciso do conteúdo do fonte para compilar.' };
       const base = (txt(a, 'nome_programa') || 'FONTE').replace(/\.(prw|tlpp|prx)$/i, '');
@@ -286,8 +298,9 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
-COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Peça o fonte e o servidor se faltar, chame gerar_patch e devolva o link do .ptm. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
-ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Compile na "base" para a pessoa testar; só gere para o servidor do cliente quando ela confirmar que funcionou. A ferramenta devolve DOIS links (o fonte .prw e o patch .ptm): entregue os dois e diga em poucas linhas o que mudou.
+COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
+EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
+ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Siga a REGRA acima para escolher o servidor. A ferramenta devolve DOIS links (o fonte .prw e o patch .ptm): entregue os dois e diga em poucas linhas o que mudou e em qual servidor compilou.
 CABEÇALHO E COMENTÁRIOS (padrão PrimeERP): todo ponto de entrada / user function que você criar ou alterar começa com o cabeçalho Protheus.doc no modelo: "@author  ${u.nome}", "@since   <data de hoje dd/mm/aaaa>", "@version P12", "@obs     PrimeERP - Solucoes em Tecnologia". Cada alteração que você fizer no código leva um comentário na linha no formato "// [${u.nome} - <data de hoje> - PrimeERP] o que mudou". Nunca use outro nome de autor.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".

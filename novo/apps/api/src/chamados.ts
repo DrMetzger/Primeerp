@@ -13,6 +13,9 @@ export async function listarChamados(usuario: UsuarioLogado, filtros: { status?:
 
   if (filtros.status === 'pendentes') {
     condicoes.push("ch.status <> 'fechado'");
+  } else if (filtros.status === 'nossos') {
+    // só o que está pendente com a gente (não aguardando cliente nem fechado)
+    condicoes.push("ch.status IN ('aberto','aguardando_equipe')");
   } else if (filtros.status && (STATUS as string[]).includes(filtros.status)) {
     condicoes.push('ch.status = ?');
     params.push(filtros.status);

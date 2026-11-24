@@ -24,6 +24,7 @@ export default function PaginaCliente() {
   const [id, setId] = useState(0);
   const [dados, setDados] = useState<ClienteDetalhe | null>(null);
   const [chamados, setChamados] = useState<Lista | null>(null);
+  const [filtroCh, setFiltroCh] = useState<string>('nossos');
   const [erro, setErro] = useState('');
   const [aba, setAba] = useState<Aba>('geral');
   const [editar, setEditar] = useState(false);
@@ -39,8 +40,13 @@ export default function PaginaCliente() {
     setId(cid);
     if (!cid) { setErro('Cliente não informado.'); return; }
     recarregarCliente(cid);
-    api<Lista>(`/api/chamados?${new URLSearchParams({ cliente: String(cid), status: '' })}`).then(setChamados).catch(() => setChamados({ itens: [], total: 0 }));
   }, []);
+
+  function carregarChamados(cid: number, st: string) {
+    setChamados(null);
+    api<Lista>(`/api/chamados?${new URLSearchParams({ cliente: String(cid), status: st })}`).then(setChamados).catch(() => setChamados({ itens: [], total: 0 }));
+  }
+  useEffect(() => { if (id) carregarChamados(id, filtroCh); }, [id, filtroCh]);
 
   function recarregarCliente(cid = id) {
     api<ClienteDetalhe>(`/api/clientes/${cid}`).then(setDados).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Não consegui abrir esse cliente.'));
@@ -128,12 +134,26 @@ export default function PaginaCliente() {
             </div>
           )}
 
-          {aba === 'chamados' && (!chamados ? <EsqueletoLista /> : (
-            <>
-              <p className="text-sm text-suave">{chamados.total} chamado(s){chamados.total > chamados.itens.length ? ` · mostrando ${chamados.itens.length}` : ''}</p>
-              <ListaChamados itens={chamados.itens} visao="equipe" />
-            </>
-          ))}
+          {aba === 'chamados' && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {([['nossos', 'Pendentes com a gente'], ['aguardando_cliente', 'Aguardando cliente'], ['fechado', 'Fechados'], ['', 'Todos']] as const).map(([v, r]) => (
+                  <button key={v || 'todos'} type="button" onClick={() => setFiltroCh(v)}
+                    className={`toque rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${filtroCh === v ? 'bg-primaria text-white' : 'border border-borda text-suave hover:text-texto'}`}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+              {!chamados ? <EsqueletoLista /> : chamados.itens.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-borda p-10 text-center text-suave">Nenhum chamado {filtroCh === 'nossos' ? 'pendente com a gente' : filtroCh === 'aguardando_cliente' ? 'aguardando o cliente' : filtroCh === 'fechado' ? 'fechado' : ''} por aqui.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-suave">{chamados.total} chamado(s){chamados.total > chamados.itens.length ? ` · mostrando ${chamados.itens.length}` : ''}</p>
+                  <ListaChamados itens={chamados.itens} visao="equipe" />
+                </>
+              )}
+            </div>
+          )}
 
           {aba === 'acessos' && <SecaoAcessos clienteId={id} />}
           {aba === 'setores' && <SecaoSetores clienteId={id} dados={dados} recarregar={() => recarregarCliente()} />}
