@@ -21,14 +21,16 @@ jobs:
           echo "md5 pswmd5 LIVE: $LIVEPW"
           echo "== tuplas no heap (xmin | md5 pswmd5 | md5 chksum | len | cod):"
           Q "SELECT x::text::bigint, md5(convert_from($D4,'SQL_ASCII')), md5(convert_from($D16,'SQL_ASCII')), length(convert_from($D16,'SQL_ASCII')), btrim(convert_from($D3,'SQL_ASCII')) FROM ($ITEMS) q ORDER BY x::text::bigint;" | sed 's/|/ | /g'
-          echo "== original = tupla mais antiga com pswmd5=LIVE, chksum nao-vazio, cod=Administrador:"
-          ORIG=$(Q "SELECT btrim(convert_from($D16,'SQL_ASCII')) FROM ($ITEMS) q WHERE md5(convert_from($D4,'SQL_ASCII'))='$LIVEPW' AND btrim(convert_from($D16,'SQL_ASCII'))<>'' AND btrim(convert_from($D3,'SQL_ASCII'))='Administrador' ORDER BY x::text::bigint LIMIT 1;")
-          echo "recuperado: len=$(printf %s "$ORIG" | wc -c) md5=$(printf %s "$ORIG" | md5sum | cut -c1-12)"
-          if [ -n "$ORIG" ] && [ "$(printf %s "$ORIG" | wc -c)" -ge 10 ]; then
-            printf '%s' "$ORIG" > /tmp/ck.txt
-            sudo -u postgres psql -At -d protheus -c "UPDATE sys_usr SET usr_chksum=\$CK\$$(cat /tmp/ck.txt)\$CK\$ WHERE btrim(usr_codigo)='Administrador';"
-            sudo rm -f /tmp/ck.txt
-            echo "== restaurado. reinicia principal e testa auth do admin:"
+          echo "== par ORIGINAL consistente = tupla mais antiga do Administrador com chksum nao-vazio:"
+          WHERE_OLD="FROM ($ITEMS) q WHERE btrim(convert_from($D3,'SQL_ASCII'))='Administrador' AND btrim(convert_from($D16,'SQL_ASCII'))<>'' ORDER BY x::text::bigint LIMIT 1"
+          OLDPW=$(Q "SELECT btrim(convert_from($D4,'SQL_ASCII')) $WHERE_OLD;")
+          OLDCK=$(Q "SELECT btrim(convert_from($D16,'SQL_ASCII')) $WHERE_OLD;")
+          echo "pswmd5 recuperado: len=$(printf %s "$OLDPW" | wc -c) | chksum recuperado: len=$(printf %s "$OLDCK" | wc -c)"
+          if [ "$(printf %s "$OLDPW" | wc -c)" -ge 10 ] && [ "$(printf %s "$OLDCK" | wc -c)" -ge 10 ]; then
+            printf '%s' "$OLDPW" > /tmp/pw.txt; printf '%s' "$OLDCK" > /tmp/ck.txt
+            sudo -u postgres psql -At -d protheus -c "UPDATE sys_usr SET usr_pswmd5=\$PW\$$(cat /tmp/pw.txt)\$PW\$, usr_chksum=\$CK\$$(cat /tmp/ck.txt)\$CK\$ WHERE btrim(usr_codigo)='Administrador';"
+            sudo rm -f /tmp/pw.txt /tmp/ck.txt
+            echo "== restaurado pswmd5+chksum originais. reinicia principal e testa auth:"
             systemctl restart totvsappserver
             for i in $(seq 1 50); do ss -tlnH | grep -q ':8089 ' && break; sleep 3; done; sleep 15
             sudo rm -rf /tmp/f-adm; mkdir -p /tmp/f-adm; printf 'User Function XADM()\nReturn .T.\n' > /tmp/f-adm/xadm.prw
