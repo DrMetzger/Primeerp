@@ -6,20 +6,22 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: sobe REST e reseta admin para senha conhecida
+      - name: reseta admin com senha compativel com a politica
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           set -u
           B=http://127.0.0.1:8095/rest/prmrss
           Q(){ sudo -u postgres psql -At -d protheus -c "$1" 2>/dev/null; }
-          echo "md5 senha admin ANTES: $(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")"
-          echo "== sobe REST dedicado:"; systemctl start totvsappserver-rest
-          for i in $(seq 1 40); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 18
-          echo "rest: $(systemctl is-active totvsappserver-rest) | 8095: $(ss -tlnH|grep -q ':8095 '&&echo LISTEN||echo NAO)"
-          echo "== RESET admin -> PrimeHub2026 (via REST, no registro ja consistente):"
-          curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"PrimeHub2026","chave":"PrimeHub@2026"}'
+          systemctl start totvsappserver-rest 2>/dev/null || true
+          for i in $(seq 1 30); do ss -tlnH | grep -q ':8095 ' && break; sleep 3; done; sleep 10
+          A=$(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
+          echo "md5 ANTES: $A"
+          echo "== RESET admin -> Prime@Hub2026 (com especial):"
+          curl -s -m 25 -w ' <%{http_code}>\n' -X POST "$B" -H 'Content-Type: application/json' --data '{"login":"Administrador","senha":"Prime@Hub2026","chave":"PrimeHub@2026"}'
           sleep 2
-          echo "md5 senha admin DEPOIS: $(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")"
+          D=$(Q "SELECT md5(usr_pswmd5) FROM sys_usr WHERE btrim(usr_codigo)='Administrador';")
+          echo "md5 DEPOIS: $D"
+          [ "$A" != "$D" ] && echo ">>> GRAVOU: senha do admin mudou (reset end-to-end OK) <<<" || echo "nao mudou"
           R
