@@ -84,45 +84,50 @@ export default function PaginaAgente() {
   const fazendo = itens?.filter((p) => p.status === 'aprovado_execucao') ?? [];
   return (
     <Casca tipo="equipe" titulo="Mesa do agente">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl text-white" style={{ background: 'linear-gradient(135deg,#d946ef,#7c3aed)' }}><Bot size={22} aria-hidden="true" /></span>
-          <div className="min-w-0 flex-1">
-            <p className="font-bold text-texto">O agente prepara, você decide.</p>
-            <p className="flex items-center gap-1.5 text-sm text-suave"><ShieldCheck size={15} className="text-sucesso" aria-hidden="true" /> Nada vai para o cliente sem você clicar em Enviar.</p>
+      <div className="mx-auto grid max-w-7xl gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-6">
+          <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl text-white" style={{ background: 'linear-gradient(135deg,#d946ef,#7c3aed)' }}><Bot size={22} aria-hidden="true" /></span>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-texto">O agente prepara, você decide.</p>
+              <p className="flex items-center gap-1.5 text-sm text-suave"><ShieldCheck size={15} className="text-sucesso" aria-hidden="true" /> Nada vai para o cliente sem você clicar em Enviar.</p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-3 py-1 text-sm font-semibold text-sky-500"><Eye size={15} aria-hidden="true" /> {revisar.length} para revisar</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-sm font-semibold text-violet-500"><Hammer size={15} aria-hidden="true" /> {fazendo.length} em execução</span>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-3 py-1 text-sm font-semibold text-sky-500"><Eye size={15} aria-hidden="true" /> {revisar.length} para revisar</span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-sm font-semibold text-violet-500"><Hammer size={15} aria-hidden="true" /> {fazendo.length} em execução</span>
+
+          {pipeline.length > 0 && <Quadro etapas={pipeline} onDestravar={destravar} />}
+
+          {erro ? <Vazio>{erro}</Vazio> : !itens ? <EsqueletoLista /> : !itens.length ? <Vazio>Nada esperando você agora. O agente passa pelos chamados em horário comercial.</Vazio> : (
+            <div className="space-y-4">{[...revisar, ...fazendo].map((p) => <CartaoProposta key={p.id} p={p} aoMudar={() => void carregar()} />)}</div>
+          )}
         </div>
 
-        {pipeline.length > 0 && <Quadro etapas={pipeline} onDestravar={destravar} />}
-
-        {atividades.length > 0 && (
+        <aside className="xl:sticky xl:top-20 xl:self-start xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto">
           <section className="rounded-3xl border border-borda bg-superficie p-5 shadow-sm">
             <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-texto"><Activity size={18} className="text-primaria" aria-hidden="true" /> Ações do agente (ao vivo)</h2>
-            <ol className="space-y-2.5">
-              {atividades.map((a, i) => {
-                const info = FASE_INFO[a.fase] ?? { rotulo: a.fase, cor: '#94a3b8' };
-                return (
-                  <li key={i} className="flex items-start gap-3 text-sm">
-                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: info.cor }} aria-hidden="true" />
-                    <div className="min-w-0 flex-1">
-                      <p className="flex flex-wrap items-center gap-x-2 leading-tight">
-                        <span className="font-semibold" style={{ color: info.cor }}>{info.rotulo}</span>
-                        <Link href={`/painel/chamado?id=${a.chamadoId}`} className="font-semibold text-primaria hover:underline">#{a.chamadoId} · {a.cliente}</Link>
-                        <span className="text-xs text-suave">{horaCurta(a.em)}</span>
-                      </p>
-                      {a.texto && <p className="truncate text-suave" title={a.texto}>{a.texto}</p>}
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+            {atividades.length === 0 ? <p className="text-sm text-suave">As ações do agente aparecem aqui conforme ele trabalha.</p> : (
+              <ol className="space-y-2.5">
+                {atividades.map((a, i) => {
+                  const info = FASE_INFO[a.fase] ?? { rotulo: a.fase, cor: '#94a3b8' };
+                  return (
+                    <li key={i} className="flex items-start gap-3 text-sm">
+                      <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: info.cor }} aria-hidden="true" />
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-x-2 leading-tight">
+                          <span className="font-semibold" style={{ color: info.cor }}>{info.rotulo}</span>
+                          <Link href={`/painel/chamado?id=${a.chamadoId}`} className="font-semibold text-primaria hover:underline">#{a.chamadoId} · {a.cliente}</Link>
+                          <span className="text-xs text-suave">{horaCurta(a.em)}</span>
+                        </p>
+                        {a.texto && <p className="text-suave" title={a.texto}>{a.texto}</p>}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
           </section>
-        )}
-        {erro ? <Vazio>{erro}</Vazio> : !itens ? <EsqueletoLista /> : !itens.length ? <Vazio>Nada esperando você agora. O agente passa pelos chamados em horário comercial.</Vazio> : (
-          <div className="space-y-4">{[...revisar, ...fazendo].map((p) => <CartaoProposta key={p.id} p={p} aoMudar={() => void carregar()} />)}</div>
-        )}
+        </aside>
       </div>
     </Casca>
   );

@@ -440,10 +440,11 @@ async function alvoDoCliente(cliente: string): Promise<{ slug: string; nome: str
   const primeira1 = (s: string) => s.split(' ')[0] ?? s;
   // NUNCA auto-compilar em produção: só dev/teste/debug/exclusivo.
   const ehProducao = (a: { slug: string; nome: string }) => /prd|prod|produ/.test(normaliza(`${a.slug} ${a.nome}`));
-  const doCliente = alvos.find((a) => a.liberado && !ehProducao(a) && a.grupo && (c.includes(primeira1(normaliza(a.grupo))) || normaliza(a.grupo).includes(primeira1(c))));
-  if (doCliente) return { slug: doCliente.slug, nome: `${doCliente.grupo} — ${doCliente.nome}` };
-  const base = alvos.find((a) => a.slug === 'base' && a.liberado);
-  return base ? { slug: base.slug, nome: `${base.nome} (checagem — sem servidor de teste liberado do cliente ${cliente})` } : null;
+  // SOMENTE o servidor da empresa DO chamado — nunca compila em outra empresa nem na base da Prime.
+  const daEmpresa = alvos.filter((a) => a.liberado && a.grupo && (c.includes(primeira1(normaliza(a.grupo))) || normaliza(a.grupo).includes(primeira1(c))));
+  if (!daEmpresa.length) return null; // nenhum servidor desta empresa cadastrado/liberado
+  const dev = daEmpresa.find((a) => !ehProducao(a)) ?? null; // preferir dev/teste; nunca produção
+  return dev ? { slug: dev.slug, nome: `${dev.grupo} — ${dev.nome}` } : null;
 }
 
 interface SaidaGemini { precisa_codigo: boolean; nome_programa: string; fonte: string; resposta: string; resumo_interno: string }
@@ -507,7 +508,8 @@ export async function executarComGemini(propostaId: number): Promise<void> {
       const base = saida.nome_programa.replace(/\.(prw|tlpp|prx)$/i, '').replace(/[^\w]/g, '') || 'FONTE';
       const nomeArq = `${base}.prw`;
       arquivos.push({ nome: nomeArq, conteudo_base64: Buffer.from(saida.fonte, 'utf8').toString('base64') });
-      const alvo = await alvoDoCliente(String(det.cliente ?? ''));
+      const cliente = String(det.cliente ?? '');
+      const alvo = await alvoDoCliente(cliente);
       if (alvo) {
         await registrarEvento(p.chamado_id, 'compilando', `Compilando ${nomeArq} em ${alvo.nome}.`, propostaId);
         try {
@@ -515,10 +517,18 @@ export async function executarComGemini(propostaId: number): Promise<void> {
           if (rc.ok) {
             notaCompilacao = `Compilou OK em ${alvo.nome}. Patch: ${rc.nome} — baixar em /api/compilacao/arquivo/${rc.token}`;
             await registrarEvento(p.chamado_id, 'pronto', `Compilou OK em ${alvo.nome} (patch ${rc.nome}).`, propostaId);
-          } else { notaCompilacao = `Compilou COM ERRO em ${alvo.nome}: ${rc.erro}`; await registrarEvento(p.chamado_id, 'erro', notaCompilacao, propostaId); }
-        } catch (e) { notaCompilacao = `Não deu para compilar: ${e instanceof Error ? e.message : e}`; await registrarEvento(p.chamado_id, 'erro', notaCompilacao, propostaId); }
+          } else {
+            // Erro de compilação: guarda os DETALHES completos para a equipe ver.
+            notaCompilacao = `Compilou COM ERRO em ${alvo.nome}.\nErro do compilador:\n${rc.erro ?? '(sem detalhe)'}`;
+            await registrarEvento(p.chamado_id, 'erro', `Erro ao compilar em ${alvo.nome}: ${String(rc.erro ?? '').replace(/\s+/g, ' ').slice(0, 440)}`, propostaId);
+          }
+        } catch (e) {
+          notaCompilacao = `Não deu para compilar em ${alvo.nome}: ${e instanceof Error ? e.message : e}`;
+          await registrarEvento(p.chamado_id, 'erro', notaCompilacao.slice(0, 480), propostaId);
+        }
       } else {
-        notaCompilacao = 'Fonte gerado, mas nenhum servidor de teste liberado do cliente — compile pelo assistente após revisar.';
+        notaCompilacao = `Gerei o fonte, mas NÃO há servidor de teste liberado da empresa "${cliente}" cadastrado no painel Protheus — por isso não compilei (e nunca compilo em outra empresa). Cadastre/libere o servidor de desenvolvimento da ${cliente} para o agente compilar automaticamente.`;
+        await registrarEvento(p.chamado_id, 'erro', `Sem servidor de teste da empresa "${cliente}" — fonte gerado, mas não compilado.`, propostaId);
       }
     }
 
