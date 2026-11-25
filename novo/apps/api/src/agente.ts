@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { converterRelatorio, type PropostaAgente, type UsuarioLogado } from '@primehub/shared';
 export type { PropostaAgente };
+import { compilarFonte, listarAlvos } from './compilacao';
 import { config } from './config';
 import { consulta, primeira } from './db';
 import { configuracao } from './integracoes';
@@ -321,6 +322,8 @@ export async function aprovarExecucao(propostaId: number, quem: { id: number }, 
     .filter((a) => a.bytes.length > 0 && a.bytes.length <= 10 * 1024 * 1024);
   for (const a of limpos) await executar('INSERT INTO chamado_agente_entrada (proposta_id, nome, dados) VALUES (?,?,?)', [propostaId, a.nome, a.bytes]);
   if (chamadoId) await registrarEvento(chamadoId, 'aprovado', `Execução aprovada (${TIPOS_CASO[tipo] ?? tipo})${limpos.length ? ` · ${limpos.length} arquivo(s) de referência` : ''}.`, propostaId);
+  // Faz AGORA pela IA (Gemini) — sem travar a resposta ao usuário e sem gastar Claude.
+  void executarComGemini(propostaId).catch((e: unknown) => console.error('agente exec disparo', e instanceof Error ? e.message : e));
 }
 
 // ---------------------------------------------------------------- Envio (pelo mesmo caminho da resposta manual)
@@ -416,6 +419,115 @@ export async function arquivoDaProposta(arquivoId: number): Promise<{ nome: stri
   const a = await primeira<{ nome: string; dados: Buffer }>('SELECT nome, dados FROM chamado_agente_arquivos WHERE id = ?', [arquivoId]);
   if (!a) throw new ErroAgente('Arquivo não encontrado.', 404);
   return { nome: a.nome, bytes: Buffer.from(a.dados) };
+}
+
+// ---- Execução pela IA (Gemini): a mesa "faz" sozinha, sem gastar Claude -----
+// Quando a equipe aprova a execução, o servidor desenvolve (e compila, quando é
+// código) usando o GEMINI — nunca Claude — e devolve o resultado como proposta
+// "pronta para revisar". Assim nada fica preso em "Trabalhando".
+
+const EXECUTANDO = new Set<number>();
+function normaliza(s: string): string { return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+
+function usuarioAdminSintetico(nome: string): UsuarioLogado {
+  return { tipo: 'equipe', id: 0, nome: nome || 'PrimeERP', email: '', perfil: 'admin', foto: null, clienteId: null, empresa: null } as UsuarioLogado;
+}
+
+/** Escolhe o servidor de compilação do cliente (pelo grupo) ou cai na base. */
+async function alvoDoCliente(cliente: string): Promise<{ slug: string; nome: string } | null> {
+  const alvos = await listarAlvos(usuarioAdminSintetico('PrimeERP'));
+  const c = normaliza(cliente);
+  const primeira1 = (s: string) => s.split(' ')[0] ?? s;
+  // NUNCA auto-compilar em produção: só dev/teste/debug/exclusivo.
+  const ehProducao = (a: { slug: string; nome: string }) => /prd|prod|produ/.test(normaliza(`${a.slug} ${a.nome}`));
+  const doCliente = alvos.find((a) => a.liberado && !ehProducao(a) && a.grupo && (c.includes(primeira1(normaliza(a.grupo))) || normaliza(a.grupo).includes(primeira1(c))));
+  if (doCliente) return { slug: doCliente.slug, nome: doCliente.nome };
+  const base = alvos.find((a) => a.slug === 'base' && a.liberado);
+  return base ? { slug: base.slug, nome: `${base.nome} (checagem — sem servidor de teste liberado do cliente)` } : null;
+}
+
+interface SaidaGemini { precisa_codigo: boolean; nome_programa: string; fonte: string; resposta: string; resumo_interno: string }
+
+async function desenvolverComGemini(det: Record<string, any>, tipo: string, instrucoes: string, referencias: string): Promise<SaidaGemini | null> {
+  const chave = await configuracao('gemini_api_key', '');
+  if (!chave) return null;
+  const conversa: any[] = det.conversa ?? [];
+  const parecidos: any[] = det.chamadosParecidosResolvidos ?? [];
+  const autor = String(det.atendente ?? 'Kleber Metzger');
+  const hoje = new Date().toLocaleDateString('pt-BR');
+  const sistema = `Você é um desenvolvedor TOTVS Protheus sênior da PrimeERP. Recebe um chamado já triado e as instruções da equipe e deve ENTREGAR o trabalho (tipo: ${tipo}). Decida se precisa de código ADVPL/TLPP (correção, melhoria, desenvolvimento) ou se é só texto (resposta, orientação, proposta). Se precisar de código, escreva o fonte COMPLETO e compilável, no padrão PrimeERP: ponto de entrada ou User Function com cabeçalho Protheus.doc (@author ${autor}, @since ${hoje}, @version P12, @obs PrimeERP - Solucoes em Tecnologia) e cada alteração comentada "// [${autor} - ${hoje} - PrimeERP] o que mudou". NUNCA invente rotina, parâmetro MV_, tabela ou campo que você não tenha certeza que existe. A "resposta" é a mensagem para o cliente: português do Brasil, texto puro sem markdown, cordial e direta, em primeira pessoa do plural, SEM mencionar IA/robô/Gemini. O "resumo_interno" é só para a equipe (o que você fez e como testar). Responda SOMENTE o JSON pedido.`;
+  const contexto = `Chamado: ${det.chamado?.titulo}\nCliente: ${det.cliente}\nDescrição: ${String(det.chamado?.descricao ?? '').slice(0, 2500)}\n\nInstruções da equipe: ${instrucoes || '(sem instruções extras)'}\n\nÚltimas mensagens:\n${conversa.slice(-6).map((m) => `${m.de}: ${m.mensagem}`).join('\n').slice(0, 2500)}\n\nCasos parecidos já resolvidos:\n${parecidos.map((s) => `- ${s.titulo}: ${(s.respostasEquipe ?? []).join(' ').slice(0, 300)}`).join('\n').slice(0, 1500)}\n\nArquivos de referência da equipe:\n${referencias.slice(0, 4000) || '(nenhum)'}`;
+  const esquema = { type: 'OBJECT', properties: {
+    precisa_codigo: { type: 'BOOLEAN' }, nome_programa: { type: 'STRING' }, fonte: { type: 'STRING' }, resposta: { type: 'STRING' }, resumo_interno: { type: 'STRING' },
+  }, required: ['precisa_codigo', 'resposta', 'resumo_interno'] };
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': chave },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: contexto }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: esquema } }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    const j = (await r.json()) as any;
+    const txt = String((j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join('')).trim();
+    const o = JSON.parse(txt) as Partial<SaidaGemini>;
+    return { precisa_codigo: Boolean(o.precisa_codigo), nome_programa: String(o.nome_programa ?? 'FONTE'), fonte: String(o.fonte ?? ''), resposta: String(o.resposta ?? ''), resumo_interno: String(o.resumo_interno ?? '') };
+  } catch (e) { console.error('agente gemini exec', e instanceof Error ? e.message : e); return null; }
+}
+
+/** Executa uma proposta aprovada usando o Gemini e devolve o resultado para revisão. */
+export async function executarComGemini(propostaId: number): Promise<void> {
+  if (EXECUTANDO.has(propostaId)) return;
+  const p = await primeira<{ id: number; chamado_id: number; tipo: string; plano: string | null; instrucoes_equipe: string | null; status: string }>(
+    'SELECT id, chamado_id, tipo, plano, instrucoes_equipe, status FROM chamado_agente WHERE id = ?', [propostaId]);
+  if (!p || p.status !== 'aprovado_execucao') return;
+  EXECUTANDO.add(propostaId);
+  try {
+    await registrarEvento(p.chamado_id, 'analisando', 'IA (Gemini) analisando o chamado e as instruções.', propostaId);
+    const det = (await detalheAgente(p.chamado_id)) as Record<string, any>;
+    // Referências textuais que a equipe anexou (fontes/txt pequenos entram no prompt).
+    const refs = await consulta<{ nome: string; dados: Buffer }>('SELECT nome, dados FROM chamado_agente_entrada WHERE proposta_id = ?', [propostaId]).catch(() => []);
+    const referencias = refs.map((a) => /\.(prw|tlpp|prx|txt|csv|json|md|xml)$/i.test(a.nome) ? `--- ${a.nome} ---\n${Buffer.from(a.dados).toString('utf8').slice(0, 3000)}` : `--- ${a.nome} (anexo binário, não lido) ---`).join('\n\n');
+
+    await registrarEvento(p.chamado_id, 'desenvolvendo', 'IA desenvolvendo a solução.', propostaId);
+    const saida = await desenvolverComGemini(det, p.tipo, p.instrucoes_equipe ?? '', referencias);
+    if (!saida) throw new Error('Gemini indisponível ou sem chave.');
+
+    const arquivos: { nome: string; conteudo_base64: string }[] = [];
+    let notaCompilacao = '';
+    if (saida.precisa_codigo && saida.fonte.trim().length > 30) {
+      const base = saida.nome_programa.replace(/\.(prw|tlpp|prx)$/i, '').replace(/[^\w]/g, '') || 'FONTE';
+      const nomeArq = `${base}.prw`;
+      arquivos.push({ nome: nomeArq, conteudo_base64: Buffer.from(saida.fonte, 'utf8').toString('base64') });
+      const alvo = await alvoDoCliente(String(det.cliente ?? ''));
+      if (alvo) {
+        await registrarEvento(p.chamado_id, 'compilando', `Compilando ${nomeArq} em ${alvo.nome}.`, propostaId);
+        try {
+          const rc = await compilarFonte(usuarioAdminSintetico(String(det.atendente ?? 'PrimeERP')), alvo.slug, arquivos);
+          if (rc.ok) notaCompilacao = `Compilou OK em ${alvo.nome} (patch ${rc.nome}).`;
+          else { notaCompilacao = `Compilou COM ERRO em ${alvo.nome}: ${rc.erro}`; await registrarEvento(p.chamado_id, 'erro', notaCompilacao, propostaId); }
+        } catch (e) { notaCompilacao = `Não deu para compilar: ${e instanceof Error ? e.message : e}`; await registrarEvento(p.chamado_id, 'erro', notaCompilacao, propostaId); }
+      } else {
+        notaCompilacao = 'Fonte gerado, mas nenhum servidor liberado para compilar automaticamente — compile pelo assistente após revisar.';
+      }
+    }
+
+    const resposta = saida.resposta.trim().length >= 20 ? saida.resposta.trim() : 'Olá! Preparamos o que foi solicitado e estamos finalizando a revisão. Em seguida retornamos.';
+    const resumo = `${saida.resumo_interno}${notaCompilacao ? `\n\n[Compilação] ${notaCompilacao}` : ''}\n\nFeito automaticamente pela IA (Gemini). Revise antes de enviar.`.slice(0, 8000);
+    await registrarProposta(p.chamado_id, {
+      resposta, tipo: p.tipo, plano: `Desenvolvido pela IA (Gemini).${notaCompilacao ? ' ' + notaCompilacao : ''}`.slice(0, 8000),
+      confianca: 'media', status_sugerido: 'aguardando_cliente', resumo_interno: resumo, arquivos, sessao: 'gemini-exec',
+    });
+  } catch (e) {
+    console.error('agente executarComGemini', propostaId, e instanceof Error ? e.stack ?? e.message : e);
+    await registrarEvento(p.chamado_id, 'erro', `Falha na execução automática: ${e instanceof Error ? e.message : e}`, propostaId).catch(() => undefined);
+  } finally { EXECUTANDO.delete(propostaId); }
+}
+
+/** Varre execuções aprovadas que ainda não foram feitas e dispara o Gemini. */
+export async function processarExecucoesAprovadas(): Promise<void> {
+  if ((await configuracao('ia_chamados_motor', 'claude')) === 'desligado') return;
+  const pend = await consulta<{ id: number }>("SELECT id FROM chamado_agente WHERE status = 'aprovado_execucao' ORDER BY atualizado_em LIMIT 3").catch(() => []);
+  for (const e of pend) if (!EXECUTANDO.has(e.id)) { await executarComGemini(e.id).catch(() => undefined); }
 }
 
 // ---- Processador automático: nenhum chamado fica sem cair na Mesa ----------

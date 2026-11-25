@@ -19,7 +19,7 @@ import { montarDashboard } from './dashboard';
 import { linkClassico } from './sso';
 import { assinaturaValida, processarWebhook } from './whatsapp-bot';
 import { agente, ErroVm, podePainelVm } from './vm-servicos';
-import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, atividadesAgente, cancelarExecucao, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, pipelineAgente, processarChamadosPendentes, registrarEvento, registrarProposta, type Proposta } from './agente';
+import { anexoAgente, aprovarExecucao, arquivoDaProposta, arquivoEntrada, atividadesAgente, cancelarExecucao, conferirTokenAgente, descartarProposta, detalheAgente, enviarProposta, ErroAgente, filaAgente, garantirEstruturaAgente, gerarTokenAgente, mesaDoAgente, pipelineAgente, processarChamadosPendentes, processarExecucoesAprovadas, registrarEvento, registrarProposta, type Proposta } from './agente';
 import { SignJWT, jwtVerify } from 'jose';
 import { baixarVpn, conferirCofre, ErroCofre, recifrarCofre, excluirCredencial, excluirVpn, excluirVscode, lerCofre, revelarSenha, salvarAmbienteTcloud, salvarCredencial, salvarVpn, salvarVscode } from './acessos';
 
@@ -391,7 +391,10 @@ if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((
 // Processa chamados pendentes de tempos em tempos: todo chamado do cliente sem
 // resposta da equipe vira um rascunho na Mesa do agente (nada vai ao cliente sozinho).
 if (!comando) {
-  const rodarAgente = () => { void processarChamadosPendentes().catch((e: unknown) => console.error('agente processar:', e instanceof Error ? e.stack ?? e.message : e)); };
+  const rodarAgente = () => {
+    void processarChamadosPendentes().catch((e: unknown) => console.error('agente processar:', e instanceof Error ? e.stack ?? e.message : e));
+    void processarExecucoesAprovadas().catch((e: unknown) => console.error('agente execucoes:', e instanceof Error ? e.stack ?? e.message : e));
+  };
   setTimeout(rodarAgente, 30_000);
   setInterval(rodarAgente, 4 * 60_000);
 }
