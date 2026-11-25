@@ -63,3 +63,17 @@ export async function resetarSenhaProtheus(quem: string, login: string, senha: s
   const falhaConhecida = /Chave de autorizacao invalida|Usuario nao encontrado|Login nao informado|Valor inv.lido/i.test(corpo);
   return { ...r, ok: okJson || (r.http === 500 && !falhaConhecida) };
 }
+
+export interface NovoUsuario { login: string; nome: string; senha?: string; email?: string }
+/**
+ * Cria (ou atualiza) um usuário do Protheus pela API REST PRMADM do ambiente,
+ * sem tela e sem acesso ao banco do cliente. `restBase` é a URL do REST do alvo.
+ * Só admin/diretor/CEO.
+ */
+export async function criarUsuarioProtheus(quem: string, u: NovoUsuario, restBase?: string): Promise<RespostaReset> {
+  const r = await agente<RespostaReset>('POST', '/admin/criar-usuario', quem, { ...u, rest_base: restBase }, 60_000);
+  const corpo = String(r.resposta ?? '');
+  const okJson = /"ok"\s*:\s*true/.test(corpo);
+  const falhaConhecida = /Chave de autorizacao invalida|Login nao informado|Nome nao informado|Falha ao criar|Falha ao atualizar|Acao desconhecida/i.test(corpo);
+  return { ...r, ok: okJson || (r.http === 500 && !falhaConhecida) };
+}

@@ -274,6 +274,33 @@ class Agente(BaseHTTPRequestHandler):
                 return self.responder(200, {"ok": False, "http": e.code, "resposta": e.read().decode("utf-8", "replace")})
             except Exception as e:
                 return self.responder(200, {"ok": False, "erro": str(e)[:200]})
+        if partes == ["admin", "criar-usuario"]:
+            # Cria/atualiza um usuario Protheus chamando a API REST PRMADM
+            # (endpoint publico + chave secreta). Nunca toca no banco direto.
+            try:
+                corpo = self._corpo()
+            except Exception:
+                return self.responder(400, {"ok": False, "erro": "corpo inválido"})
+            import urllib.request, urllib.error
+            base = str(corpo.get("rest_base") or "http://127.0.0.1:8095").rstrip("/")
+            login = str(corpo.get("login", "")).strip()
+            if not login:
+                return self.responder(400, {"ok": False, "erro": "informe o login"})
+            chave = os.environ.get("PRM_RESET_CHAVE", "PrimeHub@2026")
+            dados = json.dumps({
+                "acao": "criar_usuario", "chave": chave, "login": login,
+                "nome": str(corpo.get("nome", "")), "senha": str(corpo.get("senha", "")),
+                "email": str(corpo.get("email", "")),
+            }).encode()
+            req = urllib.request.Request(base + "/rest/prmadm", data=dados,
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=40) as r:
+                    return self.responder(200, {"ok": True, "http": r.status, "resposta": r.read().decode("utf-8", "replace")})
+            except urllib.error.HTTPError as e:
+                return self.responder(200, {"ok": False, "http": e.code, "resposta": e.read().decode("utf-8", "replace")})
+            except Exception as e:
+                return self.responder(200, {"ok": False, "erro": str(e)[:200]})
         if len(partes) != 3 or partes[0] != "servicos":
             return self.responder(404, {"erro": "Caminho desconhecido."})
         alvo, acao = partes[1], partes[2]

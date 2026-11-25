@@ -2,7 +2,7 @@ import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
 import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
-import { podePainelVm, resetarSenhaProtheus } from './vm-servicos';
+import { criarUsuarioProtheus, podePainelVm, resetarSenhaProtheus } from './vm-servicos';
 import { marcarProgresso } from './progresso-agente';
 
 /**
@@ -250,6 +250,39 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       marcarProgresso(u.id, r.ok ? 'concluido' : 'erro', r.ok ? `Senha resetada em ${alvo.nome}` : `Falha ao resetar em ${alvo.nome}`, r.ok ? undefined : (r.resposta || r.erro));
       if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.resposta || r.erro || 'não deu para resetar', dica: 'confira se o REST (porta 8095) do ambiente está ligado e se o U_PRMRST está compilado lá' };
       return { ok: true, servidor: alvo.nome, login, senha, instrucao_resposta: `Confirme que a senha do usuário ${login} foi resetada em ${alvo.nome} e diga a nova senha (${senha}).` };
+    },
+  },
+  {
+    declaracao: {
+      name: 'criar_usuario_protheus',
+      description: 'SÓ PARA ADMINISTRADORES. Cria (ou atualiza, se já existir) um usuário do Protheus num servidor cadastrado, sem tela e sem acesso ao banco, pela API REST PRMADM. Use quando pedirem para criar/cadastrar um usuário no Protheus. Requer que o fonte PRMADM esteja compilado no servidor.',
+      parameters: { type: 'OBJECT', properties: {
+        servidor: { type: 'STRING', description: 'nome ou identificador do servidor cadastrado (ex.: "base", "Werk Schott")' },
+        login: { type: 'STRING', description: 'login do novo usuário (ex.: joao.silva)' },
+        nome: { type: 'STRING', description: 'nome completo do usuário' },
+        senha: { type: 'STRING', description: 'senha inicial (com caractere especial, ex.: Prime@2026)' },
+        email: { type: 'STRING', description: 'e-mail do usuário (opcional)' },
+      }, required: ['servidor', 'login', 'nome'] },
+    },
+    executar: async (u, a) => {
+      if (!podePainelVm(u)) return { erro: 'Criar usuário é só para administradores (admin/diretor/CEO).' };
+      const alvos = await listarAlvos(u);
+      const termo = txt(a, 'servidor').toLowerCase();
+      const alvo = alvos.find((x) => x.slug === termo || x.nome.toLowerCase().includes(termo) || `${x.grupo} ${x.nome}`.toLowerCase().includes(termo));
+      if (!alvo) return { erro: `Servidor "${txt(a, 'servidor')}" não encontrado. Disponíveis: ${alvos.map((x) => `${x.grupo ? `${x.grupo} — ` : ''}${x.nome}`).join('; ')}` };
+      const login = txt(a, 'login');
+      const nome = txt(a, 'nome');
+      if (!login || !nome) return { erro: 'Informe login e nome do usuário.' };
+      const senha = txt(a, 'senha');
+      if (senha && !/[^A-Za-z0-9]/.test(senha)) return { erro: 'A senha precisa de pelo menos um caractere especial (política do Protheus). Ex.: Prime@2026.' };
+      const email = txt(a, 'email');
+      const restBase = `http://${alvo.host}:8095`;
+      marcarProgresso(u.id, 'resetando', `Criando o usuário ${login} em ${alvo.nome}…`);
+      const dados = { login, nome, ...(senha ? { senha } : {}), ...(email ? { email } : {}) };
+      const r = await criarUsuarioProtheus(u.nome, dados, restBase);
+      marcarProgresso(u.id, r.ok ? 'concluido' : 'erro', r.ok ? `Usuário criado em ${alvo.nome}` : `Falha ao criar em ${alvo.nome}`, r.ok ? undefined : (r.resposta || r.erro));
+      if (!r.ok) return { ok: false, servidor: alvo.nome, erro: r.resposta || r.erro || 'não deu para criar', dica: 'confira se o REST (porta 8095) está ligado e se o PRMADM está compilado no servidor' };
+      return { ok: true, servidor: alvo.nome, login, nome, instrucao_resposta: `Confirme que o usuário ${nome} (${login}) foi criado em ${alvo.nome}${senha ? ` com a senha informada` : ''}.` };
     },
   },
 ];
