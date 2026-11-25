@@ -6,20 +6,19 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: ler cli.log/saida.txt do tdscli
+      - name: status REST + saida.txt do tdscli
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "== definicao de S= no script"
-          grep -anE '^[[:space:]]*S=|S=\"|S=/|workdir|TMP' /usr/local/bin/primehub-tdscli 2>/dev/null | head
+          echo "== AppServer REST ativo?"
+          systemctl is-active totvsappserver-rest 2>/dev/null || echo "(inativo!)"
+          pgrep -af 'appserver_rest.ini' | head -1 || echo "(processo REST ausente!)"
           echo ""
-          echo "== dirs de trabalho candidatos (cli.log recentes)"
-          mapfile -t CL < <(find /tmp /opt /var -iname 'cli.log' -mmin -60 2>/dev/null; find /tmp /opt /var -iname 'saida.txt' -mmin -60 2>/dev/null; find /tmp /opt /var -iname 'exec.log' -mmin -60 2>/dev/null)
-          for f in "${CL[@]}"; do echo " * $f ($(date -r "$f" '+%H:%M'))"; done
-          for f in "${CL[@]}"; do
+          echo "== saida/exec/cli do tdscli (ultimo compile)"
+          for f in /opt/totvs/tdscli/compilar/saida.txt /opt/totvs/tdscli/compilar/exec.log /opt/totvs/tdscli/compilar/cli.log; do
             echo ""
-            echo "===== $f ====="
-            grep -aiE 'PRMADM|PRMRSSLIB|PRMNEWU|error|erro|C[0-9]{4}|syntax|undefined|was not|cannot|invalid|duplicat|warning' "$f" 2>/dev/null | grep -aviE 'senha|password' | tail -40
+            echo "===== $f ($(date -r "$f" '+%H:%M' 2>/dev/null)) ====="
+            grep -aiE 'PRMADM|PRMRSSLIB|PRMNEWU|error|erro|C[0-9]{4}|syntax|undefined|was not|cannot|invalid|duplicat|open repository|temporarily|build' "$f" 2>/dev/null | grep -aviE 'senha|password|ciphertext' | tail -30
           done
           R
