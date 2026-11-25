@@ -41,6 +41,7 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
   const [ia, setIa] = useState<{ rodando: boolean; passos: string[]; erro: string }>({ rodando: false, passos: [], erro: '' });
   const fimConversa = useRef<HTMLDivElement>(null);
   const [arrastando, setArrastando] = useState(false);
+  const [respManual, setRespManual] = useState(false);
 
   const carregar = useCallback(async (cid: number) => {
     try {
@@ -245,11 +246,20 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
                 </div>
               )}
               {visao === 'equipe' && dados.agente && <div className="mb-4"><CartaoProposta p={dados.agente} mostrarChamado={false} aoMudar={() => void carregar(id)} /></div>}
+              {visao === 'equipe' && dados.agente && !respManual && (
+                <button type="button" onClick={() => setRespManual(true)} className="toque mb-2 text-sm font-semibold text-suave hover:text-primaria">
+                  Prefere responder você mesmo? Responder manualmente
+                </button>
+              )}
               {visao === 'equipe' && !dados.agente && dados.ia?.resposta && !mensagem && !ia.rodando && (
                 <button type="button" onClick={() => setMensagem(dados.ia?.resposta ?? '')} className="toque mb-3 flex w-full items-start gap-2 rounded-2xl border border-destaque/40 bg-destaque/10 p-3 text-left text-sm text-texto">
                   <Sparkles size={18} className="mt-0.5 shrink-0 text-destaque" aria-hidden="true" />
                   <span><b>A IA já deixou uma sugestão pronta</b> ({dados.ia.status}). Toque para usar no campo e revisar.</span>
                 </button>
+              )}
+              {(!(visao === 'equipe' && dados.agente) || respManual) && (<>
+              {visao === 'equipe' && dados.agente && respManual && (
+                <p className="mb-2 text-sm font-semibold text-suave">Resposta manual (ignora a proposta do agente):</p>
               )}
               <label className="block">
                 <span className="sr-only">Mensagem</span>
@@ -289,6 +299,7 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
                   <Send size={18} aria-hidden="true" /> {enviando ? 'Enviando…' : 'Enviar resposta'}
                 </BotaoPrimario>
               </div>
+              </>)}
               {aviso && <p className="mt-3 text-sm text-suave" role="status">{aviso}</p>}
             </Painel>
             </div>
