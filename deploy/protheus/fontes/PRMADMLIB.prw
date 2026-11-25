@@ -1,5 +1,13 @@
 #include 'protheus.ch'
 
+// Constantes MVC (fwmvcdef.ch nao esta no path deste ambiente).
+#ifndef MODEL_OPERATION_INSERT
+    #define MODEL_OPERATION_INSERT 3
+#endif
+#ifndef MODEL_OPERATION_UPDATE
+    #define MODEL_OPERATION_UPDATE 4
+#endif
+
 /*/{Protheus.doc} PRMADMLIB
 Biblioteca das acoes administrativas do PrimeERP (Prime Hub), chamada pelo
 servico REST PRMADM (fonte PRMADM.prw). Fonte separado para recompilar sem
@@ -70,3 +78,86 @@ Static Function PRMADMUsr(oJson, oResp, cErro)
     EndIf
 
 Return lOk
+
+/*/{Protheus.doc} U_PRMNEWU
+Cria (ou atualiza, se ja existir) um usuario Protheus via FWUSERACCOUNTDATA,
+sem tela. Roda em contexto REST (ambiente ja preparado pelo servidor).
+
+@param  cLogin  Login do usuario (USR_CODIGO)
+@param  cNome   Nome completo (USR_NOME)
+@param  cSenha  Senha em texto (opcional)
+@param  cEmail  E-mail (USR_EMAIL) - opcional
+@param  cErro   (referencia) mensagem de erro, se houver
+
+@author  Kleber Metzger
+@since   25/11/2026
+@version P12
+@obs     PrimeERP - Solucoes em Tecnologia
+/*/
+User Function PRMNEWU(cLogin, cNome, cSenha, cEmail, cErro)
+    Local oModel
+    Local lRet    := .F.
+    Local lExiste
+    Local nOper
+    Local aErro
+    // Ambiente transacional/log que o contexto REST nao inicializa.
+    Private __TTSINUSE := 0
+    Private __TTSKEEP  := .F.
+    Private __TTSPUSH  := {}
+    Private __TTSBREAK := {}
+    Private __CLOGSIGA := ""
+
+    Default cLogin := ""
+    Default cNome  := ""
+    Default cSenha := ""
+    Default cEmail := ""
+    Default cErro  := ""
+    cErro := ""
+
+    If Empty(cLogin)
+        cErro := "Login nao informado"
+        Return .F.
+    EndIf
+    If Empty(cNome)
+        cErro := "Nome nao informado"
+        Return .F.
+    EndIf
+
+    // Ja existe? Entao atualiza; senao, inclui.
+    PswOrder(2)
+    lExiste := PswSeek(AllTrim(cLogin), .T.)
+    If !lExiste
+        PswOrder(1)
+        lExiste := PswSeek(AllTrim(cLogin), .T.)
+    EndIf
+    nOper := IIf(lExiste, MODEL_OPERATION_UPDATE, MODEL_OPERATION_INSERT)
+
+    oModel := FWLoadModel("FWUSERACCOUNTDATA")
+    oModel:SetOperation(nOper)
+    oModel:Activate()
+
+    oModel:SetValue("DATAUSER", "USR_CODIGO", AllTrim(cLogin))
+    oModel:SetValue("DATAUSER", "USR_NOME",   cNome)
+    If !Empty(cSenha)
+        oModel:SetValue("DATAUSER", "USR_PSW",    cSenha)
+        oModel:SetValue("DATAUSER", "USR_PSWCMP", cSenha)
+    EndIf
+    If !Empty(cEmail)
+        oModel:SetValue("DATAUSER", "USR_EMAIL", cEmail)
+    EndIf
+
+    If oModel:VldData()
+        oModel:CommitData()
+        lRet := .T.
+    Else
+        aErro := oModel:GetErrorMessage()
+        cErro := IIf(lExiste, "Falha ao atualizar", "Falha ao criar")
+        If ValType(aErro) == "A" .And. Len(aErro) >= 6
+            cErro += ": " + cValToChar(aErro[6])
+        EndIf
+    EndIf
+
+    oModel:DeActivate()
+    oModel:Destroy()
+
+Return lRet
