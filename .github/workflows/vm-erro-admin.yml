@@ -6,17 +6,20 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: procurar erro de compilacao nos console.log
+      - name: console.log recem-modificados + tdscli
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "== console.log encontrados sob /opt/totvs"
-          mapfile -t LOGS < <(find /opt/totvs -iname 'console*.log' 2>/dev/null)
-          for L in "${LOGS[@]}"; do echo " - $L"; done
+          echo "== console/log modificados nos ultimos 30 min"
+          mapfile -t LOGS < <(find /opt /tmp /var -iname 'console*.log' -mmin -30 2>/dev/null)
+          for L in "${LOGS[@]}"; do echo " * $L ($(date -r "$L" '+%H:%M'))"; done
           for L in "${LOGS[@]}"; do
             echo ""
-            echo "===== $L (ultimas linhas com PRMADM/PRMRSS/erro de compilacao) ====="
-            grep -ainE 'PRMADM|PRMRSSLIB|PRMNEWU|C[0-9]{4}|syntax error|erro de compila|compilation|undefined|was not|duplicat' "$L" 2>/dev/null | grep -aviE 'senha|password' | tail -30
+            echo "===== ULTIMAS 80 LINHAS: $L ====="
+            tail -80 "$L" 2>/dev/null | grep -aviE 'senha|password|USR_PSW|CHKSUM|ULTSPSW'
           done
+          echo ""
+          echo "== onde o tdscli compila/loga (paths no script)"
+          grep -aiE 'console|\.log|appserver|workdir|tmp|patch|rpo|include' /usr/local/bin/primehub-tdscli 2>/dev/null | grep -aviE 'senha|password' | head -40
           R
