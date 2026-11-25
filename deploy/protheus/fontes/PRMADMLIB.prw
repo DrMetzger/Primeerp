@@ -1,13 +1,5 @@
 #include 'protheus.ch'
 
-// Constantes MVC (fwmvcdef.ch nao esta no path deste ambiente).
-#ifndef MODEL_OPERATION_INSERT
-    #define MODEL_OPERATION_INSERT 3
-#endif
-#ifndef MODEL_OPERATION_UPDATE
-    #define MODEL_OPERATION_UPDATE 4
-#endif
-
 /*/{Protheus.doc} PRMADMLIB
 Biblioteca das acoes administrativas do PrimeERP (Prime Hub), chamada pelo
 servico REST PRMADM (fonte PRMADM.prw). Fonte separado para recompilar sem
@@ -96,9 +88,7 @@ sem tela. Roda em contexto REST (ambiente ja preparado pelo servidor).
 /*/
 User Function PRMNEWU(cLogin, cNome, cSenha, cEmail, cErro)
     Local oModel
-    Local lRet    := .F.
-    Local lExiste
-    Local nOper
+    Local lRet := .F.
     Local aErro
     // Ambiente transacional/log que o contexto REST nao inicializa.
     Private __TTSINUSE := 0
@@ -114,32 +104,19 @@ User Function PRMNEWU(cLogin, cNome, cSenha, cEmail, cErro)
     Default cErro  := ""
     cErro := ""
 
-    If Empty(cLogin)
-        cErro := "Login nao informado"
+    If Empty(cLogin) .Or. Empty(cNome)
+        cErro := "Login e nome sao obrigatorios"
         Return .F.
     EndIf
-    If Empty(cNome)
-        cErro := "Nome nao informado"
-        Return .F.
-    EndIf
-
-    // Ja existe? Entao atualiza; senao, inclui.
-    PswOrder(2)
-    lExiste := PswSeek(AllTrim(cLogin), .T.)
-    If !lExiste
-        PswOrder(1)
-        lExiste := PswSeek(AllTrim(cLogin), .T.)
-    EndIf
-    nOper := IIf(lExiste, MODEL_OPERATION_UPDATE, MODEL_OPERATION_INSERT)
 
     oModel := FWLoadModel("FWUSERACCOUNTDATA")
-    oModel:SetOperation(nOper)
+    oModel:SetOperation(3)  // 3 = inclusao (MODEL_OPERATION_INSERT)
     oModel:Activate()
 
     oModel:SetValue("DATAUSER", "USR_CODIGO", AllTrim(cLogin))
-    oModel:SetValue("DATAUSER", "USR_NOME",   cNome)
+    oModel:SetValue("DATAUSER", "USR_NOME", cNome)
     If !Empty(cSenha)
-        oModel:SetValue("DATAUSER", "USR_PSW",    cSenha)
+        oModel:SetValue("DATAUSER", "USR_PSW", cSenha)
         oModel:SetValue("DATAUSER", "USR_PSWCMP", cSenha)
     EndIf
     If !Empty(cEmail)
@@ -151,7 +128,7 @@ User Function PRMNEWU(cLogin, cNome, cSenha, cEmail, cErro)
         lRet := .T.
     Else
         aErro := oModel:GetErrorMessage()
-        cErro := IIf(lExiste, "Falha ao atualizar", "Falha ao criar")
+        cErro := "Falha ao criar usuario"
         If ValType(aErro) == "A" .And. Len(aErro) >= 6
             cErro += ": " + cValToChar(aErro[6])
         EndIf
