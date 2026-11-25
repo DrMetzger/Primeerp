@@ -73,6 +73,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   const [fase, setFase] = useState('');
   const [digitando, setDigitando] = useState('');
   const fim = useRef<HTMLDivElement>(null);
+  const convId = useRef<number | null>(null);
   const [tamanho, setTamanho] = useState(150);
   // Posição (distância da direita e de baixo): arrastável e lembrada.
   const [pos, setPos] = useState<{ d: number; b: number }>({ d: 12, b: 12 });
@@ -165,6 +166,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
   /** Zera a conversa guardada e recomeça com a saudação. */
   function novaConversa() {
     setMensagens([]); setAcoes([]); setDigitando(''); setTexto(''); setAnexos([]);
+    convId.current = null;
     try { localStorage.removeItem(CHAVE_CONVERSA); } catch { /* ignore */ }
     setTimeout(() => abrir(), 50);
   }
@@ -200,9 +202,10 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     try {
       const r = await fetch('/api/assistente', {
         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, tela: contextoDaTela(), ...(enviados.length ? { anexos: enviados } : {}) }),
+        body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, tela: contextoDaTela(), ...(convId.current ? { conversaId: convId.current } : {}), ...(enviados.length ? { anexos: enviados } : {}) }),
       });
-      const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[] };
+      const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[]; conversaId?: number | null };
+      if (corpo.conversaId) convId.current = corpo.conversaId;
       clearInterval(acompanhar);
       setPensando(false); setFase('');
       responder(corpo.texto ?? corpo.erro ?? 'Não consegui responder agora.');

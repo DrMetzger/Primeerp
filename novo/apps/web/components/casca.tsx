@@ -8,7 +8,7 @@ import {
 import { usePathname } from 'next/navigation';
 import { JanelaApk } from './cartao-apk';
 import { type ReactNode, useEffect, useState } from 'react';
-import { Assistente, chamarAssistente } from './assistente/assistente';
+import { Assistente } from './assistente/assistente';
 import { sair, usuarioSalvo } from '@/lib/sessao';
 import { TemaBotao } from './tema-botao';
 
@@ -122,12 +122,12 @@ export function Casca({ tipo, titulo, children, acoes }: { tipo: 'equipe' | 'cli
           </button>
         </li>
         <li>
-          <button type="button" onClick={() => { setAberto(false); chamarAssistente(); }}
+          <a href={tipo === 'equipe' ? '/painel/assistente' : '/cliente/assistente'} onClick={() => setAberto(false)}
             className="toque flex w-full items-center gap-3 rounded-xl px-3 text-left font-medium text-suave transition hover:bg-superficie-alta hover:text-texto">
             <Bot size={20} aria-hidden="true" />
             <span className="flex-1">Assistente</span>
             <span className="rounded-full bg-destaque/15 px-2 py-0.5 text-xs font-semibold text-destaque">IA</span>
-          </button>
+          </a>
         </li>
       </ul>
       {usuario && (

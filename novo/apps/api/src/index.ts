@@ -9,6 +9,7 @@ import { converterRelatorio } from '@primehub/shared';
 import { alvoComSenha, compilarFonte, definirSenhaAlvo, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
+import { apagarConversa, garantirEstruturaAssistente, lerConversa, listarConversas, salvarTroca } from './assistente-conversas';
 import { lerProgresso } from './progresso-agente';
 import { listarChamados } from './chamados';
 import { detalharChamado, detalharCliente, detalharSetor, listarClientes } from './clientes';
@@ -321,14 +322,26 @@ const esquemaAssistente = z.object({
   historico: z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string().max(4000) })).max(20).default([]),
   tela: z.object({ rota: z.string().max(300), titulo: z.string().max(200), texto: z.string().max(8000) }).optional(),
   anexos: z.array(z.object({ nome: z.string().max(160), conteudo: z.string().max(200000) })).max(5).optional(),
+  conversaId: z.number().int().positive().optional(),
 });
 
 app.post('/api/assistente', exigirLogin(), async (c) => {
   const dados = esquemaAssistente.safeParse(await c.req.json().catch(() => null));
   if (!dados.success) return c.json({ erro: 'Escreva sua pergunta.' }, 400);
-  const r = await perguntar(c.get('usuario'), dados.data.historico, dados.data.mensagem, dados.data.tela, dados.data.anexos);
-  return 'erro' in r ? c.json(r, 200) : c.json(r);
+  const usuario = c.get('usuario');
+  const r = await perguntar(usuario, dados.data.historico, dados.data.mensagem, dados.data.tela, dados.data.anexos);
+  if ('erro' in r) return c.json(r, 200);
+  // Guarda a troca no histórico (recuperável depois). Não quebra a resposta se falhar.
+  const conversaId = await salvarTroca(usuario.id, dados.data.conversaId ?? null, dados.data.mensagem, r.texto).catch(() => dados.data.conversaId ?? null);
+  return c.json({ ...r, conversaId });
 });
+
+app.get('/api/assistente/conversas', exigirLogin(), async (c) => c.json(await listarConversas(c.get('usuario').id)));
+app.get('/api/assistente/conversas/:id', exigirLogin(), async (c) => {
+  const conv = await lerConversa(c.get('usuario').id, idDe(c.req.param('id')));
+  return conv ? c.json(conv) : c.json({ erro: 'Conversa não encontrada.' }, 404);
+});
+app.delete('/api/assistente/conversas/:id', exigirLogin(), async (c) => { await apagarConversa(c.get('usuario').id, idDe(c.req.param('id'))); return c.json({ ok: true }); });
 
 // Progresso ao vivo da operação do assistente (gerando/compilando/erro),
 // para o site mostrar o que a IA está fazendo enquanto a resposta não volta.
@@ -387,7 +400,7 @@ if (comando === '--recifrar-cofre') {
     .then((r) => { console.log(`cofre: ${r.abrem} de ${r.total} senha(s) abrem com a chave atual`); process.exit(r.abrem === r.total ? 0 : 2); })
     .catch((e: unknown) => { console.error('cofre: ERRO', e instanceof Error ? e.message : e); process.exit(1); });
 }
-if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); void garantirEstruturaCompilacao().catch((e: unknown) => console.error('compilacao: estrutura', e instanceof Error ? e.message : e)); }
+if (!comando) { void garantirEstrutura(); void garantirEstruturaAgente().catch((e: unknown) => console.error('agente: estrutura', e instanceof Error ? e.message : e)); void garantirEstruturaCompilacao().catch((e: unknown) => console.error('compilacao: estrutura', e instanceof Error ? e.message : e)); void garantirEstruturaAssistente().catch((e: unknown) => console.error('assistente: estrutura', e instanceof Error ? e.message : e)); }
 // Processa chamados pendentes de tempos em tempos: todo chamado do cliente sem
 // resposta da equipe vira um rascunho na Mesa do agente (nada vai ao cliente sozinho).
 if (!comando) {
