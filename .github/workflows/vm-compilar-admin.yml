@@ -1,0 +1,17 @@
+name: VM - compilar PRMADM (admin) na base
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: compilar PRMRSSLIB + PRMADMLIB + PRMADM na base
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          tar -czf /tmp/adm-src.tgz -C deploy/protheus/fontes PRMRSSLIB.prw PRMADMLIB.prw PRMADM.prw
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/adm.tgz' || true
+          sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/adm-src.tgz "$USER_VM@$VM_IP:/tmp/adm.tgz"
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/fontes-admin && mkdir -p /tmp/fontes-admin && tar -xzf /tmp/adm.tgz -C /tmp/fontes-admin && systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-admin 2>/dev/null | tail -20"'
