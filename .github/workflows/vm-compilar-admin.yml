@@ -28,6 +28,10 @@ jobs:
           echo "== compilando PRMRSSLIB + PRMADMLIB + PRMADM na base"
           rm -rf /tmp/fontes-admin && mkdir -p /tmp/fontes-admin && tar -xzf /tmp/adm.tgz -C /tmp/fontes-admin
           systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-admin 2>/dev/null | tail -5
+          echo "== warning/erro do compilador (console do appserver principal)"
+          CON=/opt/totvs/protheus12/protheus/bin/appserver/console.log
+          grep -anE 'PRMRSSLIB|PRMADM|PRMNEWU|\.PRW[:(][0-9]+|WARNING|W[0-9]{4}|warning|error C|C[0-9]{4}|unused|not used|never used|redefin|already def' "$CON" 2>/dev/null \
+            | grep -aviE 'senha|password|USR_PSW|CHKSUM|ULTSPSW|ciphertext' | tail -25
           echo "== religando AppServer REST"
           systemctl start totvsappserver-rest 2>/dev/null
           sleep 3

@@ -108,9 +108,9 @@ Retorna .T./.F. e devolve a mensagem de erro por referencia.
 /*/
 User Function PRMNEWU(cLogin, cNome, cSenha, cEmail, cErro)
     Local oModel
-    Local lRet   := .F.
-    Local lExiste := .F.
-    Local nOper  := MODEL_OPERATION_INSERT
+    Local lRet    := .F.
+    Local lExiste
+    Local nOper
     Local aErro
     // Ambiente transacional/log que o contexto REST nao inicializa.
     Private __TTSINUSE := 0
