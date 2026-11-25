@@ -1,0 +1,28 @@
+name: VM - quem trava o RPO
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: processos e locks do RPO
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== processos appserver / tds / dbaccess"
+          ps -eo pid,etime,rss,cmd 2>/dev/null | grep -aiE 'appserver|tds|dbaccess' | grep -aiv grep | head -40
+          echo ""
+          echo "== arquivos .rpo"
+          find /opt/totvs -iname '*.rpo' 2>/dev/null | head
+          echo ""
+          echo "== quem segura cada .rpo (fuser)"
+          for R in $(find /opt/totvs -iname '*.rpo' 2>/dev/null); do
+            echo "--- $R"
+            fuser -v "$R" 2>&1 | head
+          done
+          echo ""
+          echo "== build/cli appserver do tdscli ainda vivo?"
+          ps -eo pid,etime,cmd 2>/dev/null | grep -aiE 'exec.ini|val.ini|tdscli|--log-file' | grep -aiv grep | head
+          R
