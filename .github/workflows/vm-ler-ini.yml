@@ -1,0 +1,27 @@
+name: VM - ler config REST dos ini
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: dump das secoes REST dos appserver.ini
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          BIN=/opt/totvs/protheus12/protheus/bin/appserver
+          mascara() { sed -E 's/(senha|password|psw|key|secret|token)[^=]*=.*/\1=<oculto>/Ig'; }
+          for INI in "$BIN/appserver.ini" "$BIN/appserver_rest.ini"; do
+            echo "########################## $INI"
+            [ -f "$INI" ] || { echo "(nao existe)"; continue; }
+            # secoes relevantes a REST/HTTP/porta/onstart/jobs
+            awk 'BEGIN{IGNORECASE=1}
+                 /^\[/{sec=$0; p=(sec ~ /onstart|http|rest|job|uri|webapp|tcp|environment|general|servicos|v11|hair/)}
+                 p{print}' "$INI" | mascara | head -120
+            echo ""
+          done
+          echo "== portas ouvindo (ss)"
+          ss -tlnp 2>/dev/null | grep -aiE '8095|8080|1234|1235|8090|:80 |:443' | head
+          R
