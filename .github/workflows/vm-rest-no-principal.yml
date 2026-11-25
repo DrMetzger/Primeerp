@@ -29,13 +29,13 @@ jobs:
           pkill -f 'appserver_rest.ini' 2>/dev/null; sleep 2
           echo "== reiniciando o appserver principal"
           systemctl restart totvsappserver 2>/dev/null
-          echo "== aguardando REST subir (ate 90s)"
+          echo "== aguardando REST subir (ate 210s; ONSTART RefreshInterval=120)"
           OK=0
-          for i in $(seq 1 18); do
-            sleep 5
+          for i in $(seq 1 30); do
+            sleep 7
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8095/rest/ 2>/dev/null)
             PORT=$(ss -tlnH 2>/dev/null | grep -c ':8095 ')
-            echo "  t=$((i*5))s  8095_listen=$PORT  http=$CODE"
+            echo "  t=$((i*7))s  8095_listen=$PORT  http=$CODE"
             [ "$PORT" -ge 1 ] && { OK=1; break; }
           done
           if [ "$OK" = "1" ]; then
