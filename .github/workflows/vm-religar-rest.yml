@@ -1,0 +1,31 @@
+name: VM - religar REST dedicado (restaurar 8095)
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: restart apenas do REST dedicado e esperar 8095
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== restart SO do REST dedicado (principal/base intactos)"
+          systemctl restart totvsappserver-rest 2>/dev/null
+          OK=0
+          for i in $(seq 1 10); do
+            sleep 15
+            P=$(ss -tlnH 2>/dev/null | grep -c ':8095 ')
+            C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8095/rest/ 2>/dev/null)
+            echo "  +$((i*15))s  8095_listen=$P  http=$C"
+            [ "$P" -ge 1 ] && { OK=1; break; }
+          done
+          echo ""
+          if [ "$OK" = "1" ]; then
+            echo "== 8095 DE PE. Reset de senha restaurado."
+          else
+            echo "== 8095 ainda NAO subiu. Causa no console_rest:"
+            tail -120 /opt/totvs/protheus12/protheus/bin/appserver/console_rest.log 2>/dev/null | grep -aiE 'httpv11|httprest|8095|HTTP_START|fail|error|bind|address|environment|rpo|could not' | grep -aviE 'senha|password' | tail -20
+          fi
+          R
