@@ -223,8 +223,8 @@ export function ChamadoDetalheTela({ visao }: { visao: Visao }) {
             <div className="relative"
               onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setArrastando(true); } }}
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArrastando(false); }}
-              onDrop={(e) => { e.preventDefault(); setArrastando(false); const f = Array.from(e.dataTransfer.files); if (f.length) setAnexos((l) => [...l, ...f]); }}
-              onPaste={(e) => { const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); setAnexos((l) => [...l, ...f]); } }}>
+              onDrop={(e) => { e.preventDefault(); setArrastando(false); const f = Array.from(e.dataTransfer.files); if (f.length) { setRespManual(true); setAnexos((l) => [...l, ...f]); } }}
+              onPaste={(e) => { const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); setRespManual(true); setAnexos((l) => [...l, ...f]); } }}>
             {arrastando && (
               <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-primaria bg-primaria/15 text-primaria backdrop-blur-sm">
                 <UploadCloud size={40} aria-hidden="true" /><p className="font-bold">Solte aqui para anexar</p><p className="text-sm">Imagens, vídeos, PDFs, planilhas, fontes…</p>
