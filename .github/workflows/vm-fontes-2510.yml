@@ -1,0 +1,31 @@
+name: VM - mapear fontes 2510
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: localizar pasta de fontes e includes do 2510
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== raiz /opt/totvs/fontes"
+          ls -la /opt/totvs/fontes 2>/dev/null | head -30
+          echo ""
+          echo "== diretorios 'include' sob /opt/totvs (com contagem de .ch)"
+          for D in $(find /opt/totvs -type d -iname 'include*' 2>/dev/null | head -20); do
+            N=$(find "$D" -maxdepth 1 -iname '*.ch' 2>/dev/null | wc -l)
+            echo "  $D  (.ch: $N)"
+          done
+          echo ""
+          echo "== onde estao os fontes 2510 (dirs com muitos .prw)"
+          find /opt/totvs/fontes -type d 2>/dev/null | while read D; do
+            N=$(find "$D" -maxdepth 1 -iname '*.prw' 2>/dev/null | wc -l)
+            [ "$N" -gt 20 ] && echo "  $D  (.prw: $N)"
+          done | head -20
+          echo ""
+          echo "== include atual cadastrado no alvo base (tdscli)"
+          grep -anE 'include|AINC|fontes' /usr/local/bin/primehub-tdscli 2>/dev/null | grep -aviE 'senha|password' | head
+          R
