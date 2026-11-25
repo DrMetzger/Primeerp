@@ -6,19 +6,17 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: status REST + saida.txt do tdscli
+      - name: dump saida/exec do tdscli
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "== AppServer REST ativo?"
-          systemctl is-active totvsappserver-rest 2>/dev/null || echo "(inativo!)"
-          pgrep -af 'appserver_rest.ini' | head -1 || echo "(processo REST ausente!)"
+          echo "######## saida.txt (cru) ########"
+          sed -e 's/[0-9a-fA-F]\{64,\}/<hex>/g' /opt/totvs/tdscli/compilar/saida.txt 2>/dev/null | grep -aviE 'password|senha' | tail -60
           echo ""
-          echo "== saida/exec/cli do tdscli (ultimo compile)"
-          for f in /opt/totvs/tdscli/compilar/saida.txt /opt/totvs/tdscli/compilar/exec.log /opt/totvs/tdscli/compilar/cli.log; do
-            echo ""
-            echo "===== $f ($(date -r "$f" '+%H:%M' 2>/dev/null)) ====="
-            grep -aiE 'PRMADM|PRMRSSLIB|PRMNEWU|error|erro|C[0-9]{4}|syntax|undefined|was not|cannot|invalid|duplicat|open repository|temporarily|build' "$f" 2>/dev/null | grep -aviE 'senha|password|ciphertext' | tail -30
-          done
+          echo "######## exec.log (cru) ########"
+          sed -e 's/[0-9a-fA-F]\{64,\}/<hex>/g' /opt/totvs/tdscli/compilar/exec.log 2>/dev/null | grep -aviE 'password|senha' | tail -40
+          echo ""
+          echo "######## problems*/*.json se houver ########"
+          find /opt/totvs/tdscli /tmp -iname 'problem*' -mmin -60 2>/dev/null | head
           R
