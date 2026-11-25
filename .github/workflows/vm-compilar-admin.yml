@@ -7,11 +7,29 @@ jobs:
     runs-on: [self-hosted, vm]
     steps:
       - uses: actions/checkout@v4
-      - name: compilar PRMRSSLIB + PRMADMLIB + PRMADM na base
+      - name: parar REST, compilar admin, religar REST
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           tar -czf /tmp/adm-src.tgz -C deploy/protheus/fontes PRMRSSLIB.prw PRMADMLIB.prw PRMADM.prw
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo rm -f /tmp/adm.tgz' || true
           sshpass -e scp -o StrictHostKeyChecking=accept-new /tmp/adm-src.tgz "$USER_VM@$VM_IP:/tmp/adm.tgz"
-          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -c "rm -rf /tmp/fontes-admin && mkdir -p /tmp/fontes-admin && tar -xzf /tmp/adm.tgz -C /tmp/fontes-admin && systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-admin 2>/dev/null | tail -20"'
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set +e
+          echo "== parando AppServer REST (libera o lock do custom.rpo)"
+          systemctl stop totvsappserver-rest 2>/dev/null
+          # garante que o processo do appserver_rest.ini saiu
+          for i in 1 2 3 4 5; do
+            P=$(pgrep -af 'appserver_rest.ini' | awk '{print $1}')
+            [ -z "$P" ] && break
+            echo "  aguardando REST sair (pid $P)..."; sleep 2
+          done
+          pgrep -af 'appserver_rest.ini' && { echo "  forcando kill"; pkill -f 'appserver_rest.ini'; sleep 2; }
+          echo "== compilando PRMRSSLIB + PRMADMLIB + PRMADM na base"
+          rm -rf /tmp/fontes-admin && mkdir -p /tmp/fontes-admin && tar -xzf /tmp/adm.tgz -C /tmp/fontes-admin
+          systemd-run --scope --quiet -p MemoryMax=2G /usr/local/bin/primehub-tdscli compilar base /tmp/fontes-admin 2>/dev/null | tail -5
+          echo "== religando AppServer REST"
+          systemctl start totvsappserver-rest 2>/dev/null
+          sleep 3
+          systemctl is-active totvsappserver-rest 2>/dev/null || echo "  (REST nao esta active - conferir)"
+          R
