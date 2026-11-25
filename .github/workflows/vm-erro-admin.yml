@@ -1,0 +1,22 @@
+name: VM - ver erro compilacao PRMADM
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: procurar erro de compilacao nos console.log
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          echo "== console.log encontrados sob /opt/totvs"
+          mapfile -t LOGS < <(find /opt/totvs -iname 'console*.log' 2>/dev/null)
+          for L in "${LOGS[@]}"; do echo " - $L"; done
+          for L in "${LOGS[@]}"; do
+            echo ""
+            echo "===== $L (ultimas linhas com PRMADM/PRMRSS/erro de compilacao) ====="
+            grep -ainE 'PRMADM|PRMRSSLIB|PRMNEWU|C[0-9]{4}|syntax error|erro de compila|compilation|undefined|was not|duplicat' "$L" 2>/dev/null | grep -aviE 'senha|password' | tail -30
+          done
+          R
