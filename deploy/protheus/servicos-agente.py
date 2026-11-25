@@ -36,6 +36,27 @@ def sh(*args, timeout=30):
     return r.returncode, r.stdout, r.stderr
 
 
+def parar_rest_para_compilar(slug):
+    """O AppServer REST da VM (totvsappserver-rest) mantem o custom.rpo da BASE
+    aberto e isso trava o build do tdscli (COMPILEERROR-300 Failed to open
+    repository). Antes de compilar NA BASE, paramos o REST; religamos depois.
+    Para clientes (compilacao remota no servidor deles) nao mexe em nada."""
+    if slug != "base":
+        return False
+    sh("systemctl", "stop", "totvsappserver-rest", timeout=30)
+    for _ in range(8):
+        rc, _, _ = sh("pgrep", "-f", "appserver_rest.ini", timeout=10)
+        if rc != 0:
+            break
+        time.sleep(1)
+    sh("pkill", "-f", "appserver_rest.ini", timeout=10)
+    return True
+
+
+def religar_rest():
+    sh("systemctl", "start", "totvsappserver-rest", timeout=30)
+
+
 def portas_abertas():
     _, out, _ = sh("ss", "-tlnH")
     return {int(m.group(1)) for m in re.finditer(r":(\d+)\s", out + " ")}
@@ -229,6 +250,7 @@ class Agente(BaseHTTPRequestHandler):
                 return self.responder(400, {"ok": False, "erro": "informe slug e arquivos"})
             import base64, tempfile, shutil
             d = tempfile.mkdtemp(prefix="compilar-")
+            parou_rest = False
             try:
                 for a in arquivos[:50]:
                     nome = os.path.basename(str(a.get("nome", "")))[:80]
@@ -236,6 +258,8 @@ class Agente(BaseHTTPRequestHandler):
                         continue
                     with open(os.path.join(d, nome), "wb") as fp:
                         fp.write(base64.b64decode(str(a.get("conteudo_base64", ""))))
+                # Libera o lock do custom.rpo da base antes de compilar (e religa no finally).
+                parou_rest = parar_rest_para_compilar(slug)
                 _, out, _ = sh("systemd-run", "--scope", "--quiet", "-p", "MemoryMax=2G",
                                "/usr/local/bin/primehub-tdscli", "compilar", slug, d, timeout=260)
                 linha = next((l for l in out.splitlines() if l.strip().startswith("{")), "")
@@ -248,6 +272,8 @@ class Agente(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.responder(200, {"ok": False, "erro": str(e)[:200]})
             finally:
+                if parou_rest:
+                    religar_rest()
                 shutil.rmtree(d, ignore_errors=True)
         if partes == ["reset", "senha"]:
             # Reseta a senha de um usuario Protheus chamando a API REST do
