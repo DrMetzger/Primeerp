@@ -18,7 +18,7 @@ function minutosDesde(s: string): number { try { return Math.max(0, Math.round((
 function haQuanto(min: number): string { return min < 1 ? 'agora' : min < 60 ? `há ${min} min` : min < 1440 ? `há ${Math.round(min / 60)}h` : `há ${Math.round(min / 1440)}d`; }
 
 /** Quadro (kanban) do agente: cada chamado aparece na coluna do estágio atual. */
-function Quadro({ etapas }: { etapas: EtapaPipeline[] }) {
+function Quadro({ etapas, onDestravar }: { etapas: EtapaPipeline[]; onDestravar: (propostaId: number) => void }) {
   const porColuna = (fases: string[]) => etapas.filter((e) => fases.includes(e.fase));
   return (
     <section className="rounded-3xl border border-borda bg-superficie p-4 shadow-sm">
@@ -38,13 +38,20 @@ function Quadro({ etapas }: { etapas: EtapaPipeline[] }) {
                   // Trabalhando/Compilando devia ser rápido: passou de 15 min, provavelmente travou.
                   const travou = ['trabalhando', 'compilando'].includes(col.id) && min > 15;
                   return (
-                    <Link key={e.chamadoId} href={`/painel/chamado?id=${e.chamadoId}`}
-                      className="toque block rounded-xl border border-borda bg-superficie p-2.5 text-left transition hover:border-primaria/60"
+                    <div key={e.chamadoId} className="rounded-xl border border-borda bg-superficie p-2.5"
                       style={{ borderLeft: `3px solid ${travou ? '#ef4444' : (COR_PRIO[e.prioridade] ?? '#64748b')}` }}>
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-primaria">#{e.chamadoId} · <span className="truncate text-suave">{e.cliente}</span></p>
-                      <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-texto">{e.chamadoTitulo}</p>
-                      <p className={`mt-1 text-[11px] ${travou ? 'font-semibold text-perigo' : 'text-suave'}`}>{travou ? `⚠ parado ${haQuanto(min)}` : haQuanto(min)}</p>
-                    </Link>
+                      <Link href={`/painel/chamado?id=${e.chamadoId}`} className="toque block text-left hover:opacity-80">
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-primaria">#{e.chamadoId} · <span className="truncate text-suave">{e.cliente}</span></p>
+                        <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-texto">{e.chamadoTitulo}</p>
+                        <p className={`mt-1 text-[11px] ${travou ? 'font-semibold text-perigo' : 'text-suave'}`}>{travou ? `⚠ parado ${haQuanto(min)}` : haQuanto(min)}</p>
+                      </Link>
+                      {travou && e.propostaId && (
+                        <button type="button" onClick={() => onDestravar(e.propostaId as number)}
+                          className="toque mt-2 w-full rounded-lg border border-perigo/50 bg-perigo/10 px-2 py-1 text-[11px] font-bold text-perigo hover:bg-perigo/20">
+                          Destravar (voltar p/ revisar)
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
                 {cards.length === 0 && <p className="px-1 text-[11px] text-suave/60">—</p>}
@@ -69,6 +76,10 @@ export default function PaginaAgente() {
     return api<PropostaAgente[]>('/api/agente/mesa').then(setItens).catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Não consegui abrir a mesa.'));
   }, []);
   useEffect(() => { void carregar(); const t = setInterval(() => void carregar(), 20_000); return () => clearInterval(t); }, [carregar]);
+  const destravar = useCallback((propostaId: number) => {
+    if (!confirm('Destravar essa execução? Ela volta para revisão (rascunho) e sai de "Trabalhando".')) return;
+    void api(`/api/agente/propostas/${propostaId}/cancelar`, { method: 'POST', body: '{}' }).then(() => void carregar()).catch(() => void carregar());
+  }, [carregar]);
   const revisar = itens?.filter((p) => p.status === 'rascunho') ?? [];
   const fazendo = itens?.filter((p) => p.status === 'aprovado_execucao') ?? [];
   return (
@@ -84,7 +95,7 @@ export default function PaginaAgente() {
           <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-sm font-semibold text-violet-500"><Hammer size={15} aria-hidden="true" /> {fazendo.length} em execução</span>
         </div>
 
-        {pipeline.length > 0 && <Quadro etapas={pipeline} />}
+        {pipeline.length > 0 && <Quadro etapas={pipeline} onDestravar={destravar} />}
 
         {atividades.length > 0 && (
           <section className="rounded-3xl border border-borda bg-superficie p-5 shadow-sm">
