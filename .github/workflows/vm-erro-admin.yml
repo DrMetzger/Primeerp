@@ -6,18 +6,13 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: contexto apos Compiling PRMRSSLIB
+      - name: contexto apos Compiling PRMADMLIB
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           CON=/opt/totvs/protheus12/protheus/bin/appserver/console.log
-          echo "== 45 linhas apos a ULTIMA 'Compiling PRMRSSLIB.prw'"
-          N=$(grep -an 'Compiling PRMRSSLIB.prw' "$CON" | tail -1 | cut -d: -f1)
-          echo "(linha $N)"
-          sed -n "${N},$((N+45))p" "$CON" 2>/dev/null | sed -e 's/[0-9a-fA-F]\{40,\}/<hex>/g' | grep -aviE 'senha|password|USR_PSW|ULTSPSW'
-          echo ""
-          echo "== e apos a ultima 'Compiling PRMADM' para comparar"
-          M=$(grep -an 'Compiling PRMADM' "$CON" | tail -1 | cut -d: -f1)
-          sed -n "${M},$((M+10))p" "$CON" 2>/dev/null | grep -aviE 'senha|password'
+          N=$(grep -an 'Compiling PRMADMLIB.prw' "$CON" | tail -1 | cut -d: -f1)
+          echo "(ultima Compiling PRMADMLIB.prw na linha $N)"
+          sed -n "${N},$((N+40))p" "$CON" 2>/dev/null | sed -e 's/[0-9a-fA-F]\{40,\}/<hex>/g' | grep -aviE 'senha|password|USR_PSW|ULTSPSW|multiport|unrecognized|licenseserver|NOTIFY THREAD'
           R
