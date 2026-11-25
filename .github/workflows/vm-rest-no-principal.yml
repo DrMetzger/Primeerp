@@ -14,50 +14,21 @@ jobs:
           set +e
           BIN=/opt/totvs/protheus12/protheus/bin/appserver
           INI=$BIN/appserver.ini
-          TS=$(date +%Y%m%d-%H%M%S)
-          BK=$INI.bak-$TS
+          BK=$INI.bak-$(date +%Y%m%d-%H%M%S)
           cp -a "$INI" "$BK"
           echo "backup: $BK"
-
           if grep -qiE '^\[HTTPREST\]' "$INI"; then
             echo "appserver.ini JA tem [HTTPREST] — nao altero."
           else
-            cat >> "$INI" <<'INIEOF'
-
-[ONSTART]
-Jobs=HTTPJOB
-RefreshInterval=120
-
-[HTTPJOB]
-Main=HTTP_START
-Environment=PRIMEERP
-
-[HTTPV11]
-Enable=1
-Sockets=HTTPREST
-
-[HTTPREST]
-Port=8095
-URIs=HTTPURI
-Security=0
-
-[HTTPURI]
-URL=/rest
-CORSEnable=1
-AllowOrigin=*
-PUBLIC=prmrss,/prmrss,prmadm,/prmadm
-INIEOF
+            printf '%s\n' '' '[ONSTART]' 'Jobs=HTTPJOB' 'RefreshInterval=120' '' '[HTTPJOB]' 'Main=HTTP_START' 'Environment=PRIMEERP' '' '[HTTPV11]' 'Enable=1' 'Sockets=HTTPREST' '' '[HTTPREST]' 'Port=8095' 'URIs=HTTPURI' 'Security=0' '' '[HTTPURI]' 'URL=/rest' 'CORSEnable=1' 'AllowOrigin=*' 'PUBLIC=prmrss,/prmrss,prmadm,/prmadm' >> "$INI"
             echo "REST adicionado ao principal."
           fi
-
           echo "== parando e DESABILITANDO o REST dedicado (libera 8095 e o RPO)"
           systemctl stop totvsappserver-rest 2>/dev/null
           systemctl disable totvsappserver-rest 2>/dev/null
           pkill -f 'appserver_rest.ini' 2>/dev/null; sleep 2
-
           echo "== reiniciando o appserver principal"
           systemctl restart totvsappserver 2>/dev/null
-
           echo "== aguardando REST subir (ate 90s)"
           OK=0
           for i in $(seq 1 18); do
@@ -65,12 +36,10 @@ INIEOF
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8095/rest/ 2>/dev/null)
             PORT=$(ss -tlnH 2>/dev/null | grep -c ':8095 ')
             echo "  t=$((i*5))s  8095_listen=$PORT  http=$CODE"
-            if [ "$PORT" -ge 1 ]; then OK=1; break; fi
+            [ "$PORT" -ge 1 ] && { OK=1; break; }
           done
-
           if [ "$OK" = "1" ]; then
             echo "== SUCESSO: principal servindo REST na 8095. REST dedicado aposentado."
-            echo "== APPMON recente:"
             tail -120 $BIN/console.log 2>/dev/null | grep -aiE 'APPMON|Invalid REST Port|REST on environment' | tail -6
           else
             echo "== FALHA: REST nao subiu. ROLLBACK."
