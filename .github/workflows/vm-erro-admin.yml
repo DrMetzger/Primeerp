@@ -6,17 +6,16 @@ jobs:
   vm:
     runs-on: [self-hosted, vm]
     steps:
-      - name: dump saida/exec do tdscli
+      - name: warning do PRMRSSLIB no console do appserver
         env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
         run: |
           sudo apt-get install -y -qq sshpass >/dev/null
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
-          echo "######## saida.txt (cru) ########"
-          sed -e 's/[0-9a-fA-F]\{64,\}/<hex>/g' /opt/totvs/tdscli/compilar/saida.txt 2>/dev/null | grep -aviE 'password|senha' | tail -60
-          echo ""
-          echo "######## exec.log (cru) ########"
-          sed -e 's/[0-9a-fA-F]\{64,\}/<hex>/g' /opt/totvs/tdscli/compilar/exec.log 2>/dev/null | grep -aviE 'password|senha' | tail -40
-          echo ""
-          echo "######## problems*/*.json se houver ########"
-          find /opt/totvs/tdscli /tmp -iname 'problem*' -mmin -60 2>/dev/null | head
+          for L in $(find /opt/totvs -iname 'console*.log' -mmin -20 2>/dev/null); do
+            echo "===== $L ====="
+            # ultimas ocorrencias de PRMRSSLIB/PRMADM + warnings/erros com numero de linha
+            grep -anE 'PRMRSSLIB|PRMADM|PRMNEWU|\.PRW[:(][0-9]+|WARNING|W[0-9]{4}|ERROR|C[0-9]{4}|warning|error|unused|not used|never|redefin|already' "$L" 2>/dev/null \
+              | grep -aviE 'senha|password|USR_PSW|CHKSUM|ULTSPSW|ciphertext|multiport|unrecognized' | tail -40
+            echo ""
+          done
           R
