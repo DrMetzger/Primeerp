@@ -1,0 +1,23 @@
+name: VM - startup completo do REST
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: console_rest.log inicio ao fim do ultimo boot
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          BIN=/opt/totvs/protheus12/protheus/bin/appserver
+          C=$BIN/console_rest.log
+          echo "== secao [PRIMEERP]/environment no appserver_rest.ini"
+          awk 'BEGIN{IGNORECASE=1} /^\[/{s=$0; p=(s ~ /primeerp|environment|rootpath|startpath|rpo|dbaccess|include/)} p{print}' "$BIN/appserver_rest.ini" 2>/dev/null | sed -E 's/(senha|password|psw|key|secret)[^=]*=.*/\1=<oculto>/Ig' | head -40
+          echo ""
+          echo "== ULTIMO boot do console_rest (da ultima linha 'Starting' pra frente)"
+          N=$(grep -anE 'Starting Application|Server Start Time|Build date' "$C" 2>/dev/null | tail -1 | cut -d: -f1)
+          [ -z "$N" ] && N=1
+          sed -n "${N},$ p" "$C" 2>/dev/null | sed -E 's/[0-9a-fA-F]{40,}/<hex>/g; s/(senha|password|psw)[^=]*=.*/\1=<oculto>/Ig' | grep -aiE 'environment|rootpath|startpath|rpo|http|rest|8095|port|job|error|erro|fail|not been|bind|dbaccess' | head -50
+          R
