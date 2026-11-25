@@ -595,16 +595,31 @@ async function rascunhoIA(det: Record<string, any>, temFonte: boolean): Promise<
   if (!chave) return padrao;
   const conversa: any[] = det.conversa ?? [];
   const parecidos: any[] = det.chamadosParecidosResolvidos ?? [];
-  const sistema = `Você escreve a resposta de um chamado em nome da equipe da PrimeERP (consultoria TOTVS Protheus). Portugues do Brasil, cordial e direto, TEXTO PURO sem markdown. Comece cumprimentando "${nome || 'Olá'}". Fale em primeira pessoa do plural (verificamos, preparamos). NUNCA mencione IA, robô, assistente, modelo ou Gemini; nunca afirme ser humano. Não invente rotina, parâmetro (MV_), tabela ou prazo. ${temFonte ? 'Já convertemos o fonte para User Function (segue em anexo): diga que enviamos o fonte convertido, que podemos gerar a atualização (patch) para aplicar, e peça para testar em ambiente de teste primeiro.' : 'Dê a melhor orientação técnica possível, ou peça com objetividade as informações que faltam.'} No máximo ~150 palavras. Não assine.`;
-  const contexto = `Chamado: ${det.chamado?.titulo}\nDescrição: ${String(det.chamado?.descricao ?? '').slice(0, 1500)}\n\nÚltimas mensagens:\n${conversa.slice(-5).map((m) => `${m.de}: ${m.mensagem}`).join('\n').slice(0, 2000)}\n\nCasos parecidos já resolvidos pela equipe:\n${parecidos.map((s) => `- ${s.titulo}: ${(s.respostasEquipe ?? []).join(' ').slice(0, 300)}`).join('\n').slice(0, 1500)}`;
+  const sistema = `Você é um consultor sênior da PrimeERP (consultoria TOTVS Protheus) respondendo um cliente por escrito, em nome da equipe. Escreva como uma PESSOA de verdade que LEU o chamado: natural, gentil e seguro, nada de robô nem de texto-padrão. Português do Brasil, texto puro (sem markdown, sem asteriscos).
+
+Como escrever:
+- Cumprimente a pessoa pelo nome ("${nome || 'Olá'}") de um jeito caloroso e varie o início (não comece sempre igual).
+- Mostre que entendeu o problema DELA, com as palavras dela, citando a rotina/assunto específico do chamado — nunca frases vagas como "verificamos sua solicitação a respeito do...".
+- Fale em primeira pessoa do plural (vimos, preparamos, vamos). Seja específico e útil: dê a orientação técnica que você tem certeza, ou peça de forma objetiva só o que falta (print do erro, código da rotina, exemplo), explicando por que ajuda.
+- Feche com um próximo passo claro e um tom acolhedor. Não prometa prazo.
+- Escreva a mensagem COMPLETA, de 2 a 4 parágrafos curtos. Nunca pare no meio de uma frase.
+
+Proibido: mencionar IA, robô, assistente, modelo ou Gemini; afirmar ser humano; inventar rotina, parâmetro MV_, tabela ou prazo; assinar no fim.
+${temFonte ? 'Contexto: já convertemos o fonte para User Function (vai em anexo). Diga que enviamos o fonte convertido, que podemos gerar a atualização (patch) para aplicar, e peça para testar em ambiente de teste primeiro.' : ''}`;
+  const contexto = `Chamado: ${det.chamado?.titulo}\nDescrição do cliente: ${String(det.chamado?.descricao ?? '').slice(0, 1800)}\n\nÚltimas mensagens:\n${conversa.slice(-5).map((m) => `${m.de}: ${m.mensagem}`).join('\n').slice(0, 2000)}\n\nComo a equipe já respondeu casos parecidos (use como referência de tom e solução):\n${parecidos.map((s) => `- ${s.titulo}: ${(s.respostasEquipe ?? []).join(' ').slice(0, 300)}`).join('\n').slice(0, 1500)}`;
   try {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': chave },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: contexto }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 600 } }),
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: contexto }] }],
+        generationConfig: { temperature: 0.65, maxOutputTokens: 1200, thinkingConfig: { thinkingBudget: 0 } } }),
       signal: AbortSignal.timeout(30_000),
     });
     const j = (await r.json()) as any;
-    const t = String((j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join('')).replace(/\*\*/g, '').trim();
-    return t.length >= 20 ? t : padrao;
+    const cand = j?.candidates?.[0];
+    const t = String((cand?.content?.parts ?? []).map((p: any) => p.text).join('')).replace(/\*\*/g, '').trim();
+    // Se veio vazio ou cortado no meio (sem pontuação final), usa o padrão em vez de mandar texto truncado.
+    if (t.length < 20) return padrao;
+    if (cand?.finishReason === 'MAX_TOKENS' && !/[.!?…)]\s*$/.test(t)) return padrao;
+    return t;
   } catch { return padrao; }
 }
