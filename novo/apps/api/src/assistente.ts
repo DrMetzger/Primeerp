@@ -2,7 +2,7 @@ import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
 import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
-import { criarUsuarioProtheus, podePainelVm, resetarSenhaProtheus } from './vm-servicos';
+import { buscarFontesProtheus, criarUsuarioProtheus, lerFonteProtheus, podePainelVm, resetarSenhaProtheus } from './vm-servicos';
 import { marcarProgresso } from './progresso-agente';
 
 /**
@@ -194,6 +194,36 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
   },
   {
     declaracao: {
+      name: 'buscar_fonte',
+      description: 'SÓ PARA ADMINISTRADORES. Procura fontes (.prw/.tlpp) na PASTA DE FONTES do Protheus 2510 por nome parcial (ex.: "MATR440", "FAT"). Use para achar o fonte de um relatório/rotina padrão pelo nome antes de ler/converter, quando a pessoa não anexou o arquivo.',
+      parameters: { type: 'OBJECT', properties: { termo: { type: 'STRING', description: 'parte do nome do fonte, ex.: MATR440' } }, required: ['termo'] },
+    },
+    executar: async (u, a) => {
+      if (!podeCompilacao(u)) return { erro: 'Buscar fontes é só para administradores.' };
+      const r = await buscarFontesProtheus(u.nome, txt(a, 'termo'));
+      if (!r.ok) return { erro: r.erro || 'não consegui buscar' };
+      return { total: r.total ?? 0, fontes: (r.fontes ?? []).slice(0, 30) };
+    },
+  },
+  {
+    declaracao: {
+      name: 'ler_fonte',
+      description: 'SÓ PARA ADMINISTRADORES. Lê o conteúdo de um fonte da PASTA DE FONTES do Protheus 2510, por nome (ex.: "MATR440") ou pelo caminho exato devolvido por buscar_fonte. Use para pegar um relatório/rotina padrão e então convertê-lo ou alterá-lo, sem precisar que a pessoa cole/anexe.',
+      parameters: { type: 'OBJECT', properties: {
+        nome: { type: 'STRING', description: 'nome do fonte, ex.: MATR440 ou MATR440.prw' },
+        caminho: { type: 'STRING', description: 'caminho exato (opcional, de buscar_fonte)' },
+      } },
+    },
+    executar: async (u, a) => {
+      if (!podeCompilacao(u)) return { erro: 'Ler fontes é só para administradores.' };
+      const r = await lerFonteProtheus(u.nome, txt(a, 'nome'), txt(a, 'caminho') || undefined);
+      if (!r.ok || !r.conteudo) return { erro: r.erro || 'fonte não encontrado na pasta de fontes' };
+      return { nome: r.nome, caminho: r.caminho, conteudo: r.conteudo.slice(0, 200000),
+        instrucao_resposta: 'Use este conteúdo como o fonte para converter (converter_relatorio) ou alterar (gerar_patch). Não peça para a pessoa colar nada.' };
+    },
+  },
+  {
+    declaracao: {
       name: 'gerar_patch',
       description: 'SÓ PARA ADMINISTRADORES. Compila um fonte ADVPL/TLPP em um servidor cadastrado (os mesmos do VS Code, no painel Protheus) e gera um patch .ptm pronto para aplicar. Pode antes converter um relatório padrão em User Function no padrão PrimeERP. Devolve um link para baixar o .ptm. Use quando pedirem para compilar, gerar patch, ou converter um relatório em user function.',
       parameters: { type: 'OBJECT', properties: {
@@ -353,7 +383,8 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
-COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
+COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar.
+PASTA DE FONTES (SÓ ADMIN): você tem acesso à pasta de fontes do Protheus 2510. Para pegar um relatório/rotina padrão pelo nome (sem anexo), use "buscar_fonte" (acha pelo nome parcial) e "ler_fonte" (lê o conteúdo). Então converta com "converter_relatorio" ou altere com "gerar_patch". Nunca peça para a pessoa colar um fonte que você pode buscar na pasta. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
 EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
 ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, relatório, etc.), o conteúdo COMPLETO vem no fim da mensagem entre "--- Arquivo anexado ---" e "--- fim do arquivo ---". Esse é o fonte — use-o direto. NUNCA, em hipótese alguma, peça para a pessoa "colar o texto" ou "colar o fonte" se já tem um arquivo anexado: o conteúdo já está aí na sua frente. Se faltar o fonte e não houver anexo, aí sim peça o anexo (ou o nome do programa para você buscar na pasta de fontes, quando tiver a ferramenta "ler_fonte").
 CONVERTER RELATÓRIO: quando pedirem para converter um relatório padrão em User Function (padrão PrimeERP), use o fonte ANEXADO (ou o que você leu da pasta). Se a pessoa (admin) só quer o FONTE convertido, use a ferramenta "converter_relatorio" e entregue o link do fonte .prw convertido — SEM compilar. Se a pessoa quer aplicar/testar, use a "gerar_patch" com converter_relatorio=true para converter E compilar, devolvendo o fonte e o patch.

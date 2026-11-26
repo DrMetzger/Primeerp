@@ -327,6 +327,55 @@ class Agente(BaseHTTPRequestHandler):
                 return self.responder(200, {"ok": False, "http": e.code, "resposta": e.read().decode("utf-8", "replace")})
             except Exception as e:
                 return self.responder(200, {"ok": False, "erro": str(e)[:200]})
+        if partes == ["fontes", "buscar"]:
+            # Lista fontes .prw/.tlpp pela pasta de fontes do Protheus (por nome parcial).
+            try:
+                corpo = self._corpo()
+            except Exception:
+                return self.responder(400, {"ok": False, "erro": "corpo inválido"})
+            termo = re.sub(r"[^A-Za-z0-9_.\- ]", "", str(corpo.get("termo", "")).strip())[:80]
+            if len(termo) < 2:
+                return self.responder(400, {"ok": False, "erro": "informe ao menos 2 letras"})
+            raiz = os.environ.get("PRM_FONTES_DIR", "/opt/totvs/fontes")
+            try:
+                rc, out, _ = sh("bash", "-lc",
+                                "find %s -type f \\( -iname '*%s*.prw' -o -iname '*%s*.tlpp' -o -iname '*%s*.prx' \\) 2>/dev/null | head -40"
+                                % (raiz, termo, termo, termo), timeout=40)
+                achados = [l for l in out.splitlines() if l.strip()]
+                return self.responder(200, {"ok": True, "total": len(achados),
+                                            "fontes": [{"nome": os.path.basename(p), "caminho": p} for p in achados]})
+            except Exception as e:
+                return self.responder(200, {"ok": False, "erro": str(e)[:200]})
+        if partes == ["fontes", "ler"]:
+            # Le o conteudo de um fonte .prw/.tlpp da pasta de fontes do Protheus, por nome ou caminho.
+            try:
+                corpo = self._corpo()
+            except Exception:
+                return self.responder(400, {"ok": False, "erro": "corpo inválido"})
+            raiz = os.path.realpath(os.environ.get("PRM_FONTES_DIR", "/opt/totvs/fontes"))
+            caminho = str(corpo.get("caminho", "")).strip()
+            nome = re.sub(r"[^A-Za-z0-9_.\-]", "", str(corpo.get("nome", "")).strip())[:120]
+            alvo = ""
+            if caminho:
+                rp = os.path.realpath(caminho)
+                if rp.startswith(raiz + os.sep) and os.path.isfile(rp):
+                    alvo = rp
+            if not alvo and nome:
+                base = nome if re.search(r"\.(prw|tlpp|prx)$", nome, re.I) else nome + ".prw"
+                try:
+                    rc, out, _ = sh("bash", "-lc",
+                                    "find %s -type f -iname '%s' 2>/dev/null | head -1" % (raiz, base), timeout=40)
+                    alvo = out.strip().splitlines()[0] if out.strip() else ""
+                except Exception:
+                    alvo = ""
+            if not alvo:
+                return self.responder(404, {"ok": False, "erro": "fonte nao encontrado na pasta de fontes"})
+            try:
+                with open(alvo, "r", encoding="utf-8", errors="replace") as fp:
+                    conteudo = fp.read(900000)
+                return self.responder(200, {"ok": True, "nome": os.path.basename(alvo), "caminho": alvo, "conteudo": conteudo})
+            except Exception as e:
+                return self.responder(200, {"ok": False, "erro": str(e)[:200]})
         if len(partes) != 3 or partes[0] != "servicos":
             return self.responder(404, {"erro": "Caminho desconhecido."})
         alvo, acao = partes[1], partes[2]
