@@ -163,6 +163,14 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     try { localStorage.setItem(CHAVE_OCULTO, '1'); } catch { /* ignore */ }
   }
 
+  /** Traz o robô de volta depois de fechado (pelo lançador flutuante). */
+  function reabrir() {
+    try { localStorage.removeItem(CHAVE_OCULTO); } catch { /* ignore */ }
+    setVisivel(true);
+    setAberto(true);
+    setTimeout(() => robo.current?.agir('acenar', 1800), 300);
+  }
+
   /** Zera a conversa guardada e recomeça com a saudação. */
   function novaConversa() {
     setMensagens([]); setAcoes([]); setDigitando(''); setTexto(''); setAnexos([]);
@@ -232,7 +240,16 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     }
   }
 
-  if (!visivel) return null;
+  // Fechado: mostra um lançador flutuante pra sempre dar pra reabrir o robô.
+  if (!visivel) {
+    return (
+      <button type="button" onClick={reabrir} aria-label="Abrir o assistente PrimeERP" title="Abrir o assistente"
+        className="pointer-events-auto fixed z-50 flex h-14 w-14 items-center justify-center rounded-full gradiente-marca text-white shadow-2xl shadow-primaria/40 transition hover:scale-105"
+        style={{ right: `max(${pos.d}px, env(safe-area-inset-right))`, bottom: `max(${pos.b}px, env(safe-area-inset-bottom))` }}>
+        <Sparkles size={26} aria-hidden="true" />
+      </button>
+    );
+  }
   const escala = tamanho / CENA.largura;
   const alturaRobo = CENA.altura * escala;
   const espacoAcima = typeof window !== 'undefined' ? innerHeight - pos.b - alturaRobo : 600;
