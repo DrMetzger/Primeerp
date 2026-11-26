@@ -52,7 +52,7 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
     setPensando(true);
     try {
       const r = await api<{ texto?: string; erro?: string; acoes?: Acao[]; conversaId?: number | null }>('/api/assistente', {
-        method: 'POST', body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, conversaId: conversaId ?? undefined, ...(enviados.length ? { anexos: enviados } : {}), tela: { rota: location.pathname, titulo: 'Conversas com o assistente', texto: '' } }),
+        method: 'POST', signal: AbortSignal.timeout(95_000), body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, conversaId: conversaId ?? undefined, ...(enviados.length ? { anexos: enviados } : {}), tela: { rota: location.pathname, titulo: 'Conversas com o assistente', texto: '' } }),
       });
       setMensagens((m) => [...m, { autor: 'assistente', texto: r.texto ?? r.erro ?? 'Não consegui responder agora.' }]);
       if (r.acoes?.length) setAcoes((a) => [...a, ...(r.acoes ?? []).map((x) => ({ ...x, estado: 'pendente' as const }))]);

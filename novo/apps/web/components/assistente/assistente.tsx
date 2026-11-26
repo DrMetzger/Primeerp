@@ -209,7 +209,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     }, 1500);
     try {
       const r = await fetch('/api/assistente', {
-        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(95_000),
         body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, tela: contextoDaTela(), ...(convId.current ? { conversaId: convId.current } : {}), ...(enviados.length ? { anexos: enviados } : {}) }),
       });
       const corpo = (await r.json()) as { texto?: string; erro?: string; acoes?: Acao[]; conversaId?: number | null };
