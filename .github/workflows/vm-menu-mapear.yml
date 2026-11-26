@@ -1,0 +1,33 @@
+name: VM - mapear MPMENU
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: estrutura e dados do menu (Cadastro de Cliente SIGAFAT)
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -F '|' -d protheus -c "$1" 2>&1; }
+          echo "== tabelas mpmenu"
+          Q "SELECT tablename FROM pg_tables WHERE tablename ILIKE 'mpmenu%' ORDER BY 1;"
+          for T in mpmenu mpmenu_menu mpmenu_item mpmenu_function mpmenu_i18n mpmenu_rw mpmenu_key_words; do
+            echo ""
+            echo "== colunas de $T"
+            Q "SELECT column_name||' '||data_type FROM information_schema.columns WHERE table_name='$T' ORDER BY ordinal_position;"
+            echo "   linhas: $(Q "SELECT count(*) FROM $T;")"
+          done
+          echo ""
+          echo "== onde aparece 'Cliente' nos textos (i18n)"
+          Q "SELECT * FROM mpmenu_i18n WHERE (CAST(mpmenu_i18n AS text)) ILIKE '%cliente%' LIMIT 10;" 2>/dev/null
+          echo ""
+          echo "== amostra mpmenu_i18n (5 linhas) para ver as colunas de texto"
+          Q "SELECT * FROM mpmenu_i18n LIMIT 5;"
+          echo ""
+          echo "== amostra mpmenu_item (3) e mpmenu_function (3)"
+          Q "SELECT * FROM mpmenu_item LIMIT 3;"
+          Q "SELECT * FROM mpmenu_function LIMIT 3;"
+          R
