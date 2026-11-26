@@ -13,8 +13,8 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
           D(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'insecure'; }
           echo "== usuarios com 'etron' ou 'petr' no nome/email (nome | email | perfil | tipo | ativo)"
-          D "SELECT nome, email, perfil, tipo, ativo FROM usuarios WHERE nome LIKE '%etron%' OR email LIKE '%etron%' OR nome LIKE '%petr%' OR email LIKE '%petr%'"
+          D "SELECT nome, email, perfil, ativo FROM usuarios WHERE nome LIKE '%etron%' OR email LIKE '%etron%' OR nome LIKE '%petr%' OR email LIKE '%petr%'"
           echo ""
           echo "== quantos de cada perfil na equipe"
-          D "SELECT perfil, COUNT(*) FROM usuarios WHERE tipo='equipe' GROUP BY perfil"
+          D "SELECT perfil, COUNT(*) FROM usuarios GROUP BY perfil"
           R
