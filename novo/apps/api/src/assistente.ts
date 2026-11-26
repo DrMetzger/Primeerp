@@ -1,4 +1,4 @@
-import { converterRelatorio, manualEmTexto, type UsuarioLogado } from '@primehub/shared';
+import { converterRelatorio, manualEmTexto, pareceFonteADVPL, type UsuarioLogado } from '@primehub/shared';
 import { filtroEscopoCliente, filtroEscopoEquipe } from './auth';
 import { consulta, primeira } from './db';
 import { compilarFonte, guardarArtefato, listarAlvos, podeCompilacao } from './compilacao';
@@ -267,9 +267,11 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       if (u.tipo !== 'equipe') return { erro: 'Converter fonte é só para a equipe.' };
       const fonte = typeof a.fonte === 'string' ? a.fonte : '';
       if (!fonte.trim()) return { erro: 'Preciso do conteúdo do fonte (anexe o relatório ou mande o conteúdo). Não peça para colar se já há anexo.' };
+      if (!pareceFonteADVPL(fonte)) return { erro: 'Esse conteúdo não parece um fonte ADVPL legível (veio vazio, cortado ou binário). NÃO vou gerar um arquivo vazio. Peça para a pessoa anexar o fonte .prw correto.' };
       const base = (txt(a, 'nome_programa') || 'RELATORIO').replace(/\.(prw|tlpp|prx)$/i, '');
       marcarProgresso(u.id, 'convertendo', 'Convertendo o relatório em User Function…');
       const c = converterRelatorio(fonte, base || 'RELATORIO', u.nome);
+      if (!c.funcoes.length) return { erro: `O arquivo não tem nenhuma Function ADVPL — não é um relatório padrão convertível. NÃO gerei arquivo. Confira se é mesmo o fonte do ${base}.` };
       const token = await guardarArtefato(c.nomeArquivo, Buffer.from(c.fonte, 'utf8'));
       marcarProgresso(u.id, 'concluido', `Convertido: ${c.principal}`);
       return { ok: true, principal: c.principal, chamada: c.funcoes[0]?.chamada ?? '', nome_fonte: c.nomeArquivo, baixar_fonte: `/api/compilacao/arquivo/${token}`,
@@ -288,9 +290,11 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
       if (!nome) return { erro: 'Informe o nome do relatório (ex.: MATR010).' };
       marcarProgresso(u.id, 'convertendo', `Buscando e convertendo ${nome}…`);
       const lido = await lerFonteProtheus(u.nome, nome);
-      if (!lido.ok || !lido.conteudo) return { erro: `Não achei o fonte "${nome}" na pasta de fontes. Confira o nome (ou use buscar_fonte).` };
+      if (!lido.ok || !lido.conteudo) return { erro: `NÃO tenho o fonte "${nome}" na pasta de fontes. Diga claramente para a pessoa que você não tem esse fonte e PEÇA para ela anexar o .prw para você converter. NÃO invente, NÃO gere arquivo e NÃO pegue de outra pasta.`, nao_encontrado: true };
+      if (!pareceFonteADVPL(lido.conteudo)) return { erro: `Achei um arquivo para "${nome}", mas ele não parece um fonte ADVPL legível (veio vazio, cortado ou binário). NÃO vou gerar um arquivo vazio. Diga que não conseguiu ler esse fonte e peça o .prw correto para a pessoa.`, nao_encontrado: true };
       const base = String(lido.nome ?? nome).replace(/\.(prw|tlpp|prx)$/i, '');
       const c = converterRelatorio(lido.conteudo, base || 'RELATORIO', u.nome);
+      if (!c.funcoes.length) return { erro: `O fonte "${nome}" não tem nenhuma Function ADVPL — não é um relatório padrão convertível. NÃO gerei arquivo. Peça o fonte correto.`, nao_encontrado: true };
       const token = await guardarArtefato(c.nomeArquivo, Buffer.from(c.fonte, 'utf8'));
       marcarProgresso(u.id, 'concluido', `Convertido: ${c.principal}`);
       return { ok: true, origem: lido.nome, principal: c.principal, chamada: c.funcoes[0]?.chamada ?? '', nome_fonte: c.nomeArquivo, baixar_fonte: `/api/compilacao/arquivo/${token}`,
@@ -309,7 +313,7 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
     executar: async (u, a) => {
       if (u.tipo !== 'equipe') return { erro: 'Salvar fonte é só para a equipe.' };
       const conteudo = typeof a.conteudo === 'string' ? a.conteudo : '';
-      if (conteudo.trim().length < 10) return { erro: 'Preciso do conteúdo do fonte para salvar.' };
+      if (conteudo.trim().length < 20 || conteudo.includes('\u0000') || conteudo.includes('�')) return { erro: 'Não vou salvar um arquivo vazio ou ilegível. Preciso do conteúdo real do fonte.' };
       let nome = (txt(a, 'nome') || 'FONTE.prw').replace(/[^\w.\-]/g, '_');
       if (!/\.(prw|tlpp|prx)$/i.test(nome)) nome += '.prw';
       const token = await guardarArtefato(nome, Buffer.from(conteudo, 'utf8'));
@@ -425,6 +429,7 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
 CONVERTER E LER FONTES (TODA A EQUIPE): qualquer pessoa da equipe pode converter relatórios. Quando pedirem "converte o <NOME>" (ex.: "converte o MATR010", "converte o CTBR260") SEM anexo, use a ferramenta "converter_relatorio_por_nome" com o nome — ela faz tudo num passo (busca na pasta, lê, converte e devolve o link do .prw). NÃO use buscar_fonte + ler_fonte + converter_relatorio separados pra isso (fica lento). Se a pessoa ANEXOU o fonte, use "converter_relatorio" com o conteúdo anexado. Para entregar qualquer fonte, use "salvar_fonte". Nunca peça para colar um fonte que você pode buscar, e NUNCA cole o fonte no chat — sempre o LINK de download. NÃO mande a pessoa "usar o VS Code".
+QUANDO NÃO TEM O FONTE (REGRA CRÍTICA, NUNCA QUEBRE): se a ferramenta devolver "nao_encontrado" ou um erro dizendo que não tem/não leu o fonte, você DIZ com todas as letras que NÃO TEM esse fonte na pasta e PEDE para a pessoa anexar o .prw para converter. É PROIBIDO: (a) inventar/escrever o fonte você mesmo; (b) gerar ou entregar um arquivo/link se a ferramenta não devolveu um link; (c) pegar o fonte "parecido" de outra pasta ou de outra versão — não sabemos se está certo. Nunca entregue um .prw vazio. Melhor dizer "não tenho o fonte X, me manda ele" do que entregar algo errado. Só existe link de download quando a ferramenta devolveu "baixar_fonte" — se não devolveu, NÃO escreva nenhum link.
 COMPILAR (SÓ ADMIN): gerar patch .ptm / compilar num servidor ("gerar_patch") é restrito a administradores (admin/diretor/CEO). Se quem pede não for admin, converta/entregue o fonte normalmente e explique que a COMPILAÇÃO (gerar o patch e aplicar) é feita por um administrador.
 EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
 ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, relatório, etc.), o conteúdo COMPLETO vem no fim da mensagem entre "--- Arquivo anexado ---" e "--- fim do arquivo ---". Esse é o fonte — use-o direto. NUNCA, em hipótese alguma, peça para a pessoa "colar o texto" ou "colar o fonte" se já tem um arquivo anexado: o conteúdo já está aí na sua frente. Se faltar o fonte e não houver anexo, aí sim peça o anexo (ou o nome do programa para você buscar na pasta de fontes, quando tiver a ferramenta "ler_fonte").

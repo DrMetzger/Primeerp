@@ -32,6 +32,23 @@ export function nomeCustomizado(original: string): string {
   return ('X' + original.slice(1)).slice(0, 7).toUpperCase();
 }
 
+/**
+ * Diz se o texto parece MESMO um fonte ADVPL/TLPP legível (e não vazio, nem
+ * binário/RPO, nem lixo). Serve para NUNCA converter/gerar um arquivo vazio:
+ * se isto for falso, o certo é avisar que não temos o fonte e pedir ele.
+ */
+export function pareceFonteADVPL(texto: string | undefined | null): boolean {
+  const t = (texto ?? '').trim();
+  if (t.length < 40) return false; // vazio ou pequeno demais para um relatório
+  // Caractere nulo ou excesso de bytes de controle => binário/RPO, não é fonte.
+  if (t.includes('\u0000') || t.includes('�')) return false;
+  let controle = 0;
+  for (let i = 0; i < t.length; i++) { const c = t.charCodeAt(i); if (c < 9 || (c > 13 && c < 32)) controle++; }
+  if (controle > t.length * 0.02) return false;
+  // Precisa ter cara de ADVPL: ao menos uma palavra-chave típica.
+  return /\b(function|user function|static function|#include|return|local|if|while|dbselectarea)\b/i.test(t);
+}
+
 const DECLARACAO = /^([ \t]*)(user[ \t]+function|static[ \t]+function|function)([ \t]+)([A-Za-z_]\w*)/gim;
 const ALTERNATIVAS = '23456789BCDEFGHJKLMNPQRSTUVWXYZ';
 

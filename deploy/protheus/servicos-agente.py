@@ -371,8 +371,14 @@ class Agente(BaseHTTPRequestHandler):
             if not alvo:
                 return self.responder(404, {"ok": False, "erro": "fonte nao encontrado na pasta de fontes"})
             try:
-                with open(alvo, "r", encoding="utf-8", errors="replace") as fp:
-                    conteudo = fp.read(900000)
+                with open(alvo, "rb") as fp:
+                    bruto = fp.read(900000)
+                # Binario/RPO/compilado: tem byte nulo ou muitos bytes de controle. Nao e um fonte legivel.
+                if b"\x00" in bruto:
+                    return self.responder(404, {"ok": False, "erro": "arquivo binario/ilegivel (nao e um fonte .prw de texto)"})
+                conteudo = bruto.decode("utf-8", errors="replace")
+                if len(conteudo.strip()) < 40 or conteudo.count("�") > len(conteudo) * 0.02:
+                    return self.responder(404, {"ok": False, "erro": "fonte vazio ou ilegivel"})
                 return self.responder(200, {"ok": True, "nome": os.path.basename(alvo), "caminho": alvo, "conteudo": conteudo})
             except Exception as e:
                 return self.responder(200, {"ok": False, "erro": str(e)[:200]})
