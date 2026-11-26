@@ -153,7 +153,13 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
                 ) : a.aviso ? <p className="mt-2 text-sm font-semibold text-suave">{a.aviso}</p> : null}
               </div>
             ))}
-            {pensando && <p className="w-fit rounded-2xl bg-superficie-alta px-3.5 py-2.5 text-suave">digitando…</p>}
+            {pensando && (
+              <div className="flex w-fit items-center gap-1.5 rounded-2xl bg-superficie-alta px-3.5 py-3" aria-label="digitando">
+                <span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-suave [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-suave" />
+              </div>
+            )}
             <div ref={fim} />
           </div>
 
