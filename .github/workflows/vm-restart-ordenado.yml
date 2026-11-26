@@ -1,0 +1,48 @@
+name: VM - restart ordenado do Protheus (restaurar REST)
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: dbaccess -> principal -> REST, verificar 8095
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          set +e
+          echo "== garantindo REST habilitado"
+          systemctl enable totvsappserver-rest 2>/dev/null
+          echo "== 1) restart dbaccess"
+          systemctl restart totvsdbaccess 2>/dev/null
+          sleep 12
+          echo "   dbaccess: $(systemctl is-active totvsdbaccess 2>/dev/null)"
+          echo "== 2) restart principal (aguarda ambiente carregar)"
+          systemctl restart totvsappserver 2>/dev/null
+          for i in $(seq 1 12); do
+            sleep 10
+            P=$(ss -tlnH 2>/dev/null | grep -c ':1234 ')
+            [ "$P" -ge 1 ] && { echo "   principal 1234 ouvindo em ~$((i*10))s"; break; }
+          done
+          sleep 20
+          echo "== 3) restart REST dedicado (aguarda 8095, ate 180s)"
+          systemctl restart totvsappserver-rest 2>/dev/null
+          OK=0
+          for i in $(seq 1 26); do
+            sleep 7
+            P=$(ss -tlnH 2>/dev/null | grep -c ':8095 ')
+            C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8095/rest/ 2>/dev/null)
+            echo "   +$((i*7))s  8095_listen=$P  http=$C"
+            [ "$P" -ge 1 ] && { OK=1; break; }
+          done
+          echo ""
+          if [ "$OK" = "1" ]; then
+            echo "== RESULTADO: REST 8095 DE PE. Reset de senha restaurado."
+          else
+            echo "== RESULTADO: 8095 ainda nao subiu. Ultimas linhas REST/HTTP do console_rest:"
+            tail -150 /opt/totvs/protheus12/protheus/bin/appserver/console_rest.log 2>/dev/null | grep -aiE 'http server|started on port|8095|HTTP_START|fail|error 98|not been|bind|rpo|environment' | grep -aviE 'senha|password' | tail -18
+          fi
+          echo "== estado final dos servicos"
+          for S in totvsdbaccess totvsappserver totvsappserver-rest; do echo "   $S: $(systemctl is-active $S 2>/dev/null)"; done
+          R
