@@ -14,6 +14,10 @@ SOCKET = "/run/primehub/servicos.sock"
 REGISTRO = "/var/log/primehub-servicos.log"
 APP_LOG = "/opt/totvs/protheus12/protheus/bin/appserver/console.log"
 VERSOES = "/opt/totvs/versoes.json"
+# Pasta OFICIAL dos fontes 2510 (decidido com a equipe). Buscar/ler SO aqui:
+# o que estiver fora conta como "nao tenho o fonte". Nao pegar copia de outra
+# pasta (pode estar errada). Pode ser trocado pela env PRM_FONTES_DIR.
+FONTES_OFICIAL = "/opt/totvs/fontes/Fontes_2510"
 
 SERVICOS = [
     {"id": "appserver", "unidade": "totvsappserver", "nome": "AppServer", "descricao": "Protheus (Webapp e TDS)", "portas": [1234, 8089], "critico": True},
@@ -336,7 +340,7 @@ class Agente(BaseHTTPRequestHandler):
             termo = re.sub(r"[^A-Za-z0-9_.\- ]", "", str(corpo.get("termo", "")).strip())[:80]
             if len(termo) < 2:
                 return self.responder(400, {"ok": False, "erro": "informe ao menos 2 letras"})
-            raiz = os.environ.get("PRM_FONTES_DIR", "/opt/totvs/fontes")
+            raiz = os.environ.get("PRM_FONTES_DIR", FONTES_OFICIAL)
             try:
                 rc, out, _ = sh("bash", "-lc",
                                 "find %s -type f \\( -iname '*%s*.prw' -o -iname '*%s*.tlpp' -o -iname '*%s*.prx' \\) 2>/dev/null | head -40"
@@ -352,7 +356,7 @@ class Agente(BaseHTTPRequestHandler):
                 corpo = self._corpo()
             except Exception:
                 return self.responder(400, {"ok": False, "erro": "corpo inválido"})
-            raiz = os.path.realpath(os.environ.get("PRM_FONTES_DIR", "/opt/totvs/fontes"))
+            raiz = os.path.realpath(os.environ.get("PRM_FONTES_DIR", FONTES_OFICIAL))
             caminho = str(corpo.get("caminho", "")).strip()
             nome = re.sub(r"[^A-Za-z0-9_.\-]", "", str(corpo.get("nome", "")).strip())[:120]
             alvo = ""
