@@ -137,8 +137,12 @@ import { agente } from './vm-servicos';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const PATCHES = join(process.env.UPLOADS_DIR ?? '/uploads', 'patches');
+// Se /uploads não for gravável pela API, caímos num diretório temporário.
+const PATCHES_FALLBACK = join(tmpdir(), 'primehub-patches');
+const DIRS_ARTEFATO = [PATCHES, PATCHES_FALLBACK];
 
 export interface ArquivoFonte { nome: string; conteudo_base64: string }
 export interface ResultadoCompilacao { ok: boolean; nome?: string; erro?: string; token?: string }
@@ -159,21 +163,31 @@ export async function compilarFonte(u: UsuarioLogado, slug: string, arquivos: Ar
 
 /** Guarda um arquivo (patch ou fonte) para download por token. Devolve o token. */
 export async function guardarArtefato(nomeArquivo: string, bytes: Buffer): Promise<string> {
-  await mkdir(PATCHES, { recursive: true });
   const token = randomBytes(16).toString('hex');
-  await writeFile(join(PATCHES, `${token}.bin`), bytes);
-  await writeFile(join(PATCHES, `${token}.nome`), (nomeArquivo || 'arquivo.txt').replace(/[\r\n]/g, ' ').slice(0, 160));
-  return token;
+  const nome = (nomeArquivo || 'arquivo.txt').replace(/[\r\n]/g, ' ').slice(0, 160);
+  let ultimoErro: unknown = null;
+  for (const dir of DIRS_ARTEFATO) {
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, `${token}.bin`), bytes);
+      await writeFile(join(dir, `${token}.nome`), nome);
+      return token;
+    } catch (e) { ultimoErro = e; /* tenta o próximo diretório */ }
+  }
+  throw new Error(`não consegui salvar o arquivo para download: ${ultimoErro instanceof Error ? ultimoErro.message : ultimoErro}`);
 }
 
 export async function lerArtefato(token: string): Promise<{ nome: string; bytes: Buffer } | null> {
   const t = String(token || '').replace(/[^a-f0-9]/g, '');
   if (t.length !== 32) return null;
-  try {
-    const bytes = await readFile(join(PATCHES, `${t}.bin`));
-    const nome = (await readFile(join(PATCHES, `${t}.nome`), 'utf8').catch(() => 'arquivo.txt')).trim() || 'arquivo.txt';
-    return { nome, bytes };
-  } catch { return null; }
+  for (const dir of DIRS_ARTEFATO) {
+    try {
+      const bytes = await readFile(join(dir, `${t}.bin`));
+      const nome = (await readFile(join(dir, `${t}.nome`), 'utf8').catch(() => 'arquivo.txt')).trim() || 'arquivo.txt';
+      return { nome, bytes };
+    } catch { /* tenta o próximo diretório */ }
+  }
+  return null;
 }
 
 /** Define (cifrada) a senha do alvo de compilação. Uso interno via CLI. */
