@@ -1,6 +1,6 @@
 'use client';
 
-import { MessageSquarePlus, Send, Sparkles, Trash2, Zap } from 'lucide-react';
+import { MessageSquarePlus, Paperclip, Send, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Casca } from '@/components/casca';
 import { acaoPhp, api } from '@/lib/api';
@@ -18,6 +18,7 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
   const [mensagens, setMensagens] = useState<Msg[]>([]);
   const [acoes, setAcoes] = useState<Acao[]>([]);
   const [texto, setTexto] = useState('');
+  const [anexos, setAnexos] = useState<{ nome: string; conteudo: string }[]>([]);
   const [pensando, setPensando] = useState(false);
   const [listaAberta, setListaAberta] = useState(false);
   const fim = useRef<HTMLDivElement>(null);
@@ -41,14 +42,17 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
   async function enviar(e: FormEvent) {
     e.preventDefault();
     const p = texto.trim();
-    if (!p || pensando) return;
+    if ((!p && !anexos.length) || pensando) return;
     setTexto('');
+    const enviados = anexos;
+    setAnexos([]);
     const historico = mensagens.slice(-10);
-    setMensagens((m) => [...m, { autor: 'pessoa', texto: p }]);
+    const rotulo = enviados.length ? `${p}${p ? '\n' : ''}📎 ${enviados.map((a) => a.nome).join(', ')}` : p;
+    setMensagens((m) => [...m, { autor: 'pessoa', texto: rotulo }]);
     setPensando(true);
     try {
       const r = await api<{ texto?: string; erro?: string; acoes?: Acao[]; conversaId?: number | null }>('/api/assistente', {
-        method: 'POST', body: JSON.stringify({ mensagem: p, historico, conversaId: conversaId ?? undefined, tela: { rota: location.pathname, titulo: 'Conversas com o assistente', texto: '' } }),
+        method: 'POST', body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico, conversaId: conversaId ?? undefined, ...(enviados.length ? { anexos: enviados } : {}), tela: { rota: location.pathname, titulo: 'Conversas com o assistente', texto: '' } }),
       });
       setMensagens((m) => [...m, { autor: 'assistente', texto: r.texto ?? r.erro ?? 'Não consegui responder agora.' }]);
       if (r.acoes?.length) setAcoes((a) => [...a, ...(r.acoes ?? []).map((x) => ({ ...x, estado: 'pendente' as const }))]);
@@ -134,14 +138,39 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
             <div ref={fim} />
           </div>
 
-          <form onSubmit={(e) => void enviar(e)} className="flex items-end gap-2 border-t border-borda p-3">
-            <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={1}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void enviar(e as unknown as FormEvent); } }}
-              placeholder="Escreva sua mensagem…" className="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-2xl border border-borda bg-fundo p-3 text-base text-texto outline-none focus:border-primaria" />
-            <button type="submit" disabled={pensando || !texto.trim()} className="toque flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl gradiente-marca text-white disabled:opacity-50" aria-label="Enviar">
-              <Send size={18} aria-hidden="true" />
-            </button>
-          </form>
+          <div className="border-t border-borda p-3">
+            {anexos.length > 0 && (
+              <ul className="mb-2 flex flex-wrap gap-2">
+                {anexos.map((a, i) => (
+                  <li key={`${a.nome}-${i}`} className="inline-flex items-center gap-2 rounded-lg bg-superficie-alta px-2 py-1 text-xs text-texto">
+                    <Paperclip size={12} className="text-primaria" aria-hidden="true" />
+                    <span className="max-w-[12rem] truncate" title={a.nome}>{a.nome}</span>
+                    <button type="button" aria-label={`Remover ${a.nome}`} onClick={() => setAnexos((l) => l.filter((_, j) => j !== i))} className="toque text-suave hover:text-perigo"><X size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form onSubmit={(e) => void enviar(e)} className="flex items-end gap-2">
+              <label className="toque flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl border border-borda text-suave hover:text-texto" title="Anexar fonte (.prw, .tlpp, .ch, .txt)" aria-label="Anexar arquivo">
+                <Paperclip size={18} aria-hidden="true" />
+                <input type="file" accept=".prw,.tlpp,.prx,.ch,.txt,.tlp,text/plain" multiple className="hidden"
+                  onChange={async (e) => {
+                    for (const f of Array.from(e.target.files ?? [])) {
+                      if (anexos.length >= 5) break;
+                      if (f.size > 1024 * 1024) { setMensagens((m) => [...m, { autor: 'assistente', texto: `O arquivo ${f.name} é grande demais (máx. 1 MB).` }]); continue; }
+                      try { const t = await f.text(); setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: f.name.slice(0, 120), conteudo: t }])); } catch { /* ignore */ }
+                    }
+                    e.target.value = '';
+                  }} />
+              </label>
+              <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={1}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void enviar(e as unknown as FormEvent); } }}
+                placeholder="Escreva sua mensagem…" className="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-2xl border border-borda bg-fundo p-3 text-base text-texto outline-none focus:border-primaria" />
+              <button type="submit" disabled={pensando || (!texto.trim() && !anexos.length)} className="toque flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl gradiente-marca text-white disabled:opacity-50" aria-label="Enviar">
+                <Send size={18} aria-hidden="true" />
+              </button>
+            </form>
+          </div>
         </section>
       </div>
     </Casca>

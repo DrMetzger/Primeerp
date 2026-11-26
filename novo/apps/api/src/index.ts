@@ -321,7 +321,7 @@ const esquemaAssistente = z.object({
   mensagem: z.string().trim().min(1).max(1000),
   historico: z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string().max(4000) })).max(20).default([]),
   tela: z.object({ rota: z.string().max(300), titulo: z.string().max(200), texto: z.string().max(8000) }).optional(),
-  anexos: z.array(z.object({ nome: z.string().max(160), conteudo: z.string().max(200000) })).max(5).optional(),
+  anexos: z.array(z.object({ nome: z.string().max(160), conteudo: z.string().max(1200000) })).max(5).optional(),
   conversaId: z.number().int().positive().optional(),
 });
 

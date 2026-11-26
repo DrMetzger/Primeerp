@@ -226,6 +226,28 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
   },
   {
     declaracao: {
+      name: 'converter_relatorio',
+      description: 'SÓ PARA ADMINISTRADORES. Converte um relatório padrão ADVPL em User Function no padrão PrimeERP (1ª letra vira X, chamada U_) e DEVOLVE o fonte convertido para download, SEM compilar. Use quando o admin pedir só o fonte convertido. O fonte vem do arquivo ANEXADO (conteúdo no fim da mensagem) — NUNCA peça para colar o texto se há anexo.',
+      parameters: { type: 'OBJECT', properties: {
+        nome_programa: { type: 'STRING', description: 'nome do programa/relatório, ex.: MATR440' },
+        fonte: { type: 'STRING', description: 'conteúdo completo do fonte do relatório a converter (use o conteúdo do arquivo anexado)' },
+      }, required: ['fonte'] },
+    },
+    executar: async (u, a) => {
+      if (!podeCompilacao(u)) return { erro: 'Converter fonte é só para administradores (admin/diretor/CEO).' };
+      const fonte = typeof a.fonte === 'string' ? a.fonte : '';
+      if (!fonte.trim()) return { erro: 'Preciso do conteúdo do fonte (anexe o relatório ou mande o conteúdo). Não peça para colar se já há anexo.' };
+      const base = (txt(a, 'nome_programa') || 'RELATORIO').replace(/\.(prw|tlpp|prx)$/i, '');
+      marcarProgresso(u.id, 'convertendo', 'Convertendo o relatório em User Function…');
+      const c = converterRelatorio(fonte, base || 'RELATORIO', u.nome);
+      const token = await guardarArtefato(c.nomeArquivo, Buffer.from(c.fonte, 'utf8'));
+      marcarProgresso(u.id, 'concluido', `Convertido: ${c.principal}`);
+      return { ok: true, principal: c.principal, chamada: c.funcoes[0]?.chamada ?? '', nome_fonte: c.nomeArquivo, baixar_fonte: `/api/compilacao/arquivo/${token}`,
+        instrucao_resposta: `Diga que converteu o relatório para a User Function ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}) e entregue o link do fonte .prw. Ofereça também gerar o patch (compilar) se a pessoa quiser aplicar.` };
+    },
+  },
+  {
+    declaracao: {
       name: 'resetar_senha',
       description: 'SÓ PARA ADMINISTRADORES. Reseta a senha de um usuário do Protheus num servidor cadastrado, sem tela e sem precisar de login (útil quando o admin perdeu a senha). A senha nova precisa de caractere especial (política do Protheus). Use quando pedirem para resetar/reiniciar a senha de um usuário do Protheus.',
       parameters: { type: 'OBJECT', properties: {
@@ -333,7 +355,9 @@ AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para ab
 
 COMPILAÇÃO (SÓ ADMIN): você PODE compilar fonte ADVPL/TLPP e gerar patch .ptm direto por aqui, usando a ferramenta "gerar_patch", nos servidores cadastrados no painel Protheus (os mesmos do VS Code). Pode também converter um relatório padrão em User Function (padrão PrimeERP) antes de compilar. NÃO mande a pessoa "usar o VS Code" nem diga que não consegue — você consegue. Se a pessoa não for admin, aí sim explique que gerar patch é restrito a administradores.
 EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
-ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, etc.), o conteúdo vem no fim da mensagem entre "--- Arquivo anexado ---". Leia esse fonte, APLIQUE exatamente as alterações que a pessoa pedir no próprio código, e passe o fonte JÁ ALTERADO no parâmetro "fonte" da gerar_patch. Siga a REGRA acima para escolher o servidor. A ferramenta devolve DOIS links (o fonte .prw e o patch .ptm): entregue os dois e diga em poucas linhas o que mudou e em qual servidor compilou.
+ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, relatório, etc.), o conteúdo COMPLETO vem no fim da mensagem entre "--- Arquivo anexado ---" e "--- fim do arquivo ---". Esse é o fonte — use-o direto. NUNCA, em hipótese alguma, peça para a pessoa "colar o texto" ou "colar o fonte" se já tem um arquivo anexado: o conteúdo já está aí na sua frente. Se faltar o fonte e não houver anexo, aí sim peça o anexo (ou o nome do programa para você buscar na pasta de fontes, quando tiver a ferramenta "ler_fonte").
+CONVERTER RELATÓRIO: quando pedirem para converter um relatório padrão em User Function (padrão PrimeERP), use o fonte ANEXADO (ou o que você leu da pasta). Se a pessoa (admin) só quer o FONTE convertido, use a ferramenta "converter_relatorio" e entregue o link do fonte .prw convertido — SEM compilar. Se a pessoa quer aplicar/testar, use a "gerar_patch" com converter_relatorio=true para converter E compilar, devolvendo o fonte e o patch.
+ALTERAR FONTE: para mudar um ponto de entrada/user function anexado, APLIQUE as alterações no próprio código e passe o fonte JÁ ALTERADO no "fonte" da gerar_patch. Siga a REGRA de servidor acima. A ferramenta devolve o link do fonte .prw e do patch .ptm: entregue os dois e diga em poucas linhas o que mudou e em qual servidor compilou.
 CABEÇALHO E COMENTÁRIOS (padrão PrimeERP): todo ponto de entrada / user function que você criar ou alterar começa com o cabeçalho Protheus.doc no modelo: "@author  ${u.nome}", "@since   <data de hoje dd/mm/aaaa>", "@version P12", "@obs     PrimeERP - Solucoes em Tecnologia". Cada alteração que você fizer no código leva um comentário na linha no formato "// [${u.nome} - <data de hoje> - PrimeERP] o que mudou". Nunca use outro nome de autor.
 
 MELHORIAS: quando perceber algo (gargalo, cliente acumulando chamados, chamado parado, uso melhor de um recurso), sugira uma melhoria prática no fim, em uma frase começando com "Sugestão:".
@@ -418,8 +442,8 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
     if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));
     const acoes: AcaoProposta[] = [];
     const contents: Conteudo[] = historico.slice(-10).map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
-    const anexosTexto = (anexos ?? []).map((a) => `\n\n--- Arquivo anexado: ${a.nome} ---\n${a.conteudo.slice(0, 80000)}\n--- fim do arquivo ---`).join('');
-    contents.push({ role: 'user' as const, parts: [{ text: (mensagem.slice(0, 3000) + anexosTexto).slice(0, 170000) }] });
+    const anexosTexto = (anexos ?? []).map((a) => `\n\n--- Arquivo anexado: ${a.nome} ---\n${a.conteudo.slice(0, 300000)}\n--- fim do arquivo ---`).join('');
+    contents.push({ role: 'user' as const, parts: [{ text: (mensagem.slice(0, 3000) + anexosTexto).slice(0, 600000) }] });
     try {
       // Até 5 rodadas de ferramenta (consultar, conferir, propor) antes de responder.
       for (let rodada = 0; rodada < 6; rodada++) {

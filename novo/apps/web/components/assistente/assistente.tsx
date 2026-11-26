@@ -360,7 +360,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
                     e.target.value = '';
                     for (const f of fs) {
                       if (anexos.length >= 5) break;
-                      if (f.size > 200_000) { setMensagens((m) => [...m, { autor: 'assistente', texto: `O arquivo ${f.name} é grande demais (máx. 200 KB).` }]); continue; }
+                      if (f.size > 1024 * 1024) { setMensagens((m) => [...m, { autor: 'assistente', texto: `O arquivo ${f.name} é grande demais (máx. 1 MB).` }]); continue; }
                       try { const t = await f.text(); setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: f.name.slice(0, 120), conteudo: t }])); } catch { /* ignore */ }
                     }
                   }} />
