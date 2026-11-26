@@ -278,6 +278,26 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
   },
   {
     declaracao: {
+      name: 'salvar_fonte',
+      description: 'SÓ PARA ADMINISTRADORES. Salva um fonte (.prw/.tlpp) e devolve um LINK de download. Use SEMPRE que precisar entregar um fonte para a pessoa (ex.: "me passa o .prw", "me manda o arquivo") — passe o conteúdo do fonte que você tem e entregue o link. NUNCA cole o conteúdo do fonte na resposta.',
+      parameters: { type: 'OBJECT', properties: {
+        nome: { type: 'STRING', description: 'nome do arquivo, ex.: XATR010.prw' },
+        conteudo: { type: 'STRING', description: 'conteúdo completo do fonte a salvar' },
+      }, required: ['nome', 'conteudo'] },
+    },
+    executar: async (u, a) => {
+      if (!podeCompilacao(u)) return { erro: 'Salvar fonte é só para administradores.' };
+      const conteudo = typeof a.conteudo === 'string' ? a.conteudo : '';
+      if (conteudo.trim().length < 10) return { erro: 'Preciso do conteúdo do fonte para salvar.' };
+      let nome = (txt(a, 'nome') || 'FONTE.prw').replace(/[^\w.\-]/g, '_');
+      if (!/\.(prw|tlpp|prx)$/i.test(nome)) nome += '.prw';
+      const token = await guardarArtefato(nome, Buffer.from(conteudo, 'utf8'));
+      return { ok: true, nome_fonte: nome, baixar_fonte: `/api/compilacao/arquivo/${token}`,
+        instrucao_resposta: `Entregue SÓ o link de download do ${nome}. NÃO cole o conteúdo do fonte.` };
+    },
+  },
+  {
+    declaracao: {
       name: 'resetar_senha',
       description: 'SÓ PARA ADMINISTRADORES. Reseta a senha de um usuário do Protheus num servidor cadastrado, sem tela e sem precisar de login (útil quando o admin perdeu a senha). A senha nova precisa de caractere especial (política do Protheus). Use quando pedirem para resetar/reiniciar a senha de um usuário do Protheus.',
       parameters: { type: 'OBJECT', properties: {
@@ -388,7 +408,7 @@ PASTA DE FONTES (SÓ ADMIN): você tem acesso à pasta de fontes do Protheus 251
 EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
 ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, relatório, etc.), o conteúdo COMPLETO vem no fim da mensagem entre "--- Arquivo anexado ---" e "--- fim do arquivo ---". Esse é o fonte — use-o direto. NUNCA, em hipótese alguma, peça para a pessoa "colar o texto" ou "colar o fonte" se já tem um arquivo anexado: o conteúdo já está aí na sua frente. Se faltar o fonte e não houver anexo, aí sim peça o anexo (ou o nome do programa para você buscar na pasta de fontes, quando tiver a ferramenta "ler_fonte").
 CONVERTER RELATÓRIO: quando pedirem para converter um relatório padrão em User Function (padrão PrimeERP), use o fonte ANEXADO (ou o que você leu da pasta). Se a pessoa (admin) só quer o FONTE convertido, use a ferramenta "converter_relatorio" e entregue o LINK de download do fonte .prw convertido — SEM compilar. Se a pessoa quer aplicar/testar, use a "gerar_patch" com converter_relatorio=true para converter E compilar, devolvendo o fonte e o patch.
-NUNCA COLE O FONTE NO CHAT: jamais despeje o conteúdo de um fonte .prw/.tlpp inteiro na resposta. Sempre entregue o LINK de download que a ferramenta devolve (baixar_fonte / baixar_patch). Colar código grande no chat não serve — a pessoa precisa do ARQUIVO.
+NUNCA COLE O FONTE NO CHAT: jamais despeje o conteúdo de um fonte .prw/.tlpp inteiro na resposta. Sempre entregue o LINK de download. Se você converteu/alterou um fonte e a pessoa pede "me passa o .prw", "me manda o arquivo" ou parecido, chame a ferramenta "salvar_fonte" com o conteúdo do fonte e entregue o link — NUNCA cole o código. Colar código grande no chat não serve: a pessoa precisa do ARQUIVO.
 ALTERAR FONTE: para mudar um ponto de entrada/user function anexado, APLIQUE as alterações no próprio código e passe o fonte JÁ ALTERADO no "fonte" da gerar_patch. Siga a REGRA de servidor acima. A ferramenta devolve o link do fonte .prw e do patch .ptm: entregue os dois e diga em poucas linhas o que mudou e em qual servidor compilou.
 CABEÇALHO E COMENTÁRIOS (padrão PrimeERP): todo ponto de entrada / user function que você criar ou alterar começa com o cabeçalho Protheus.doc no modelo: "@author  ${u.nome}", "@since   <data de hoje dd/mm/aaaa>", "@version P12", "@obs     PrimeERP - Solucoes em Tecnologia". Cada alteração que você fizer no código leva um comentário na linha no formato "// [${u.nome} - <data de hoje> - PrimeERP] o que mudou". Nunca use outro nome de autor.
 
@@ -470,7 +490,9 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
   const sistema = (equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente())) + blocoTela(tela);
   marcarProgresso(usuario.id, 'gerando', 'O assistente está pensando…');
 
+  const prazo = Date.now() + 75_000; // nunca pendurar: devolve algo em ~75s
   for (const [tentativa, modelo] of MODELOS.entries()) {
+    if (Date.now() > prazo) break;
     if (tentativa > 0) await new Promise((r) => setTimeout(r, 400 * tentativa));
     const acoes: AcaoProposta[] = [];
     const contents: Conteudo[] = historico.slice(-10).map((m) => ({ role: m.autor === 'pessoa' ? 'user' as const : 'model' as const, parts: [{ text: m.texto.slice(0, 3000) }] }));
@@ -479,6 +501,7 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
     try {
       // Até 5 rodadas de ferramenta (consultar, conferir, propor) antes de responder.
       for (let rodada = 0; rodada < 6; rodada++) {
+        if (Date.now() > prazo) { return { texto: `Isso aqui demorou mais que o normal, ${primeiro}. Manda de novo que eu termino — se quiser, pede o fonte em partes.` }; }
         const partes = await chamarGemini(chave, modelo, sistema, contents, ferramentas);
         const chamadas = partes.filter((p) => p.functionCall);
         if (!chamadas.length) {

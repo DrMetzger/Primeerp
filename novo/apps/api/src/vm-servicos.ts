@@ -67,11 +67,11 @@ export async function resetarSenhaProtheus(quem: string, login: string, senha: s
 export interface FonteAchado { nome: string; caminho: string }
 /** Busca fontes .prw/.tlpp pela pasta de fontes do Protheus (por nome parcial). */
 export async function buscarFontesProtheus(quem: string, termo: string): Promise<{ ok: boolean; total?: number; fontes?: FonteAchado[]; erro?: string }> {
-  return agente('POST', '/fontes/buscar', quem, { termo }, 60_000);
+  return agente('POST', '/fontes/buscar', quem, { termo }, 25_000);
 }
 /** Lê o conteúdo de um fonte da pasta de fontes do Protheus, por nome ou caminho. */
 export async function lerFonteProtheus(quem: string, nome: string, caminho?: string): Promise<{ ok: boolean; nome?: string; caminho?: string; conteudo?: string; erro?: string }> {
-  return agente('POST', '/fontes/ler', quem, { nome, caminho }, 60_000);
+  return agente('POST', '/fontes/ler', quem, { nome, caminho }, 25_000);
 }
 
 export interface NovoUsuario { login: string; nome: string; senha?: string; email?: string }
