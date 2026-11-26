@@ -26,6 +26,7 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
 
   const carregarLista = useCallback(() => { void api<ConversaResumo[]>('/api/assistente/conversas').then(setConversas).catch(() => undefined); }, []);
   const montou = useRef(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // No primeiro carregamento, reabre a conversa mais recente (pra não voltar e "não ter nada").
   useEffect(() => {
     void api<ConversaResumo[]>('/api/assistente/conversas').then((l) => {
@@ -37,9 +38,19 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
 
   function abrir(id: number) {
     setConversaId(id); setListaAberta(false); setAcoes([]);
-    void api<{ mensagens: Msg[] }>(`/api/assistente/conversas/${id}`).then((c) => setMensagens(c.mensagens)).catch(() => setMensagens([]));
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
+    let tentativas = 0;
+    const carregar = () => {
+      void api<{ mensagens: Msg[] }>(`/api/assistente/conversas/${id}`).then((c) => {
+        setMensagens(c.mensagens);
+        const ultima = c.mensagens[c.mensagens.length - 1];
+        // Se a última é uma pergunta SEM resposta, a resposta pode estar sendo gerada no servidor: busca de novo.
+        if (ultima?.autor === 'pessoa' && tentativas < 12) { tentativas++; pollRef.current = setTimeout(carregar, 4000); }
+      }).catch(() => setMensagens([]));
+    };
+    carregar();
   }
-  function nova() { setConversaId(null); setMensagens([]); setAcoes([]); setTexto(''); setListaAberta(false); }
+  function nova() { if (pollRef.current) clearTimeout(pollRef.current); setConversaId(null); setMensagens([]); setAcoes([]); setTexto(''); setListaAberta(false); }
   async function apagar(id: number) {
     if (!confirm('Apagar esta conversa? Não dá para desfazer.')) return;
     await api(`/api/assistente/conversas/${id}`, { method: 'DELETE' }).catch(() => undefined);

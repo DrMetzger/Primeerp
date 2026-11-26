@@ -278,6 +278,27 @@ const FERRAMENTAS_EQUIPE: Ferramenta[] = [
   },
   {
     declaracao: {
+      name: 'converter_relatorio_por_nome',
+      description: 'SÓ EQUIPE. Em UM passo: busca o relatório na pasta de fontes do Protheus 2510 pelo NOME, lê, converte em User Function (padrão PrimeERP) e devolve o link do .prw. Use ESTA ferramenta quando pedirem "converte o <NOME>" sem anexo (ex.: "converte o MATR010", "converte o CTBR260"). É mais rápido que buscar+ler+converter separados.',
+      parameters: { type: 'OBJECT', properties: { nome: { type: 'STRING', description: 'nome do relatório, ex.: MATR010, CTBR260' } }, required: ['nome'] },
+    },
+    executar: async (u, a) => {
+      if (u.tipo !== 'equipe') return { erro: 'Converter fonte é só para a equipe.' };
+      const nome = txt(a, 'nome');
+      if (!nome) return { erro: 'Informe o nome do relatório (ex.: MATR010).' };
+      marcarProgresso(u.id, 'convertendo', `Buscando e convertendo ${nome}…`);
+      const lido = await lerFonteProtheus(u.nome, nome);
+      if (!lido.ok || !lido.conteudo) return { erro: `Não achei o fonte "${nome}" na pasta de fontes. Confira o nome (ou use buscar_fonte).` };
+      const base = String(lido.nome ?? nome).replace(/\.(prw|tlpp|prx)$/i, '');
+      const c = converterRelatorio(lido.conteudo, base || 'RELATORIO', u.nome);
+      const token = await guardarArtefato(c.nomeArquivo, Buffer.from(c.fonte, 'utf8'));
+      marcarProgresso(u.id, 'concluido', `Convertido: ${c.principal}`);
+      return { ok: true, origem: lido.nome, principal: c.principal, chamada: c.funcoes[0]?.chamada ?? '', nome_fonte: c.nomeArquivo, baixar_fonte: `/api/compilacao/arquivo/${token}`,
+        instrucao_resposta: `Diga que converteu o ${lido.nome} para a User Function ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}) e entregue o LINK do .prw. Nunca cole o código. Ofereça compilar (gerar patch) se quiser aplicar.` };
+    },
+  },
+  {
+    declaracao: {
       name: 'salvar_fonte',
       description: 'SÓ PARA ADMINISTRADORES. Salva um fonte (.prw/.tlpp) e devolve um LINK de download. Use SEMPRE que precisar entregar um fonte para a pessoa (ex.: "me passa o .prw", "me manda o arquivo") — passe o conteúdo do fonte que você tem e entregue o link. NUNCA cole o conteúdo do fonte na resposta.',
       parameters: { type: 'OBJECT', properties: {
@@ -403,7 +424,7 @@ CONHECIMENTO: o MANUAL abaixo é a verdade sobre o sistema. Explique caminhos ex
 
 AÇÕES: use as ferramentas para consultar dados reais em vez de chutar. Para abrir chamado, encerrar, mudar situação ou trocar responsável, use as ferramentas "propor_*": elas mostram um cartão e a pessoa confirma. NADA acontece antes da confirmação: diga "Preparei ... é só confirmar no cartão", nunca "fechei", "abri" ou "troquei". Antes de propor, confira o chamado/cliente com as ferramentas de consulta. Resumos de operação: destaque o que fazer primeiro (urgentes e quem espera há mais tempo) e quem está sobrecarregado.
 
-CONVERTER E LER FONTES (TODA A EQUIPE): qualquer pessoa da equipe pode buscar/ler fontes na pasta do Protheus 2510 e converter relatórios. Para pegar um relatório/rotina pelo nome (sem anexo), use "buscar_fonte" e "ler_fonte". Para converter em User Function (padrão PrimeERP) e DEVOLVER o fonte .prw, use "converter_relatorio". Para entregar qualquer fonte, use "salvar_fonte" (devolve link). Nunca peça para a pessoa colar um fonte que você pode buscar na pasta, e NUNCA cole o fonte no chat — sempre o link de download. NÃO mande a pessoa "usar o VS Code".
+CONVERTER E LER FONTES (TODA A EQUIPE): qualquer pessoa da equipe pode converter relatórios. Quando pedirem "converte o <NOME>" (ex.: "converte o MATR010", "converte o CTBR260") SEM anexo, use a ferramenta "converter_relatorio_por_nome" com o nome — ela faz tudo num passo (busca na pasta, lê, converte e devolve o link do .prw). NÃO use buscar_fonte + ler_fonte + converter_relatorio separados pra isso (fica lento). Se a pessoa ANEXOU o fonte, use "converter_relatorio" com o conteúdo anexado. Para entregar qualquer fonte, use "salvar_fonte". Nunca peça para colar um fonte que você pode buscar, e NUNCA cole o fonte no chat — sempre o LINK de download. NÃO mande a pessoa "usar o VS Code".
 COMPILAR (SÓ ADMIN): gerar patch .ptm / compilar num servidor ("gerar_patch") é restrito a administradores (admin/diretor/CEO). Se quem pede não for admin, converta/entregue o fonte normalmente e explique que a COMPILAÇÃO (gerar o patch e aplicar) é feita por um administrador.
 EM QUAL SERVIDOR COMPILAR (REGRA IMPORTANTE): NUNCA escolha o servidor no chute e NUNCA compile na "base" (VM da Prime) por padrão. Antes de compilar, descubra o servidor certo assim: 1) use a ferramenta "listar_servidores" para ver os servidores e a que cliente/grupo cada um pertence; 2) se a pessoa está dentro do chamado de um cliente (o cabeçalho/contexto da tela mostra o cliente, ex.: "#295 · WERK SCHOTT"), o servidor é o DESSE cliente — case pelo grupo (Werk → servidor do grupo WERK SCHOTT); 3) se a pessoa disse o servidor na mensagem, use o que ela disse. Se mesmo assim ficar em dúvida entre dois servidores do mesmo cliente (ex.: EXCLUSIVO vs DEBUG) ou não der para saber de qual cliente é, PERGUNTE em uma frase curta em qual servidor é pra compilar, listando as opções — só compile depois que estiver claro. A "base" (VM da Prime) só quando a pessoa pedir explicitamente pra testar na base da Prime.
 ANEXOS: quando a pessoa anexar um fonte (ponto de entrada, user function, relatório, etc.), o conteúdo COMPLETO vem no fim da mensagem entre "--- Arquivo anexado ---" e "--- fim do arquivo ---". Esse é o fonte — use-o direto. NUNCA, em hipótese alguma, peça para a pessoa "colar o texto" ou "colar o fonte" se já tem um arquivo anexado: o conteúdo já está aí na sua frente. Se faltar o fonte e não houver anexo, aí sim peça o anexo (ou o nome do programa para você buscar na pasta de fontes, quando tiver a ferramenta "ler_fonte").
