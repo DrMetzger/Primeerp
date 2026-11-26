@@ -15,6 +15,14 @@ const config: NextConfig = {
   poweredByHeader: false,
   // Checagem de tipos roda separada com o TypeScript 7 (pnpm typecheck).
   typescript: { ignoreBuildErrors: true },
+  // As páginas (HTML) não podem ficar presas em cache de 1 ano: assim todo
+  // deploy chega na hora para o usuário. Os estáticos versionados (/_next/static)
+  // continuam com cache imutável.
+  async headers() {
+    return [
+      { source: '/((?!_next/static|_next/image).*)', headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }] },
+    ];
+  },
   async rewrites() {
     if (!apiInterna) return [];
     return [
