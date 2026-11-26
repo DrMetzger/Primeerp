@@ -1,7 +1,18 @@
 import type { UsuarioLogado } from '@primehub/shared';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from 'react-native';
-import { acaoPhp, api } from './api';
+import { FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, TextInput, View } from 'react-native';
+import { acaoPhp, api, URL_SERVIDOR } from './api';
+
+/** Acha links de download de fonte/patch no texto da resposta. */
+function linksDownload(texto: string): { url: string; nome: string }[] {
+  const out: { url: string; nome: string }[] = [];
+  const re = /\/api\/compilacao\/arquivo\/[a-f0-9]{32}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(texto))) out.push({ url: `${URL_SERVIDOR}${m[0]}`, nome: /patch|\.ptm/i.test(texto.slice(Math.max(0, m.index - 40), m.index)) ? 'Baixar patch (.ptm)' : 'Baixar fonte (.prw)' });
+  return out;
+}
 import { type AcaoRobo, RoboNativo } from './RoboNativo';
 import { useTema } from './tema';
 import { T } from './ui';
@@ -21,8 +32,21 @@ export function AssistenteApp({ usuario, tela }: { usuario: UsuarioLogado; tela?
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [digitando, setDigitando] = useState('');
   const [texto, setTexto] = useState('');
+  const [anexos, setAnexos] = useState<{ nome: string; conteudo: string }[]>([]);
   const [pensando, setPensando] = useState(false);
   const lista = useRef<FlatList<Mensagem>>(null);
+
+  /** Anexa um fonte (.prw/.tlpp/.ch/.txt) lido como texto. */
+  async function anexar() {
+    try {
+      const r = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+      const f = r.canceled ? undefined : r.assets?.[0];
+      if (!f) return;
+      if ((f.size ?? 0) > 1024 * 1024) { responder(`O arquivo ${f.name} é grande demais (máx. 1 MB).`); return; }
+      const conteudo = await FileSystem.readAsStringAsync(f.uri);
+      setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: (f.name || 'fonte.prw').slice(0, 120), conteudo }]));
+    } catch { responder('Não consegui ler esse arquivo.'); }
+  }
 
   function mudarAcao(id: string, mudanca: Partial<Acao>) {
     setMensagens((m) => m.map((x) => (x.acao?.id === id ? { ...x, acao: { ...x.acao, ...mudanca } } : x)));
@@ -66,14 +90,17 @@ export function AssistenteApp({ usuario, tela }: { usuario: UsuarioLogado; tela?
 
   async function enviar(pergunta: string) {
     const p = pergunta.trim();
-    if (!p || pensando || digitando) return;
+    if ((!p && !anexos.length) || pensando || digitando) return;
     setTexto('');
+    const enviados = anexos;
+    setAnexos([]);
     const historico = mensagens;
-    setMensagens((m) => [...m, { autor: 'pessoa', texto: p }]);
+    const rotulo = enviados.length ? `${p}${p ? '\n' : ''}📎 ${enviados.map((a) => a.nome).join(', ')}` : p;
+    setMensagens((m) => [...m, { autor: 'pessoa', texto: rotulo }]);
     setPensando(true);
     setAcao('anotar');
     try {
-      const r = await api<{ texto?: string; erro?: string; acoes?: Omit<Acao, 'estado'>[] }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p, historico: historico.filter((m) => !m.acao), ...(tela ? { tela } : {}) }) });
+      const r = await api<{ texto?: string; erro?: string; acoes?: Omit<Acao, 'estado'>[] }>('/api/assistente', { method: 'POST', body: JSON.stringify({ mensagem: p || 'Segue o arquivo em anexo.', historico: historico.filter((m) => !m.acao), ...(enviados.length ? { anexos: enviados } : {}), ...(tela ? { tela } : {}) }) });
       setPensando(false);
       responder(r.texto ?? r.erro ?? 'Não consegui responder agora.', (r.acoes ?? []).map((a) => ({ ...a, estado: 'pendente' as const })));
     } catch {
@@ -111,9 +138,15 @@ export function AssistenteApp({ usuario, tela }: { usuario: UsuarioLogado; tela?
             {!!item.acao.aviso && <T style={{ fontWeight: '700', color: item.acao.estado === 'feita' ? tema.sucesso : item.acao.estado === 'erro' ? tema.perigo : tema.textoSuave }}>{item.acao.aviso}</T>}
           </View>
         ) : (
-          <View style={{ alignSelf: item.autor === 'pessoa' ? 'flex-end' : 'flex-start', maxWidth: '85%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10,
+          <View style={{ alignSelf: item.autor === 'pessoa' ? 'flex-end' : 'flex-start', maxWidth: '85%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, gap: 8,
             backgroundColor: item.autor === 'pessoa' ? tema.primaria : tema.superficie, borderWidth: item.autor === 'pessoa' ? 0 : 1, borderColor: tema.borda }}>
             <T style={{ color: item.autor === 'pessoa' ? tema.primariaTexto : tema.texto, fontSize: 16, lineHeight: 22 }}>{item.texto}</T>
+            {item.autor === 'assistente' && linksDownload(item.texto).map((l) => (
+              <Pressable key={l.url} onPress={() => void Linking.openURL(l.url)} accessibilityRole="button"
+                style={{ minHeight: 44, borderRadius: 12, backgroundColor: tema.primaria, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 }}>
+                <T style={{ color: tema.primariaTexto, fontWeight: '800' }}>⬇ {l.nome}</T>
+              </Pressable>
+            ))}
           </View>
         )}
         ListFooterComponent={mensagens.length <= 1 && !digitando ? (
@@ -126,14 +159,30 @@ export function AssistenteApp({ usuario, tela }: { usuario: UsuarioLogado; tela?
             ))}
           </View>
         ) : undefined} />
-      <View style={{ flexDirection: 'row', gap: 8, padding: 12, borderTopWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie }}>
-        <TextInput value={texto} onChangeText={setTexto} placeholder="Pergunte ao assistente…" placeholderTextColor={tema.textoSuave} onFocus={() => setAcao('sorrir')}
-          onSubmitEditing={() => void enviar(texto)} returnKeyType="send" maxFontSizeMultiplier={1.6} accessibilityLabel="Sua pergunta"
-          style={{ flex: 1, minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: tema.borda, backgroundColor: tema.fundo, color: tema.texto, paddingHorizontal: 14, fontSize: 16 }} />
-        <Pressable onPress={() => void enviar(texto)} disabled={!texto.trim() || pensando || !!digitando} accessibilityRole="button" accessibilityLabel="Enviar"
-          style={{ minWidth: 54, minHeight: 50, borderRadius: 14, backgroundColor: tema.primaria, alignItems: 'center', justifyContent: 'center', opacity: !texto.trim() ? 0.5 : 1 }}>
-          <T style={{ color: tema.primariaTexto, fontSize: 20, fontWeight: '800' }}>➤</T>
-        </Pressable>
+      <View style={{ borderTopWidth: 1, borderColor: tema.borda, backgroundColor: tema.superficie }}>
+        {anexos.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 12, paddingTop: 10 }}>
+            {anexos.map((a, i) => (
+              <View key={`${a.nome}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, backgroundColor: tema.fundo, borderWidth: 1, borderColor: tema.borda, paddingHorizontal: 8, paddingVertical: 5 }}>
+                <T style={{ fontSize: 13, maxWidth: 160 }} numberOfLines={1}>📎 {a.nome}</T>
+                <Pressable onPress={() => setAnexos((l) => l.filter((_, j) => j !== i))} accessibilityRole="button" accessibilityLabel={`Remover ${a.nome}`}><T style={{ color: tema.perigo, fontWeight: '800' }}>✕</T></Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+        <View style={{ flexDirection: 'row', gap: 8, padding: 12 }}>
+          <Pressable onPress={() => void anexar()} accessibilityRole="button" accessibilityLabel="Anexar fonte"
+            style={{ minWidth: 50, minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: tema.borda, backgroundColor: tema.fundo, alignItems: 'center', justifyContent: 'center' }}>
+            <T style={{ fontSize: 20 }}>📎</T>
+          </Pressable>
+          <TextInput value={texto} onChangeText={setTexto} placeholder="Pergunte ou anexe um fonte…" placeholderTextColor={tema.textoSuave} onFocus={() => setAcao('sorrir')}
+            onSubmitEditing={() => void enviar(texto)} returnKeyType="send" maxFontSizeMultiplier={1.6} accessibilityLabel="Sua pergunta"
+            style={{ flex: 1, minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: tema.borda, backgroundColor: tema.fundo, color: tema.texto, paddingHorizontal: 14, fontSize: 16 }} />
+          <Pressable onPress={() => void enviar(texto)} disabled={(!texto.trim() && !anexos.length) || pensando || !!digitando} accessibilityRole="button" accessibilityLabel="Enviar"
+            style={{ minWidth: 54, minHeight: 50, borderRadius: 14, backgroundColor: tema.primaria, alignItems: 'center', justifyContent: 'center', opacity: (!texto.trim() && !anexos.length) ? 0.5 : 1 }}>
+            <T style={{ color: tema.primariaTexto, fontSize: 20, fontWeight: '800' }}>➤</T>
+          </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );

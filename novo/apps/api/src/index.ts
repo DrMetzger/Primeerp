@@ -255,8 +255,9 @@ app.post('/api/compilacao/alvos/:slug/compilar', exigirLogin('equipe'), (c) => c
   return compilarFonte(c.get('usuario'), c.req.param('slug'), arquivos);
 }));
 // Baixa o patch gerado (token de uso interno). Só admin.
-app.get('/api/compilacao/arquivo/:token', exigirLogin('equipe'), async (c) => {
-  if (!podeCompilacao(c.get('usuario'))) return c.json({ erro: 'Sem permissão.' }, 403);
+// Download por token (o token de 128 bits é o próprio segredo, como um link
+// de download assinado). Sem login para funcionar no app (navegador) pelo link.
+app.get('/api/compilacao/arquivo/:token', async (c) => {
   const p = await lerArtefato(c.req.param('token'));
   if (!p) return c.json({ erro: 'Arquivo não encontrado ou expirado.' }, 404);
   return new Response(new Uint8Array(p.bytes), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${p.nome.replace(/["\r\n]/g, '')}"`, 'cache-control': 'private, no-store' } });
