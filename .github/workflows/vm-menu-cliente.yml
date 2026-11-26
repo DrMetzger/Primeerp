@@ -1,0 +1,41 @@
+name: VM - rastrear item Cliente e MATR010
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: item Cliente (SIGAFAT) + funcao MATR010
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          Q(){ sudo -u postgres psql -At -F '|' -d protheus -c "$1" 2>&1; }
+          echo "== itens cujo rotulo contem 'Cliente' (via i18n) com a rotina e o modulo"
+          Q "SELECT i.i_id, i.i_father, i.i_module, i.i_order, i.i_tp_menu, f.f_function, trim(n.n_desc) AS rotulo
+               FROM mpmenu_i18n n
+               JOIN mpmenu_item i ON i.i_id = n.n_paren_id AND i.d_e_l_e_t_ <> '*'
+               LEFT JOIN mpmenu_function f ON f.f_id = i.i_id_func
+              WHERE n.n_lang='1' AND n.d_e_l_e_t_<>'*' AND trim(n.n_desc) ILIKE 'client%'
+              ORDER BY i.i_module, i.i_order LIMIT 25;"
+          echo ""
+          echo "== funcao MATR010 (f_id) e itens que a usam"
+          Q "SELECT f_id, trim(f_function) FROM mpmenu_function WHERE trim(f_function) ILIKE 'MATR010';"
+          Q "SELECT i.i_id, i.i_module, i.i_order, trim(n.n_desc)
+               FROM mpmenu_item i JOIN mpmenu_function f ON f.f_id=i.i_id_func
+               LEFT JOIN mpmenu_i18n n ON n.n_paren_id=i.i_id AND n.n_lang='1'
+              WHERE trim(f.f_function) ILIKE 'MATR010' AND i.d_e_l_e_t_<>'*' LIMIT 10;"
+          echo ""
+          echo "== exemplo COMPLETO: pega 1 item 'Cliente' do modulo Faturamento e mostra TUDO"
+          IID=$(Q "SELECT i.i_id FROM mpmenu_i18n n JOIN mpmenu_item i ON i.i_id=n.n_paren_id
+                    LEFT JOIN mpmenu_function f ON f.f_id=i.i_id_func
+                   WHERE n.n_lang='1' AND trim(n.n_desc) ILIKE 'client%' AND i.d_e_l_e_t_<>'*'
+                   ORDER BY i.i_module LIMIT 1;")
+          echo "item escolhido: $IID"
+          echo "-- mpmenu_item:"; Q "SELECT i_id,i_father,i_itemid,i_id_func,i_tp_menu,i_order,i_module,i_type,i_resname,i_access,i_owner,i_default FROM mpmenu_item WHERE i_id='$IID';"
+          echo "-- mpmenu_i18n do item:"; Q "SELECT n_paren_tp,n_paren_id,n_lang,trim(n_desc),n_default FROM mpmenu_i18n WHERE n_paren_id='$IID';"
+          echo "-- mpmenu_key_words do item:"; Q "SELECT k_id_item,k_lang,trim(k_desc) FROM mpmenu_key_words WHERE k_id_item='$IID';"
+          echo "-- rotina do item:"; Q "SELECT f.f_id, trim(f.f_function) FROM mpmenu_item i JOIN mpmenu_function f ON f.f_id=i.i_id_func WHERE i.i_id='$IID';"
+          echo "-- pai (i_father) e rotulo do pai:"; Q "SELECT i2.i_id, trim(n2.n_desc) FROM mpmenu_item i2 LEFT JOIN mpmenu_i18n n2 ON n2.n_paren_id=i2.i_id AND n2.n_lang='1' WHERE i2.i_id=(SELECT i_father FROM mpmenu_item WHERE i_id='$IID');"
+          R
