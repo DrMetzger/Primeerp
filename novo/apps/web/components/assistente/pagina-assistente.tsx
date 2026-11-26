@@ -3,6 +3,7 @@
 import { MessageSquarePlus, Paperclip, Send, Sparkles, Trash2, X, Zap } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Casca } from '@/components/casca';
+import { TextoComLinks } from '@/components/assistente/texto-links';
 import { acaoPhp, api } from '@/lib/api';
 
 interface Msg { autor: 'pessoa' | 'assistente'; texto: string }
@@ -24,7 +25,14 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
   const fim = useRef<HTMLDivElement>(null);
 
   const carregarLista = useCallback(() => { void api<ConversaResumo[]>('/api/assistente/conversas').then(setConversas).catch(() => undefined); }, []);
-  useEffect(() => { carregarLista(); }, [carregarLista]);
+  const montou = useRef(false);
+  // No primeiro carregamento, reabre a conversa mais recente (pra não voltar e "não ter nada").
+  useEffect(() => {
+    void api<ConversaResumo[]>('/api/assistente/conversas').then((l) => {
+      setConversas(l);
+      if (!montou.current) { montou.current = true; if (l.length && l[0]) abrir(l[0].id); }
+    }).catch(() => undefined);
+  }, []);
   useEffect(() => { fim.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [mensagens, pensando]);
 
   function abrir(id: number) {
@@ -120,7 +128,7 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
               </div>
             )}
             {mensagens.map((m, i) => (
-              <p key={i} className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed ${m.autor === 'pessoa' ? 'ml-auto bg-primaria text-primaria-texto' : 'bg-superficie-alta text-texto'}`}>{m.texto}</p>
+              <p key={i} className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed ${m.autor === 'pessoa' ? 'ml-auto bg-primaria text-primaria-texto' : 'bg-superficie-alta text-texto'}`}><TextoComLinks texto={m.texto} /></p>
             ))}
             {acoes.map((a) => (
               <div key={a.id} className={`rounded-2xl border p-3 text-sm ${a.perigo ? 'border-perigo/40 bg-perigo/5' : 'border-primaria/40 bg-primaria/5'}`}>

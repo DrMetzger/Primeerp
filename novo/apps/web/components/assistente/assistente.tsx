@@ -5,6 +5,7 @@ import { acaoPhp } from '@/lib/api';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { usuarioSalvo } from '@/lib/sessao';
 import { CENA, preCarregar, Robo } from './robo';
+import { TextoComLinks } from './texto-links';
 
 interface Mensagem { autor: 'pessoa' | 'assistente'; texto: string }
 interface Acao { id: string; titulo: string; detalhe: string; arquivo: string; campos: Record<string, string>; perigo?: boolean; estado?: 'pendente' | 'rodando' | 'feita' | 'cancelada' | 'erro'; aviso?: string }
@@ -303,7 +304,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
           </header>
           <div className="flex-1 space-y-2 overflow-y-auto p-4" aria-live="polite">
             {mensagens.map((m, i) => (
-              <p key={i} className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[15px] leading-snug ${m.autor === 'pessoa' ? 'ml-auto bg-primaria text-primaria-texto' : 'bg-superficie-alta text-texto'}`}>{m.texto}</p>
+              <p key={i} className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[15px] leading-snug ${m.autor === 'pessoa' ? 'ml-auto bg-primaria text-primaria-texto' : 'bg-superficie-alta text-texto'}`}><TextoComLinks texto={m.texto} /></p>
             ))}
             {acoes.map((a) => (
               <div key={a.id} className={`rounded-2xl border p-3 text-sm ${a.perigo ? 'border-perigo/40 bg-perigo/5' : 'border-primaria/40 bg-primaria/5'}`}>

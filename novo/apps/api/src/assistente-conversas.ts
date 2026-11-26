@@ -30,8 +30,9 @@ export async function garantirEstruturaAssistente(): Promise<void> {
 
 const tituloDe = (pergunta: string) => (pergunta.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Conversa');
 
-/** Salva a pergunta e a resposta; cria a conversa se não vier id. Devolve o id. */
-export async function salvarTroca(usuarioId: number, conversaId: number | null, pergunta: string, resposta: string): Promise<number> {
+/** Salva a PERGUNTA na hora (cria a conversa se não vier id) e devolve o id.
+ * Assim a conversa nunca se perde mesmo se a resposta demorar ou falhar. */
+export async function salvarPergunta(usuarioId: number, conversaId: number | null, pergunta: string): Promise<number> {
   let id = conversaId ?? 0;
   if (id) {
     const dona = await primeira<{ id: number }>('SELECT id FROM assistente_conversas WHERE id = ? AND usuario_id = ?', [id, usuarioId]);
@@ -44,8 +45,14 @@ export async function salvarTroca(usuarioId: number, conversaId: number | null, 
     await executar('UPDATE assistente_conversas SET atualizado_em = CURRENT_TIMESTAMP WHERE id = ?', [id]);
   }
   if (pergunta.trim()) await executar('INSERT INTO assistente_mensagens (conversa_id, autor, texto) VALUES (?, ?, ?)', [id, 'pessoa', pergunta.slice(0, 20000)]);
-  if (resposta.trim()) await executar('INSERT INTO assistente_mensagens (conversa_id, autor, texto) VALUES (?, ?, ?)', [id, 'assistente', resposta.slice(0, 20000)]);
   return id;
+}
+
+/** Salva a RESPOSTA do assistente numa conversa já criada. */
+export async function salvarResposta(conversaId: number, resposta: string): Promise<void> {
+  if (!conversaId || !resposta.trim()) return;
+  await executar('INSERT INTO assistente_mensagens (conversa_id, autor, texto) VALUES (?, ?, ?)', [conversaId, 'assistente', resposta.slice(0, 20000)]);
+  await executar('UPDATE assistente_conversas SET atualizado_em = CURRENT_TIMESTAMP WHERE id = ?', [conversaId]);
 }
 
 export interface ConversaResumo { id: number; titulo: string; atualizadoEm: string; previa: string }

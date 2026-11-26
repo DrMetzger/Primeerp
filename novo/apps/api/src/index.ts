@@ -9,7 +9,7 @@ import { converterRelatorio } from '@primehub/shared';
 import { alvoComSenha, compilarFonte, definirSenhaAlvo, ErroCompilacao, excluirAlvo, garantirEstruturaCompilacao, lerArtefato, listarAlvos, podeCompilacao, salvarAlvo, type ArquivoFonte } from './compilacao';
 import { respostaApk, versaoAtual } from './app-versao';
 import { perguntar } from './assistente';
-import { apagarConversa, garantirEstruturaAssistente, lerConversa, listarConversas, salvarTroca } from './assistente-conversas';
+import { apagarConversa, garantirEstruturaAssistente, lerConversa, listarConversas, salvarPergunta, salvarResposta } from './assistente-conversas';
 import { lerProgresso } from './progresso-agente';
 import { listarChamados } from './chamados';
 import { detalharChamado, detalharCliente, detalharSetor, listarClientes } from './clientes';
@@ -330,11 +330,13 @@ app.post('/api/assistente', exigirLogin(), async (c) => {
   const dados = esquemaAssistente.safeParse(await c.req.json().catch(() => null));
   if (!dados.success) return c.json({ erro: 'Escreva sua pergunta.' }, 400);
   const usuario = c.get('usuario');
+  // Salva a PERGUNTA na hora: a conversa nunca se perde, mesmo se a resposta demorar/falhar.
+  const conversaId = await salvarPergunta(usuario.id, dados.data.conversaId ?? null, dados.data.mensagem).catch(() => dados.data.conversaId ?? 0);
   const r = await perguntar(usuario, dados.data.historico, dados.data.mensagem, dados.data.tela, dados.data.anexos);
-  if ('erro' in r) return c.json(r, 200);
-  // Guarda a troca no histórico (recuperável depois). Não quebra a resposta se falhar.
-  const conversaId = await salvarTroca(usuario.id, dados.data.conversaId ?? null, dados.data.mensagem, r.texto).catch(() => dados.data.conversaId ?? null);
-  return c.json({ ...r, conversaId });
+  const resposta = 'erro' in r ? r.erro : r.texto;
+  if (conversaId) await salvarResposta(conversaId, resposta).catch(() => undefined);
+  if ('erro' in r) return c.json({ ...r, conversaId: conversaId || undefined }, 200);
+  return c.json({ ...r, conversaId: conversaId || undefined });
 });
 
 app.get('/api/assistente/conversas', exigirLogin(), async (c) => c.json(await listarConversas(c.get('usuario').id)));
