@@ -40,11 +40,12 @@ export function nomeCustomizado(original: string): string {
 export function pareceFonteADVPL(texto: string | undefined | null): boolean {
   const t = (texto ?? '').trim();
   if (t.length < 40) return false; // vazio ou pequeno demais para um relatório
-  // Caractere nulo ou excesso de bytes de controle => binário/RPO, não é fonte.
-  if (t.includes('\u0000') || t.includes('�')) return false;
-  let controle = 0;
-  for (let i = 0; i < t.length; i++) { const c = t.charCodeAt(i); if (c < 9 || (c > 13 && c < 32)) controle++; }
-  if (controle > t.length * 0.02) return false;
+  if (t.includes('\u0000')) return false; // byte nulo => binário/RPO de verdade
+  // Fonte ANSI/cp1252 lido como UTF-8 vira "�" nos acentos: isso NÃO é binário.
+  // Só tratamos como binário/lixo quando a densidade de "�"/controle é ALTA.
+  let ruido = 0;
+  for (let i = 0; i < t.length; i++) { const c = t.charCodeAt(i); if (c === 0xfffd || c < 9 || (c > 13 && c < 32)) ruido++; }
+  if (ruido > t.length * 0.25) return false;
   // Precisa ter cara de ADVPL: ao menos uma palavra-chave típica.
   return /\b(function|user function|static function|#include|return|local|if|while|dbselectarea)\b/i.test(t);
 }

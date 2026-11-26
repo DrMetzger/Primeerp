@@ -514,6 +514,33 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
   const equipe = usuario.tipo === 'equipe';
   const ferramentas = equipe ? FERRAMENTAS_EQUIPE : FERRAMENTAS_CLIENTE;
   const sistema = (equipe ? instrucoesEquipe(usuario) : instrucoesCliente(usuario, await nomeAtendente())) + blocoTela(tela);
+
+  // CONVERSÃO DE ANEXO — caminho DIRETO, sem passar pela IA (nunca "me enrolei",
+  // nunca arquivo vazio): se a equipe anexou um fonte e o contexto é conversão,
+  // converte aqui e devolve o link, ou um erro HONESTO e específico.
+  if (equipe) {
+    const anexoFonte = (anexos ?? []).find((a) => /\.(prw|tlpp|prx)$/i.test(a.nome) || pareceFonteADVPL(a.conteudo));
+    const querConverter = /\bconvert|converte|converter|convers|user function|vira\b/i.test(mensagem) || /segue o arquivo|em anexo/i.test(mensagem)
+      || historico.slice(-3).some((m) => m.autor === 'assistente' && /convers|converter|user function|anex/i.test(m.texto));
+    if (anexoFonte && querConverter) {
+      marcarProgresso(usuario.id, 'convertendo', `Convertendo ${anexoFonte.nome}…`);
+      if (!pareceFonteADVPL(anexoFonte.conteudo)) {
+        marcarProgresso(usuario.id, 'concluido', 'Anexo ilegível');
+        return { texto: `${primeiro}, o arquivo ${anexoFonte.nome} que você anexou está em formato binário/compilado — não é um fonte .prw de texto, então não dá pra converter. Me manda o fonte em TEXTO (ADVPL) que eu converto na hora.` };
+      }
+      const base = anexoFonte.nome.replace(/\.(prw|tlpp|prx)$/i, '');
+      const c = converterRelatorio(anexoFonte.conteudo, base || 'RELATORIO', usuario.nome);
+      if (!c.funcoes.length) {
+        marcarProgresso(usuario.id, 'concluido', 'Sem Function');
+        return { texto: `${primeiro}, abri o ${anexoFonte.nome} mas não encontrei nenhuma Function ADVPL pra converter. Confira se é mesmo o fonte do relatório.` };
+      }
+      const token = await guardarArtefato(c.nomeArquivo, Buffer.from(c.fonte, 'utf8'));
+      marcarProgresso(usuario.id, 'concluido', `Convertido: ${c.principal}`);
+      const aviso = c.avisos.length ? `\n\n⚠ Confira: ${c.avisos.join(' ')}` : '';
+      return { texto: `Pronto, ${primeiro}! Converti o ${anexoFonte.nome} para a User Function ${c.principal} (chamada ${c.funcoes[0]?.chamada ?? ''}).\n\n[Baixar ${c.nomeArquivo}](/api/compilacao/arquivo/${token})${aviso}` };
+    }
+  }
+
   marcarProgresso(usuario.id, 'gerando', 'O assistente está pensando…');
 
   const prazo = Date.now() + 75_000; // nunca pendurar: devolve algo em ~75s
@@ -527,7 +554,7 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
     try {
       // Até 5 rodadas de ferramenta (consultar, conferir, propor) antes de responder.
       for (let rodada = 0; rodada < 6; rodada++) {
-        if (Date.now() > prazo) { return { texto: `Isso aqui demorou mais que o normal, ${primeiro}. Manda de novo que eu termino — se quiser, pede o fonte em partes.` }; }
+        if (Date.now() > prazo) { return { texto: `${primeiro}, essa consulta ficou mais pesada que o normal e preferi não te deixar travado esperando. Pode tentar de novo de forma mais direta; se for sobre um fonte grande, me manda ele anexado que eu trato na hora.` }; }
         const partes = await chamarGemini(chave, modelo, sistema, contents, ferramentas);
         const chamadas = partes.filter((p) => p.functionCall);
         if (!chamadas.length) {
@@ -550,5 +577,5 @@ export async function perguntar(usuario: UsuarioLogado, historico: MensagemChat[
       console.error(`assistente: ${modelo} falhou:`, e instanceof Error ? e.message : e);
     }
   }
-  return { texto: `Opa, ${primeiro}! Me enrolei aqui por um instante. Pode mandar de novo? Se for urgente, é só abrir um chamado.` };
+  return { erro: `${primeiro}, tive uma falha técnica aqui pra montar a resposta (foi do meu lado, não seu). A equipe já consegue ver isso pelos logs. Se precisar na hora, abre um chamado que a gente resolve rápido.` };
 }

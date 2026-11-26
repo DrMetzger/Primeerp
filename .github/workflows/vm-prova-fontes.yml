@@ -1,0 +1,30 @@
+name: VM - prova pasta oficial de fontes
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: prova busca/leitura restrita a Fontes_2510
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          SOCK=/run/primehub/servicos.sock
+          ler(){ curl -s --unix-socket "$SOCK" -H 'x-quem: prova' -H 'content-type: application/json' --data "{\"nome\":\"$1\"}" http://x/fontes/ler | head -c 300; echo; }
+          buscar(){ curl -s --unix-socket "$SOCK" -H 'x-quem: prova' -H 'content-type: application/json' --data "{\"termo\":\"$1\"}" http://x/fontes/buscar | head -c 400; echo; }
+          ALVO=$(find /opt/totvs/fontes/Fontes_2510 -type f -iname '*.prw' 2>/dev/null | head -1)
+          NOME=$(basename "${ALVO%.*}" 2>/dev/null)
+          echo "alvo real em Fontes_2510: ${ALVO:-<nenhum .prw>}  (nome=$NOME)"
+          echo ""
+          echo "== 1) CTB00R73 (so existe em FONTES_PROTHEUS; ESPERADO: ok=false / nao encontrado)"
+          ler CTB00R73 | sed -E 's/("conteudo":")[^"]{0,60}[^"]*/\1<...>/'
+          echo ""
+          echo "== 2) fonte real de Fontes_2510 (ESPERADO: ok=true, com conteudo)"
+          if [ -n "$NOME" ]; then ler "$NOME" | sed -E 's/("conteudo":")[^"]{0,40}.*/\1<...cortado...>/'; else echo "  (sem .prw em Fontes_2510)"; fi
+          echo ""
+          echo "== 3) buscar 'CTB00' (ESPERADO: so o que houver DENTRO de Fontes_2510)"
+          buscar CTB00
+          echo "(fim)"
+          R

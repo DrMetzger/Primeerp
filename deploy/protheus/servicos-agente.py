@@ -35,6 +35,13 @@ TRAVA = threading.Lock()
 SENSIVEL = re.compile(r"senha|password|psw|passwd|secret|token", re.I)
 
 
+def _eh_utf8(b):
+    try:
+        b.decode("utf-8", errors="strict"); return True
+    except Exception:
+        return False
+
+
 def sh(*args, timeout=30):
     r = subprocess.run(list(args), capture_output=True, text=True, timeout=timeout)
     return r.returncode, r.stdout, r.stderr
@@ -377,11 +384,12 @@ class Agente(BaseHTTPRequestHandler):
             try:
                 with open(alvo, "rb") as fp:
                     bruto = fp.read(900000)
-                # Binario/RPO/compilado: tem byte nulo ou muitos bytes de controle. Nao e um fonte legivel.
+                # Binario/RPO/compilado: tem byte nulo. Nao e um fonte de texto.
                 if b"\x00" in bruto:
                     return self.responder(404, {"ok": False, "erro": "arquivo binario/ilegivel (nao e um fonte .prw de texto)"})
-                conteudo = bruto.decode("utf-8", errors="replace")
-                if len(conteudo.strip()) < 40 or conteudo.count("�") > len(conteudo) * 0.02:
+                # Fontes Protheus costumam ser ANSI/cp1252: tenta utf-8 e cai pra cp1252.
+                conteudo = bruto.decode("utf-8", errors="strict") if _eh_utf8(bruto) else bruto.decode("cp1252", errors="replace")
+                if len(conteudo.strip()) < 40:
                     return self.responder(404, {"ok": False, "erro": "fonte vazio ou ilegivel"})
                 return self.responder(200, {"ok": True, "nome": os.path.basename(alvo), "caminho": alvo, "conteudo": conteudo})
             except Exception as e:

@@ -183,7 +183,12 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
                     for (const f of Array.from(e.target.files ?? [])) {
                       if (anexos.length >= 5) break;
                       if (f.size > 1024 * 1024) { setMensagens((m) => [...m, { autor: 'assistente', texto: `O arquivo ${f.name} é grande demais (máx. 1 MB).` }]); continue; }
-                      try { const t = await f.text(); setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: f.name.slice(0, 120), conteudo: t }])); } catch { /* ignore */ }
+                      try {
+                        const buf = await f.arrayBuffer();
+                        let t: string;
+                        try { t = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { t = new TextDecoder('windows-1252').decode(buf); }
+                        setAnexos((l) => (l.length >= 5 ? l : [...l, { nome: f.name.slice(0, 120), conteudo: t }]));
+                      } catch { /* ignore */ }
                     }
                     e.target.value = '';
                   }} />
