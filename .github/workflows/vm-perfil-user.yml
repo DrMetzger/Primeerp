@@ -1,0 +1,20 @@
+name: VM - conferir perfil de usuario
+on: { workflow_dispatch: {} }
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: perfil do Petronilho
+        env: { VM_IP: "${{ secrets.VM_IP }}", USER_VM: "${{ secrets.USER_VM }}", SSHPASS: "${{ secrets.PSW_VM }}" }
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" 'sudo bash -s' <<'R'
+          D(){ docker exec primehub-db sh -lc "mariadb -uprimehub -p\"\$MARIADB_PASSWORD\" primehub -N -e \"$1\"" 2>&1 | grep -aviE 'insecure'; }
+          echo "== usuarios com 'etron' ou 'petr' no nome/email (nome | email | perfil | tipo | ativo)"
+          D "SELECT nome, email, perfil, tipo, ativo FROM usuarios WHERE nome LIKE '%etron%' OR email LIKE '%etron%' OR nome LIKE '%petr%' OR email LIKE '%petr%'"
+          echo ""
+          echo "== quantos de cada perfil na equipe"
+          D "SELECT perfil, COUNT(*) FROM usuarios WHERE tipo='equipe' GROUP BY perfil"
+          R
