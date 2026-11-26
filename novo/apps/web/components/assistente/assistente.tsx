@@ -184,7 +184,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     const p = pergunta.trim();
     if ((!p && !anexos.length) || pensando || digitando) return;
     setTexto('');
-    const historico = mensagens;
+    const historico = mensagens.slice(-10).map((m) => ({ autor: m.autor, texto: m.texto.slice(0, 4000) }));
     const enviados = anexos;
     setAnexos([]);
     const rotulo = enviados.length ? `${p}${p ? '\n' : ''}📎 ${enviados.map((a) => a.nome).join(', ')}` : p;

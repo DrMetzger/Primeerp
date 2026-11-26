@@ -65,7 +65,7 @@ export function PaginaAssistente({ visao }: { visao: 'equipe' | 'cliente' }) {
     setTexto('');
     const enviados = anexos;
     setAnexos([]);
-    const historico = mensagens.slice(-10);
+    const historico = mensagens.slice(-10).map((m) => ({ autor: m.autor, texto: m.texto.slice(0, 4000) }));
     const rotulo = enviados.length ? `${p}${p ? '\n' : ''}📎 ${enviados.map((a) => a.nome).join(', ')}` : p;
     setMensagens((m) => [...m, { autor: 'pessoa', texto: rotulo }]);
     setPensando(true);

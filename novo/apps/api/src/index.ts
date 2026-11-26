@@ -318,9 +318,20 @@ app.post('/api/classico', exigirLogin(), async (c) => {
   return c.json({ url: linkClassico(c.get('usuario'), corpo.data.destino) });
 });
 
+// O histórico é acessório: nunca pode barrar a pergunta. Em vez de rejeitar
+// quando vem longo/grande (o que travava TUDO com "Escreva sua pergunta."),
+// aparamos para as últimas 15 trocas e cortamos textos gigantes.
+const historicoResiliente = z.preprocess((v) => {
+  if (!Array.isArray(v)) return [];
+  return v.slice(-15).map((x) => {
+    const o = (x ?? {}) as { autor?: unknown; texto?: unknown };
+    return { autor: o.autor === 'assistente' ? 'assistente' : 'pessoa', texto: String(o.texto ?? '').slice(0, 8000) };
+  });
+}, z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string() })).catch([]));
+
 const esquemaAssistente = z.object({
-  mensagem: z.string().trim().min(1).max(1000),
-  historico: z.array(z.object({ autor: z.enum(['pessoa', 'assistente']), texto: z.string().max(4000) })).max(20).default([]),
+  mensagem: z.preprocess((v) => (typeof v === 'string' ? v.trim().slice(0, 4000) : v), z.string().min(1)),
+  historico: historicoResiliente.default([]),
   tela: z.object({ rota: z.string().max(300), titulo: z.string().max(200), texto: z.string().max(8000) }).optional(),
   anexos: z.array(z.object({ nome: z.string().max(160), conteudo: z.string().max(1200000) })).max(5).optional(),
   conversaId: z.number().int().positive().optional(),
