@@ -245,7 +245,7 @@ export function Assistente({ modo = 'logado' }: { modo?: 'logado' | 'login' }) {
     return (
       <button type="button" onClick={reabrir} aria-label="Abrir o assistente PrimeERP" title="Abrir o assistente"
         className="pointer-events-auto fixed z-50 flex h-14 w-14 items-center justify-center rounded-full gradiente-marca text-white shadow-2xl shadow-primaria/40 transition hover:scale-105"
-        style={{ right: `max(${pos.d}px, env(safe-area-inset-right))`, bottom: `max(${pos.b}px, env(safe-area-inset-bottom))` }}>
+        style={{ right: `max(${pos.d}px, env(safe-area-inset-right))`, bottom: `calc(max(${pos.b}px, env(safe-area-inset-bottom)) + 28px)` }}>
         <Sparkles size={26} aria-hidden="true" />
       </button>
     );
