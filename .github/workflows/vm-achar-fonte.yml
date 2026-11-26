@@ -1,0 +1,36 @@
+name: VM - achar fonte por nome
+on:
+  workflow_dispatch:
+    inputs:
+      nome:
+        description: "Nome do fonte (sem extensao, ex: CTB00R73)"
+        required: true
+        default: "CTB00R73"
+permissions: { contents: read }
+concurrency: { group: vm-protheus, cancel-in-progress: false }
+jobs:
+  vm:
+    runs-on: [self-hosted, vm]
+    steps:
+      - name: procurar fonte na pasta de fontes
+        env:
+          VM_IP: "${{ secrets.VM_IP }}"
+          USER_VM: "${{ secrets.USER_VM }}"
+          SSHPASS: "${{ secrets.PSW_VM }}"
+          NOME: "${{ github.event.inputs.nome }}"
+        run: |
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new "$USER_VM@$VM_IP" "sudo NOME='$NOME' bash -s" <<'R'
+          echo "== procurando '$NOME' (sem extensao, case-insensitive) em /opt/totvs/fontes"
+          find /opt/totvs/fontes -type f -iname "${NOME}.*" 2>/dev/null | head -40
+          echo ""
+          echo "== qualquer arquivo cujo nome contenha '$NOME'"
+          find /opt/totvs/fontes -type f -iname "*${NOME}*" 2>/dev/null | head -40
+          echo ""
+          echo "== busca ampla no disco (fora de /proc), caso a pasta seja outra"
+          find /opt /totvs /u01 /home 2>/dev/null -type f -iname "*${NOME}*" 2>/dev/null | head -20
+          echo ""
+          echo "== prefixo CTB00 (relatorios de contabilidade) na pasta de fontes"
+          find /opt/totvs/fontes -type f -iname "CTB00*" 2>/dev/null | sort | head -40
+          echo "(fim)"
+          R
